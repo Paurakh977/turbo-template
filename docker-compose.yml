@@ -1,0 +1,221 @@
+x-proxy-base: &proxy-base
+  image: nginx:1.27-alpine
+  restart: unless-stopped
+  command:
+    ['/bin/sh', '-c', 'sh /opt/nginx/entrypoint.sh && exec nginx -g "daemon off;"']
+  environment:
+    NGINX_SERVER_NAME: ${NGINX_SERVER_NAME:?NGINX_SERVER_NAME is required}
+    NGINX_SSL_CERT_FILENAME: ${NGINX_SSL_CERT_FILENAME:?NGINX_SSL_CERT_FILENAME is required}
+    NGINX_SSL_KEY_FILENAME: ${NGINX_SSL_KEY_FILENAME:?NGINX_SSL_KEY_FILENAME is required}
+  ports:
+    - '${PROXY_HTTP_PORT:?PROXY_HTTP_PORT is required}:80'
+    - '${PROXY_HTTPS_PORT:?PROXY_HTTPS_PORT is required}:443'
+  volumes:
+    - ./nginx/nginx.conf:/opt/nginx/nginx.conf.template:ro
+    - ./nginx/entrypoint.sh:/opt/nginx/entrypoint.sh:ro
+    - ./nginx/certs:/etc/nginx/certs:ro
+  healthcheck:
+    test:
+      ['CMD-SHELL', 'wget -qO- http://127.0.0.1/healthz > /dev/null || exit 1']
+    interval: 15s
+    timeout: 5s
+    retries: 10
+    start_period: 15s
+  networks:
+    app-network:
+      aliases:
+        - proxy
+
+services:
+  api:
+    profiles: ['prod']
+    image: template-turbo-api:prod
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile.prod
+      target: runner
+      args:
+        TURBO_VERSION: '2.9.6'
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      HOST: ${API_HOST:?API_HOST is required}
+      PORT: ${API_PORT:?API_PORT is required}
+    expose:
+      - '${API_PORT:?API_PORT is required}'
+    healthcheck:
+      test:
+        ['CMD-SHELL', 'wget -qO- "http://127.0.0.1:$${PORT}/" > /dev/null || exit 1']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      app-network:
+        aliases:
+          - api
+
+  web:
+    profiles: ['prod']
+    image: template-turbo-web:prod
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile.prod
+      target: runner
+      args:
+        TURBO_VERSION: '2.9.6'
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
+        NEXT_ALLOWED_DEV_ORIGINS: ${NEXT_ALLOWED_DEV_ORIGINS:-}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      HOSTNAME: ${WEB_HOST:?WEB_HOST is required}
+      PORT: ${WEB_PORT:?WEB_PORT is required}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
+      NEXT_ALLOWED_DEV_ORIGINS: ${NEXT_ALLOWED_DEV_ORIGINS:-}
+      INTERNAL_API_URL: http://api:${API_PORT:?API_PORT is required}
+    expose:
+      - '${WEB_PORT:?WEB_PORT is required}'
+    healthcheck:
+      test:
+        ['CMD-SHELL', 'wget -qO- "http://127.0.0.1:$${PORT}/" > /dev/null || exit 1']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      app-network:
+        aliases:
+          - web
+
+  proxy:
+    <<: *proxy-base
+    profiles: ['prod']
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    environment:
+      NGINX_SERVER_NAME: ${NGINX_SERVER_NAME:?NGINX_SERVER_NAME is required}
+      NGINX_SSL_CERT_FILENAME: ${NGINX_SSL_CERT_FILENAME:?NGINX_SSL_CERT_FILENAME is required}
+      NGINX_SSL_KEY_FILENAME: ${NGINX_SSL_KEY_FILENAME:?NGINX_SSL_KEY_FILENAME is required}
+      API_UPSTREAM_HOST: api
+      API_UPSTREAM_PORT: ${API_PORT:?API_PORT is required}
+      WEB_UPSTREAM_HOST: web
+      WEB_UPSTREAM_PORT: ${WEB_PORT:?WEB_PORT is required}
+
+  api-dev:
+    profiles: ['dev']
+    image: template-turbo-api:dev
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile.dev
+    init: true
+    command: >
+      sh -c "pnpm install --frozen-lockfile --store-dir /pnpm/store &&
+             pnpm turbo run dev --filter=api... --no-daemon"
+    environment:
+      NODE_ENV: development
+      PNPM_NODE_LINKER: hoisted
+      HOST: ${API_HOST:?API_HOST is required}
+      PORT: ${API_PORT:?API_PORT is required}
+      CHOKIDAR_USEPOLLING: 'true'
+      CHOKIDAR_INTERVAL: '100'
+      WATCHPACK_POLLING: 'true'
+      TSC_WATCHFILE: UseDynamicPolling
+    expose:
+      - '${API_PORT:?API_PORT is required}'
+    volumes:
+      - .:/app
+      - api-node_modules:/app/node_modules
+      - api-pnpm-store:/pnpm/store
+      - api-turbo:/app/.turbo
+    healthcheck:
+      test:
+        ['CMD-SHELL', 'wget -qO- "http://127.0.0.1:$${PORT}/" > /dev/null || exit 1']
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    networks:
+      app-network:
+        aliases:
+          - api-dev
+
+  web-dev:
+    profiles: ['dev']
+    image: template-turbo-web:dev
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile.dev
+    init: true
+    command: >
+      sh -c "pnpm install --frozen-lockfile --store-dir /pnpm/store &&
+             pnpm turbo run dev --filter=web... --no-daemon"
+    depends_on:
+      api-dev:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PNPM_NODE_LINKER: hoisted
+      HOSTNAME: ${WEB_HOST:?WEB_HOST is required}
+      PORT: ${WEB_PORT:?WEB_PORT is required}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
+      NEXT_ALLOWED_DEV_ORIGINS: ${NEXT_ALLOWED_DEV_ORIGINS:?NEXT_ALLOWED_DEV_ORIGINS is required}
+      INTERNAL_API_URL: http://api-dev:${API_PORT:?API_PORT is required}
+      CHOKIDAR_USEPOLLING: 'true'
+      CHOKIDAR_INTERVAL: '100'
+      WATCHPACK_POLLING: 'true'
+    expose:
+      - '${WEB_PORT:?WEB_PORT is required}'
+    volumes:
+      - .:/app
+      - web-node_modules:/app/node_modules
+      - web-pnpm-store:/pnpm/store
+      - web-turbo:/app/.turbo
+      - web-next:/app/apps/web/.next
+    healthcheck:
+      test:
+        ['CMD-SHELL', 'wget -qO- "http://127.0.0.1:$${PORT}/" > /dev/null || exit 1']
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    networks:
+      app-network:
+        aliases:
+          - web-dev
+
+  proxy-dev:
+    <<: *proxy-base
+    profiles: ['dev']
+    depends_on:
+      api-dev:
+        condition: service_healthy
+      web-dev:
+        condition: service_healthy
+    environment:
+      NGINX_SERVER_NAME: ${NGINX_SERVER_NAME:?NGINX_SERVER_NAME is required}
+      NGINX_SSL_CERT_FILENAME: ${NGINX_SSL_CERT_FILENAME:?NGINX_SSL_CERT_FILENAME is required}
+      NGINX_SSL_KEY_FILENAME: ${NGINX_SSL_KEY_FILENAME:?NGINX_SSL_KEY_FILENAME is required}
+      API_UPSTREAM_HOST: api-dev
+      API_UPSTREAM_PORT: ${API_PORT:?API_PORT is required}
+      WEB_UPSTREAM_HOST: web-dev
+      WEB_UPSTREAM_PORT: ${WEB_PORT:?WEB_PORT is required}
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  api-node_modules:
+  api-pnpm-store:
+  api-turbo:
+  web-node_modules:
+  web-pnpm-store:
+  web-turbo:
+  web-next:

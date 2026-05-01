@@ -1,0 +1,51 @@
+# syntax=docker/dockerfile:1.7
+
+FROM node:22-alpine AS base
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+ENV TURBO_TELEMETRY_DISABLED=1
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN apk add --no-cache libc6-compat \
+  && corepack enable
+WORKDIR /repo
+
+FROM base AS pruner
+ARG TURBO_VERSION=2.9.6
+COPY . .
+RUN pnpm dlx turbo@${TURBO_VERSION} prune web --docker
+
+FROM base AS installer
+WORKDIR /app
+COPY --from=pruner /repo/out/json/ .
+COPY --from=pruner /repo/out/pnpm-lock.yaml ./pnpm-lock.yaml
+RUN --mount=type=cache,id=web-pnpm-store,target=/pnpm/store \
+  pnpm install --frozen-lockfile
+
+FROM installer AS builder
+ARG NEXT_PUBLIC_API_URL
+ARG NEXT_ALLOWED_DEV_ORIGINS
+ARG TURBO_TEAM
+ARG TURBO_TOKEN
+ENV NODE_ENV=production
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ENV NEXT_ALLOWED_DEV_ORIGINS=$NEXT_ALLOWED_DEV_ORIGINS
+ENV TURBO_TEAM=$TURBO_TEAM
+ENV TURBO_TOKEN=$TURBO_TOKEN
+COPY --from=pruner /repo/out/full/ .
+RUN pnpm turbo run build --filter=web...
+
+FROM node:22-alpine AS runner
+WORKDIR /app
+RUN apk add --no-cache dumb-init libc6-compat \
+  && addgroup -S nextjs -g 1001 \
+  && adduser -S nextjs -u 1001 -G nextjs
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+COPY --from=builder --chown=nextjs:nextjs /app/apps/web/.next/standalone ./
+COPY --from=builder --chown=nextjs:nextjs /app/apps/web/.next/static ./apps/web/.next/static
+COPY --from=builder --chown=nextjs:nextjs /app/apps/web/public ./apps/web/public
+USER nextjs
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD wget -qO- "http://127.0.0.1:${PORT}/" > /dev/null || exit 1
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["node", "apps/web/server.js"]

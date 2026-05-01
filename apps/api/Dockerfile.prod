@@ -1,0 +1,51 @@
+# syntax=docker/dockerfile:1.7
+
+FROM node:22-alpine AS base
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+ENV TURBO_TELEMETRY_DISABLED=1
+RUN apk add --no-cache libc6-compat \
+  && corepack enable
+WORKDIR /repo
+
+FROM base AS pruner
+ARG TURBO_VERSION=2.9.6
+COPY . .
+RUN pnpm dlx turbo@${TURBO_VERSION} prune api --docker
+
+FROM base AS installer
+WORKDIR /app
+COPY --from=pruner /repo/out/json/ .
+COPY --from=pruner /repo/out/pnpm-lock.yaml ./pnpm-lock.yaml
+RUN --mount=type=cache,id=api-pnpm-store,target=/pnpm/store \
+  pnpm install --frozen-lockfile
+
+FROM installer AS builder
+ARG TURBO_TEAM
+ARG TURBO_TOKEN
+ENV NODE_ENV=production
+ENV TURBO_TEAM=$TURBO_TEAM
+ENV TURBO_TOKEN=$TURBO_TOKEN
+COPY --from=pruner /repo/out/full/ .
+RUN pnpm turbo run build --filter=api...
+
+FROM builder AS deployer
+RUN pnpm deploy --filter=api --prod /prod/api
+
+FROM node:22-alpine AS runner
+WORKDIR /app
+
+RUN apk add --no-cache dumb-init
+
+ENV NODE_ENV=production
+
+COPY --from=deployer --chown=node:node /prod/api ./
+
+USER node
+EXPOSE 3001
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD wget -qO- "http://127.0.0.1:${PORT}/" > /dev/null || exit 1
+
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["node", "dist/main"]

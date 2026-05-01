@@ -1,0 +1,16 @@
+FROM node:22-alpine
+
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+ENV TURBO_TELEMETRY_DISABLED=1
+
+WORKDIR /app
+
+RUN apk add --no-cache libc6-compat python3 make g++ \
+  && corepack enable \
+  && corepack prepare pnpm@8.15.5 --activate \
+  && pnpm add -g turbo@2.9.6
+
+RUN pnpm config set store-dir /pnpm/store
+
+EXPOSE 3001
