@@ -31,6 +31,35 @@ x-proxy-base: &proxy-base
         - proxy
 
 services:
+  postgres:
+    profiles: ['prod', 'dev']
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+    expose:
+      - '5432'
+    ports:
+      - '${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB} || exit 1',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      app-network:
+        aliases:
+          - postgres
+
   api:
     profiles: ['prod']
     image: template-turbo-api:prod
@@ -40,11 +69,26 @@ services:
       target: runner
       args:
         TURBO_VERSION: '2.9.7'
+        DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=public
+        BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}
+        BETTER_AUTH_URL: ${BETTER_AUTH_URL:?BETTER_AUTH_URL is required}
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
       NODE_ENV: production
       HOST: ${API_HOST:?API_HOST is required}
       PORT: ${API_PORT:?API_PORT is required}
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=public
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:?BETTER_AUTH_URL is required}
+      TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-}
+      APP_NAME: ${APP_NAME:-MyApp}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
     expose:
       - '${API_PORT:?API_PORT is required}'
     healthcheck:
@@ -71,10 +115,15 @@ services:
       target: runner
       args:
         TURBO_VERSION: '2.9.7'
+        DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=public
+        BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}
+        BETTER_AUTH_URL: ${BETTER_AUTH_URL:?BETTER_AUTH_URL is required}
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
         NEXT_ALLOWED_DEV_ORIGINS: ${NEXT_ALLOWED_DEV_ORIGINS:-}
     restart: unless-stopped
     depends_on:
+      postgres:
+        condition: service_healthy
       api:
         condition: service_healthy
     environment:
@@ -84,6 +133,10 @@ services:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
       NEXT_ALLOWED_DEV_ORIGINS: ${NEXT_ALLOWED_DEV_ORIGINS:-}
       INTERNAL_API_URL: http://api:${API_PORT:?API_PORT is required}
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=public
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:?BETTER_AUTH_URL is required}
+      TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-}
     expose:
       - '${WEB_PORT:?WEB_PORT is required}'
     healthcheck:
@@ -128,11 +181,23 @@ services:
     command: >
       sh -c "pnpm install --frozen-lockfile --store-dir /pnpm/store &&
              pnpm turbo run dev --filter=api... --no-daemon"
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
       NODE_ENV: development
       PNPM_NODE_LINKER: hoisted
       HOST: ${API_HOST:?API_HOST is required}
       PORT: ${API_PORT:?API_PORT is required}
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=public
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:?BETTER_AUTH_URL is required}
+      TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-}
+      APP_NAME: ${APP_NAME:-MyApp}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
       CHOKIDAR_USEPOLLING: 'true'
       CHOKIDAR_INTERVAL: '100'
       WATCHPACK_POLLING: 'true'
@@ -170,6 +235,8 @@ services:
       sh -c "pnpm install --frozen-lockfile --store-dir /pnpm/store &&
              pnpm turbo run dev --filter=web... --no-daemon"
     depends_on:
+      postgres:
+        condition: service_healthy
       api-dev:
         condition: service_healthy
     environment:
@@ -180,6 +247,10 @@ services:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
       NEXT_ALLOWED_DEV_ORIGINS: ${NEXT_ALLOWED_DEV_ORIGINS:?NEXT_ALLOWED_DEV_ORIGINS is required}
       INTERNAL_API_URL: http://api-dev:${API_PORT:?API_PORT is required}
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=public
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:?BETTER_AUTH_URL is required}
+      TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-}
       CHOKIDAR_USEPOLLING: 'true'
       CHOKIDAR_INTERVAL: '100'
       WATCHPACK_POLLING: 'true'
@@ -228,6 +299,7 @@ networks:
     driver: bridge
 
 volumes:
+  postgres-data:
   api-node_modules:
   api-pnpm-store:
   api-turbo:

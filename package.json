@@ -5,6 +5,17 @@
   "description": "",
   "author": "",
   "license": "UNLICENSED",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@nestjs/core",
+      "@prisma/client",
+      "@prisma/engines",
+      "better-auth",
+      "esbuild",
+      "prisma",
+      "sharp"
+    ]
+  },
   "scripts": {
     "dev": "turbo run dev",
     "start": "turbo run start",
