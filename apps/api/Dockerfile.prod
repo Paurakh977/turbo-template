@@ -4,12 +4,13 @@ FROM node:22-alpine AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 ENV TURBO_TELEMETRY_DISABLED=1
+ENV NPM_CONFIG_NODE_LINKER=isolated
 RUN apk add --no-cache libc6-compat \
   && corepack enable
 WORKDIR /repo
 
 FROM base AS pruner
-ARG TURBO_VERSION=2.9.6
+ARG TURBO_VERSION=2.9.7
 COPY . .
 RUN pnpm dlx turbo@${TURBO_VERSION} prune api --docker
 
