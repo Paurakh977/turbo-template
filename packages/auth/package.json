@@ -1,0 +1,34 @@
+{
+  "name": "@repo/auth",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "./dist/**"
+  ],
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "dev": "pnpm build --watch",
+    "build": "tsc -b -v",
+    "lint": "eslint \"src/**/*.ts\"",
+    "auth:generate": "pnpm dlx @better-auth/cli@latest generate --config ./src/auth.ts --output ../database/prisma/schema.prisma"
+  },
+  "dependencies": {
+    "@repo/database": "workspace:^",
+    "better-auth": "^1.6.0"
+  },
+  "devDependencies": {
+    "@repo/eslint-config": "workspace:^",
+    "@repo/typescript-config": "workspace:^",
+    "@types/node": "^22.19.3",
+    "eslint": "^9.39.2",
+    "typescript": "5.5.4"
+  }
+}
