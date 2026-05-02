@@ -2,7 +2,11 @@ x-proxy-base: &proxy-base
   image: nginx:1.27-alpine
   restart: unless-stopped
   command:
-    ['/bin/sh', '-c', 'sh /opt/nginx/entrypoint.sh && exec nginx -g "daemon off;"']
+    [
+      '/bin/sh',
+      '-c',
+      'sh /opt/nginx/entrypoint.sh && exec nginx -g "daemon off;"',
+    ]
   environment:
     NGINX_SERVER_NAME: ${NGINX_SERVER_NAME:?NGINX_SERVER_NAME is required}
     NGINX_SSL_CERT_FILENAME: ${NGINX_SSL_CERT_FILENAME:?NGINX_SSL_CERT_FILENAME is required}
@@ -35,7 +39,7 @@ services:
       dockerfile: apps/api/Dockerfile.prod
       target: runner
       args:
-        TURBO_VERSION: '2.9.6'
+        TURBO_VERSION: '2.9.7'
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -45,7 +49,10 @@ services:
       - '${API_PORT:?API_PORT is required}'
     healthcheck:
       test:
-        ['CMD-SHELL', 'wget -qO- "http://127.0.0.1:$${PORT}/" > /dev/null || exit 1']
+        [
+          'CMD-SHELL',
+          'wget -qO- "http://127.0.0.1:$${PORT}/" > /dev/null || exit 1',
+        ]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -63,7 +70,7 @@ services:
       dockerfile: apps/web/Dockerfile.prod
       target: runner
       args:
-        TURBO_VERSION: '2.9.6'
+        TURBO_VERSION: '2.9.7'
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
         NEXT_ALLOWED_DEV_ORIGINS: ${NEXT_ALLOWED_DEV_ORIGINS:-}
     restart: unless-stopped
@@ -81,7 +88,10 @@ services:
       - '${WEB_PORT:?WEB_PORT is required}'
     healthcheck:
       test:
-        ['CMD-SHELL', 'wget -qO- "http://127.0.0.1:$${PORT}/" > /dev/null || exit 1']
+        [
+          'CMD-SHELL',
+          'wget -qO- "http://127.0.0.1:$${PORT}/" > /dev/null || exit 1',
+        ]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -136,7 +146,10 @@ services:
       - api-turbo:/app/.turbo
     healthcheck:
       test:
-        ['CMD-SHELL', 'wget -qO- "http://127.0.0.1:$${PORT}/" > /dev/null || exit 1']
+        [
+          'CMD-SHELL',
+          'wget -qO- "http://127.0.0.1:$${PORT}/" > /dev/null || exit 1',
+        ]
       interval: 15s
       timeout: 5s
       retries: 10
@@ -180,7 +193,10 @@ services:
       - web-next:/app/apps/web/.next
     healthcheck:
       test:
-        ['CMD-SHELL', 'wget -qO- "http://127.0.0.1:$${PORT}/" > /dev/null || exit 1']
+        [
+          'CMD-SHELL',
+          'wget -qO- "http://127.0.0.1:$${PORT}/" > /dev/null || exit 1',
+        ]
       interval: 15s
       timeout: 5s
       retries: 10
