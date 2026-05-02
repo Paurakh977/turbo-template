@@ -23,16 +23,23 @@ RUN --mount=type=cache,id=web-pnpm-store,target=/pnpm/store \
   pnpm install --frozen-lockfile
 
 FROM installer AS builder
+ARG DATABASE_URL
+ARG BETTER_AUTH_SECRET
+ARG BETTER_AUTH_URL
 ARG NEXT_PUBLIC_API_URL
 ARG NEXT_ALLOWED_DEV_ORIGINS
 ARG TURBO_TEAM
 ARG TURBO_TOKEN
 ENV NODE_ENV=production
+ENV DATABASE_URL=$DATABASE_URL
+ENV BETTER_AUTH_SECRET=$BETTER_AUTH_SECRET
+ENV BETTER_AUTH_URL=$BETTER_AUTH_URL
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ENV NEXT_ALLOWED_DEV_ORIGINS=$NEXT_ALLOWED_DEV_ORIGINS
 ENV TURBO_TEAM=$TURBO_TEAM
 ENV TURBO_TOKEN=$TURBO_TOKEN
 COPY --from=pruner /repo/out/full/ .
+RUN pnpm --filter @repo/database db:generate
 RUN pnpm turbo run build --filter=web...
 
 FROM node:22-alpine AS runner

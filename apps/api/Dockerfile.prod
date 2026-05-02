@@ -22,16 +22,27 @@ RUN --mount=type=cache,id=api-pnpm-store,target=/pnpm/store \
   pnpm install --frozen-lockfile
 
 FROM installer AS builder
+ARG DATABASE_URL
+ARG BETTER_AUTH_SECRET
+ARG BETTER_AUTH_URL
 ARG TURBO_TEAM
 ARG TURBO_TOKEN
 ENV NODE_ENV=production
+ENV DATABASE_URL=$DATABASE_URL
+ENV BETTER_AUTH_SECRET=$BETTER_AUTH_SECRET
+ENV BETTER_AUTH_URL=$BETTER_AUTH_URL
 ENV TURBO_TEAM=$TURBO_TEAM
 ENV TURBO_TOKEN=$TURBO_TOKEN
 COPY --from=pruner /repo/out/full/ .
+RUN pnpm --filter @repo/database db:generate
 RUN pnpm turbo run build --filter=api...
 
 FROM builder AS deployer
 RUN pnpm deploy --filter=api --prod /prod/api
+RUN cd /prod/api && \
+    SCHEMA_PATH=$(find ./node_modules -type f -path "*/@repo/database/prisma/schema.prisma" | head -n 1) && \
+    echo "Found schema at $SCHEMA_PATH" && \
+    pnpm dlx prisma@6.19.3 generate --schema="$SCHEMA_PATH"
 
 FROM node:22-alpine AS runner
 WORKDIR /app

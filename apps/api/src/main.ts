@@ -6,7 +6,9 @@ import { getApiEnv } from './env';
 
 async function bootstrap() {
   const { host, port } = getApiEnv();
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bodyParser: false,
+  });
 
   app.set('trust proxy', true);
 

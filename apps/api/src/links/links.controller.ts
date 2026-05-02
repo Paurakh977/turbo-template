@@ -7,12 +7,14 @@ import {
   Param,
   Delete,
 } from '@nestjs/common';
+import { AllowAnonymous } from '@thallesp/nestjs-better-auth';
 
 import type { CreateLinkDto, UpdateLinkDto } from '@repo/api';
 
 import { LinksService } from './links.service';
 
 @Controller('links')
+@AllowAnonymous()
 export class LinksController {
   constructor(private readonly linksService: LinksService) {}
 
