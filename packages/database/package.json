@@ -26,14 +26,14 @@
     "db:studio": "prisma studio --schema ./prisma/schema.prisma"
   },
   "dependencies": {
-    "@prisma/client": "^6"
+    "@prisma/client": "^6",
+    "prisma": "^6"
   },
   "devDependencies": {
     "@repo/eslint-config": "workspace:^",
     "@repo/typescript-config": "workspace:^",
     "@types/node": "^22.19.3",
     "eslint": "^9.39.2",
-    "prisma": "^6.19.3",
     "typescript": "5.5.4"
   }
 }
