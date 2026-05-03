@@ -60,6 +60,31 @@ services:
         aliases:
           - postgres
 
+  redis:
+    profiles: ['prod', 'dev']
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    expose:
+      - '6379'
+    ports:
+      - '${REDIS_PORT:-6379}:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test:
+        ['CMD-SHELL', 'redis-cli -a "$${REDIS_PASSWORD}" ping | grep -q PONG']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      app-network:
+        aliases:
+          - redis
+
   api:
     profiles: ['prod']
     image: template-turbo-api:prod
@@ -76,6 +101,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       NODE_ENV: production
       HOST: ${API_HOST:?API_HOST is required}
@@ -83,8 +110,13 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=public
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:?BETTER_AUTH_URL is required}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?NEXT_PUBLIC_APP_URL is required}
       TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-}
       APP_NAME: ${APP_NAME:-MyApp}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      DEV_EMAIL_OVERRIDE: ${DEV_EMAIL_OVERRIDE:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
@@ -95,7 +127,7 @@ services:
       test:
         [
           'CMD-SHELL',
-          'wget -qO- "http://127.0.0.1:$${PORT}/" > /dev/null || exit 1',
+          'wget -qO- "http://127.0.0.1:$${PORT}/api" > /dev/null || exit 1',
         ]
       interval: 15s
       timeout: 5s
@@ -119,6 +151,7 @@ services:
         BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}
         BETTER_AUTH_URL: ${BETTER_AUTH_URL:?BETTER_AUTH_URL is required}
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?NEXT_PUBLIC_APP_URL is required}
         NEXT_ALLOWED_DEV_ORIGINS: ${NEXT_ALLOWED_DEV_ORIGINS:-}
     restart: unless-stopped
     depends_on:
@@ -131,6 +164,7 @@ services:
       HOSTNAME: ${WEB_HOST:?WEB_HOST is required}
       PORT: ${WEB_PORT:?WEB_PORT is required}
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?NEXT_PUBLIC_APP_URL is required}
       NEXT_ALLOWED_DEV_ORIGINS: ${NEXT_ALLOWED_DEV_ORIGINS:-}
       INTERNAL_API_URL: http://api:${API_PORT:?API_PORT is required}
       DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=public
@@ -184,6 +218,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       NODE_ENV: development
       PNPM_NODE_LINKER: hoisted
@@ -192,8 +228,13 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=public
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:?BETTER_AUTH_URL is required}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?NEXT_PUBLIC_APP_URL is required}
       TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-}
       APP_NAME: ${APP_NAME:-MyApp}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      DEV_EMAIL_OVERRIDE: ${DEV_EMAIL_OVERRIDE:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
@@ -237,6 +278,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
       api-dev:
         condition: service_healthy
     environment:
@@ -245,6 +288,7 @@ services:
       HOSTNAME: ${WEB_HOST:?WEB_HOST is required}
       PORT: ${WEB_PORT:?WEB_PORT is required}
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?NEXT_PUBLIC_APP_URL is required}
       NEXT_ALLOWED_DEV_ORIGINS: ${NEXT_ALLOWED_DEV_ORIGINS:?NEXT_ALLOWED_DEV_ORIGINS is required}
       INTERNAL_API_URL: http://api-dev:${API_PORT:?API_PORT is required}
       DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=public
@@ -300,6 +344,7 @@ networks:
 
 volumes:
   postgres-data:
+  redis-data:
   api-node_modules:
   api-pnpm-store:
   api-turbo:
