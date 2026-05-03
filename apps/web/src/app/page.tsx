@@ -1,11 +1,14 @@
-import type { Link } from '@repo/api';
+"use client";
+
+import { useEffect, useState } from 'react';
+import type { Link as LinkType } from '@repo/api';
 import { Button } from '@repo/ui/button';
 import Image, { type ImageProps } from 'next/image';
+import Link from 'next/link';
 
-import { getApiBaseUrl } from '../env';
 import styles from '../styles/page.module.css';
 
-export const dynamic = 'force-dynamic';
+
 
 type Props = Omit<ImageProps, 'src'> & {
   srcLight: string;
@@ -23,34 +26,34 @@ const ThemeImage = (props: Props) => {
   );
 };
 
-async function getLinks(): Promise<Link[]> {
-  try {
-    const apiBaseUrl = await getApiBaseUrl();
-    const res = await fetch(`${apiBaseUrl}/links`, {
-      cache: 'no-store',
-    });
+export default function Home() {
+  const [links, setLinks] = useState<LinkType[]>([]);
+  const [loading, setLoading] = useState(true);
 
-    if (!res.ok) {
-      throw new Error('Failed to fetch links');
+  useEffect(() => {
+    async function fetchLinks() {
+      try {
+        const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || '';
+        const res = await fetch(`${apiBaseUrl}/links`);
+        if (res.ok) {
+          setLinks(await res.json());
+        }
+      } catch (error) {
+        console.error('Error fetching links:', error);
+      } finally {
+        setLoading(false);
+      }
     }
-
-    return res.json();
-  } catch (error) {
-    console.error('Error fetching links:', error);
-    return [];
-  }
-}
-
-export default async function Home() {
-  const links = await getLinks();
+    fetchLinks();
+  }, []);
 
   return (
     <div className={styles.page}>
       <main className={styles.main}>
         <ThemeImage
           className={styles.logo}
-          srcLight="turborepo-dark.svg"
-          srcDark="turborepo-light.svg"
+          srcLight="/turborepo-dark.svg"
+          srcDark="/turborepo-light.svg"
           alt="Turborepo logo"
           width={180}
           height={38}
@@ -58,42 +61,27 @@ export default async function Home() {
         />
         <ol>
           <li>
-            Get started by editing <code>apps/web/app/page.tsx</code>
+            Get started by editing <code>apps/web/src/app/page.tsx</code>
           </li>
           <li>Save and see your changes instantly.</li>
         </ol>
 
         <div className={styles.ctas}>
-          <a
-            className={styles.primary}
-            href="https://vercel.com/new/clone?demo-description=Learn+to+implement+a+monorepo+with+a+two+Next.js+sites+that+has+installed+three+local+packages.&demo-image=%2F%2Fimages.ctfassets.net%2Fe5382hct74si%2F4K8ZISWAzJ8X1504ca0zmC%2F0b21a1c6246add355e55816278ef54bc%2FBasic.png&demo-title=Monorepo+with+Turborepo&demo-url=https%3A%2F%2Fexamples-basic-web.vercel.sh%2F&from=templates&project-name=Monorepo+with+Turborepo&repository-name=monorepo-turborepo&repository-url=https%3A%2F%2Fgithub.com%2Fvercel%2Fturborepo%2Ftree%2Fmain%2Fexamples%2Fbasic&root-directory=apps%2Fdocs&skippable-integrations=1&teamSlug=vercel&utm_source=create-turbo"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className={styles.logo}
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            href="https://turborepo.dev/docs?utm_source"
-            target="_blank"
-            rel="noopener noreferrer"
-            className={styles.secondary}
-          >
-            Read our docs
-          </a>
+          <Link href="/auth" className={styles.primary}>
+            Sign In / Sign Up
+          </Link>
+          <Link href="/dashboard" className={styles.secondary}>
+            Dashboard
+          </Link>
         </div>
 
         <Button appName="web" className={styles.secondary}>
           Open alert
         </Button>
 
-        {links.length > 0 ? (
+        {loading ? (
+          <div style={{ color: '#666' }}>Loading links...</div>
+        ) : links.length > 0 ? (
           <div className={styles.ctas}>
             {links.map((link) => (
               <a
@@ -115,37 +103,6 @@ export default async function Home() {
           </div>
         )}
       </main>
-
-      <footer className={styles.footer}>
-        <a
-          href="https://vercel.com/templates?search=turborepo&utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          href="https://turborepo.dev?utm_source=create-turbo"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to turborepo.dev →
-        </a>
-      </footer>
     </div>
   );
 }

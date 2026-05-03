@@ -27,6 +27,7 @@ ARG DATABASE_URL
 ARG BETTER_AUTH_SECRET
 ARG BETTER_AUTH_URL
 ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_APP_URL
 ARG NEXT_ALLOWED_DEV_ORIGINS
 ARG TURBO_TEAM
 ARG TURBO_TOKEN
@@ -35,6 +36,7 @@ ENV DATABASE_URL=$DATABASE_URL
 ENV BETTER_AUTH_SECRET=$BETTER_AUTH_SECRET
 ENV BETTER_AUTH_URL=$BETTER_AUTH_URL
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
 ENV NEXT_ALLOWED_DEV_ORIGINS=$NEXT_ALLOWED_DEV_ORIGINS
 ENV TURBO_TEAM=$TURBO_TEAM
 ENV TURBO_TOKEN=$TURBO_TOKEN
@@ -44,7 +46,7 @@ RUN pnpm turbo run build --filter=web...
 
 FROM node:22-alpine AS runner
 WORKDIR /app
-RUN apk add --no-cache dumb-init libc6-compat \
+RUN apk add --no-cache dumb-init libc6-compat wget \
   && addgroup -S nextjs -g 1001 \
   && adduser -S nextjs -u 1001 -G nextjs
 ENV NODE_ENV=production
@@ -54,6 +56,6 @@ COPY --from=builder --chown=nextjs:nextjs /app/apps/web/.next/static ./apps/web/
 COPY --from=builder --chown=nextjs:nextjs /app/apps/web/public ./apps/web/public
 USER nextjs
 EXPOSE 3000
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD wget -qO- "http://127.0.0.1:${PORT}/" > /dev/null || exit 1
+
 ENTRYPOINT ["dumb-init", "--"]
 CMD ["node", "apps/web/server.js"]

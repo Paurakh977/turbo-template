@@ -1,15 +1,24 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 import { authClient } from '../../../lib/auth-client';
 
 export default function SignUpPage() {
+  const router = useRouter();
+  const { data: session, isPending } = authClient.useSession();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isPending && session) {
+      router.replace('/dashboard');
+    }
+  }, [isPending, router, session]);
 
   const signUp = async () => {
     setError(null);

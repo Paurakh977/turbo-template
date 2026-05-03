@@ -1,31 +1,51 @@
 'use client';
 
-import { createAuthClient } from 'better-auth/react';
-import { twoFactorClient } from 'better-auth/client/plugins';
+import { createAuthClient } from "better-auth/react";
+import { twoFactorClient } from "better-auth/client/plugins";
+import { jwtClient } from "better-auth/client/plugins";
 
-function resolveAuthBaseURL() {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL?.trim();
-  if (!apiUrl) {
-    return undefined;
-  }
+type AuthClientError = { error?: { status?: number } };
 
-  if (/^https?:\/\//.test(apiUrl)) {
-    return apiUrl.replace(/\/api\/?$/, '');
-  }
+let lastRateLimitWarnAt = 0;
 
-  return undefined;
+function notifyRateLimit() {
+  const now = Date.now();
+  if (now - lastRateLimitWarnAt < 5000) return;
+  lastRateLimitWarnAt = now;
+  console.warn("Rate limited! Too many requests.");
 }
 
+const baseURL = typeof window !== "undefined" 
+  ? window.location.origin 
+  : process.env.BETTER_AUTH_URL || "http://localhost:3000";
+
 export const authClient = createAuthClient({
-  baseURL: resolveAuthBaseURL(),
+  baseURL,
   basePath: '/api/auth',
   plugins: [
     twoFactorClient({
       onTwoFactorRedirect() {
-        window.location.href = '/auth/two-factor';
+        window.location.href = "/auth/two-factor";
       },
     }),
+    jwtClient(), 
   ],
+  fetchOptions: {
+    credentials: "include",
+    onError(e: AuthClientError) {
+      if (e.error?.status === 429) {
+        notifyRateLimit();
+      }
+    },
+  },
 });
+
+export const {
+  signIn,
+  signUp,
+  signOut,
+  useSession,
+  getSession,
+} = authClient;
 
 export type Session = typeof authClient.$Infer.Session;
