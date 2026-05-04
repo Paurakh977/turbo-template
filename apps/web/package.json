@@ -12,8 +12,10 @@
   },
   "dependencies": {
     "@repo/auth": "workspace:^",
+    "@repo/database": "workspace:^",
     "@repo/ui": "workspace:*",
     "better-auth": "^1.6.0",
+    "date-fns": "^4.1.0",
     "framer-motion": "^12.38.0",
     "next": "16.2.0",
     "react": "^19.1.0",

@@ -36,12 +36,15 @@ const allowedDevOrigins = rawAllowedDevOrigins
 const nextConfig = {
   output: 'standalone',
   typescript: { ignoreBuildErrors: true },
-  webpack(config, { dev }) {
+  webpack(config, { dev, isServer }) {
     if (dev) {
       config.watchOptions = {
         poll: 1000,
         aggregateTimeout: 300,
       };
+    }
+    if (!isServer) {
+      config.externals = [...(config.externals || []), 'ioredis'];
     }
     return config;
   },

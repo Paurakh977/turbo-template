@@ -1,23 +1,25 @@
 'use client';
 
-import { createAuthClient } from "better-auth/react";
-import { twoFactorClient } from "better-auth/client/plugins";
-import { jwtClient } from "better-auth/client/plugins";
+import { createAuthClient } from 'better-auth/react';
+import { twoFactorClient } from 'better-auth/client/plugins';
+import { adminClient } from 'better-auth/client/plugins';
+import { jwtClient } from 'better-auth/client/plugins';
+import { ac, adminRole, userRole, superAdminRole } from './permissions';
 
 type AuthClientError = { error?: { status?: number } };
 
 let lastRateLimitWarnAt = 0;
-
 function notifyRateLimit() {
   const now = Date.now();
   if (now - lastRateLimitWarnAt < 5000) return;
   lastRateLimitWarnAt = now;
-  console.warn("Rate limited! Too many requests.");
+  console.warn('Rate limited! Too many requests.');
 }
 
-const baseURL = typeof window !== "undefined" 
-  ? window.location.origin 
-  : process.env.BETTER_AUTH_URL || "http://localhost:3000";
+const baseURL =
+  typeof window !== 'undefined'
+    ? window.location.origin
+    : process.env.BETTER_AUTH_URL || 'http://localhost:3000';
 
 export const authClient = createAuthClient({
   baseURL,
@@ -25,27 +27,26 @@ export const authClient = createAuthClient({
   plugins: [
     twoFactorClient({
       onTwoFactorRedirect() {
-        window.location.href = "/auth/two-factor";
+        window.location.href = '/auth/two-factor';
       },
     }),
-    jwtClient(), 
+    adminClient({
+      ac,
+      roles: {
+        admin: adminRole,
+        user: userRole,
+        superAdmin: superAdminRole,
+      },
+    }),
+    jwtClient(),
   ],
   fetchOptions: {
-    credentials: "include",
+    credentials: 'include',
     onError(e: AuthClientError) {
-      if (e.error?.status === 429) {
-        notifyRateLimit();
-      }
+      if (e.error?.status === 429) notifyRateLimit();
     },
   },
 });
 
-export const {
-  signIn,
-  signUp,
-  signOut,
-  useSession,
-  getSession,
-} = authClient;
-
+export const { signIn, signUp, signOut, useSession, getSession } = authClient;
 export type Session = typeof authClient.$Infer.Session;
