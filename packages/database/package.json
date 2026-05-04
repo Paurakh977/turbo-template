@@ -18,6 +18,7 @@
   "scripts": {
     "dev": "pnpm build --watch",
     "build": "tsc -b -v",
+    "db:seed": "tsx src/seed.ts",
     "lint": "eslint \"src/**/*.ts\"",
     "db:generate": "prisma generate --schema ./prisma/schema.prisma",
     "db:push": "prisma db push --schema ./prisma/schema.prisma",
@@ -27,6 +28,7 @@
   },
   "dependencies": {
     "@prisma/client": "^6",
+    "crypto-js": "^4.2.0",
     "prisma": "^6"
   },
   "devDependencies": {
@@ -34,6 +36,7 @@
     "@repo/typescript-config": "workspace:^",
     "@types/node": "^22.19.3",
     "eslint": "^9.39.2",
+    "tsx": "^4.21.0",
     "typescript": "5.5.4"
   }
 }

@@ -92,6 +92,7 @@ model TwoFactor {
 
   @@index([userId])
   @@map("twoFactor")
+  @@index([secret])
 }
 
 model RateLimit {
@@ -105,11 +106,28 @@ model RateLimit {
 }
 
 model Jwks {
-  id         String   @id
+  id         String    @id
   publicKey  String
   privateKey String
-  createdAt  DateTime @default(now())
+  createdAt  DateTime  @default(now())
   expiresAt  DateTime?
 
   @@map("jwks")
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String // e.g. "sign_in", "role_changed", "user_banned"
+  actor     String? // who performed the action (for admin actions)
+  targetId  String? // target user id (for admin actions on another user)
+  metadata  Json? // any extra structured data
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_log")
 }
