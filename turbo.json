@@ -20,6 +20,9 @@
     "lint": {},
     "test": {},
     "test:e2e": {},
+    "db:seed": {
+      "cache": false
+    },
     "db:generate": {
       "cache": false
     },
@@ -30,6 +33,9 @@
       "cache": false
     },
     "db:migrate:deploy": {
+      "cache": false
+    },
+    "db:studio": {
       "cache": false
     },
     "auth:generate": {
