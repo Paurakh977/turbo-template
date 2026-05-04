@@ -81,7 +81,6 @@ async function bootstrap() {
       'Content-Type',
       'Authorization',
       'X-Requested-With',
-      'cookie',
     ],
   });
 

@@ -1,16 +1,10 @@
-import {
-  Injectable,
-  OnModuleDestroy,
-  OnModuleInit,
-  Logger,
-  Inject,
-} from '@nestjs/common';
+import { Injectable, OnModuleInit, Logger, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 import { REDIS_CLIENT } from '../redis/redis.module';
 
 @Injectable()
-export class RateLimitService implements OnModuleInit, OnModuleDestroy {
+export class RateLimitService implements OnModuleInit {
   private readonly logger = new Logger(RateLimitService.name);
 
   private readonly maxPerWindow: number;
@@ -54,21 +48,19 @@ export class RateLimitService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  onModuleDestroy() {}
-
   async check(identifier: string, prefix = 'sst'): Promise<boolean> {
     const key = `${prefix}:${identifier}`;
     const now = Date.now();
 
     try {
-      const result = await (this.redis as any).eval(
+      const result = (await (this.redis as any).eval(
         RateLimitService.SLIDING_WINDOW_LUA,
         1,
         key,
         now,
         this.windowMs,
         this.maxPerWindow,
-      ) as number;
+      )) as number;
 
       return result === 1;
     } catch (err) {

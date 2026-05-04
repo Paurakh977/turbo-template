@@ -68,6 +68,10 @@ export const auth: any = betterAuth({
   basePath: '/api/auth',
   secret,
 
+  account: {
+    encryptOAuthTokens: true,
+  },
+
   secondaryStorage: redis ? {
     get: async (key) => {
       const value = await redis.get(key);
@@ -160,6 +164,7 @@ export const auth: any = betterAuth({
     cookieCache: {
       enabled: true,
       maxAge: process.env.SESSION_COOKIE_MAX_AGE ? parseInt(process.env.SESSION_COOKIE_MAX_AGE) : 60 * 5,
+      strategy: "jwe",
     },
   },
 
@@ -193,7 +198,7 @@ export const auth: any = betterAuth({
     backgroundTasks: {
       handler: async (promise) => {
         try {
-          await promise;
+          await promise;  //later add fire-and-forget so they don't block the HTTP response with proper loggins and retry .
         } catch (e) {
           console.error("Better Auth Background Task Failed:", e);
         }
@@ -239,7 +244,10 @@ export const auth: any = betterAuth({
       twoFactorCookieMaxAge: process.env.TWO_FACTOR_COOKIE_MAX_AGE ? parseInt(process.env.TWO_FACTOR_COOKIE_MAX_AGE) : 600,
       trustDeviceMaxAge: process.env.TRUST_DEVICE_MAX_AGE ? parseInt(process.env.TRUST_DEVICE_MAX_AGE) : 60 * 60 * 24 * 30,
     }),
-    admin(),
+    admin({
+      adminRole: "admin",
+      defaultRole: "user",
+    }),
     jwt({
       jwt: {
         expirationTime: "30m",

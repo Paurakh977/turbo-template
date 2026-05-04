@@ -1,4 +1,4 @@
-import { Module, Global } from '@nestjs/common';
+import { Module, Global, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 
@@ -24,6 +24,7 @@ export const REDIS_CLIENT = 'REDIS_CLIENT';
         );
         client.on('connect', () => console.log('[Redis] Connected'));
         client.on('reconnecting', () => console.warn('[Redis] Reconnecting…'));
+        client.on('end', () => console.log('[Redis] Connection closed'));
 
         return client;
       },
@@ -32,4 +33,10 @@ export const REDIS_CLIENT = 'REDIS_CLIENT';
   ],
   exports: [REDIS_CLIENT],
 })
-export class RedisModule {}
+export class RedisModule implements OnModuleDestroy {
+  constructor(@Inject(REDIS_CLIENT) private readonly redis: Redis) {}
+
+  async onModuleDestroy() {
+    await this.redis.quit();
+  }
+}
