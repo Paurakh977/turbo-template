@@ -605,6 +605,16 @@ export const auth = betterAuth({
     minPasswordLength: 8,
     maxPasswordLength: 128,
     requireEmailVerification: canSendEmail,
+    customSyntheticUser: ({ coreFields, additionalFields, id }) => ({
+      ...coreFields,
+      role: 'user',
+      banned: false,
+      banReason: null,
+      banExpires: null,
+      twoFactorEnabled: false,
+      ...additionalFields,
+      id,
+    }),
     sendResetPassword: async ({ user, url }) => {
       sendEmail({
         to: user.email,
