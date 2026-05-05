@@ -85,6 +85,29 @@ services:
         aliases:
           - redis
 
+  pgadmin:
+    profiles: ['prod', 'dev']
+    image: dpage/pgadmin4:8.11
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: 'False'
+    expose:
+      - '80'
+    ports:
+      - '${PGADMIN_PORT:-5050}:80'
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      app-network:
+        aliases:
+          - pgadmin
+
   api:
     profiles: ['prod']
     image: template-turbo-api:prod
@@ -345,6 +368,7 @@ networks:
 volumes:
   postgres-data:
   redis-data:
+  pgadmin-data:
   api-node_modules:
   api-pnpm-store:
   api-turbo:
