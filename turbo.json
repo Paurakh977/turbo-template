@@ -30,7 +30,8 @@
       "cache": false
     },
     "db:migrate:dev": {
-      "cache": false
+      "cache": false,
+      "persistent": true
     },
     "db:migrate:deploy": {
       "cache": false
@@ -39,7 +40,8 @@
       "cache": false
     },
     "auth:generate": {
-      "cache": false
+      "cache": false,
+      "persistent": true
     }
   }
 }
