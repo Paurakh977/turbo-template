@@ -85,6 +85,34 @@ async function popPendingUser(userId: string): Promise<UserData | undefined> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Cache invalidation
+// Destroys the user's secondary storage cache in Redis (if enabled) so that
+// the next request misses the cache, hits the DB, and fetches the fresh data
+// (like new roles, ban status, etc) instantly.
+// ---------------------------------------------------------------------------
+async function invalidateUserCache(userId: string) {
+  if (!redis) return;
+  try {
+    const userSessions = await db.session.findMany({ where: { userId } });
+    const pipeline = redis.pipeline();
+    for (const session of userSessions) {
+      // Better Auth usually caches the session using its token as the key
+      pipeline.del(session.token);
+      // Just in case it uses variations in newer versions
+      pipeline.del(`session:${session.token}`);
+      pipeline.del(`session:${session.id}`);
+    }
+    // Also delete any cached user record directly
+    pipeline.del(userId);
+    pipeline.del(`user:${userId}`);
+    await pipeline.exec();
+    console.log(`[Cache] Invalidated secondary storage for user ${userId}`);
+  } catch (e) {
+    console.error('[Cache Error] Failed to invalidate user cache:', e);
+  }
+}
+
 // Sweep stale entries every 5 minutes so the map can't grow unbounded.
 setInterval(() => {
   if (redis) return; // Redis handles TTL natively
@@ -149,6 +177,9 @@ const auditLogPlugin = (): BetterAuthPlugin => ({
             .catch((e: unknown) =>
               console.error('[AuditLog] role_changed failed:', e),
             );
+
+          // Force cache invalidation so the new role is fetched instantly
+          await invalidateUserCache(userId);
         }),
       },
       {
@@ -186,6 +217,9 @@ const auditLogPlugin = (): BetterAuthPlugin => ({
             .catch((e: unknown) =>
               console.error('[AuditLog] user_banned failed:', e),
             );
+
+          // Force cache invalidation so ban reflects instantly
+          await invalidateUserCache(userId);
         }),
       },
       {
@@ -212,6 +246,9 @@ const auditLogPlugin = (): BetterAuthPlugin => ({
             .catch((e: unknown) =>
               console.error('[AuditLog] user_unbanned failed:', e),
             );
+
+          // Force cache invalidation so unban reflects instantly
+          await invalidateUserCache(userId);
         }),
       },
       {
@@ -239,6 +276,10 @@ const auditLogPlugin = (): BetterAuthPlugin => ({
             .catch((e: unknown) =>
               console.error('[AuditLog] sessions_revoked failed:', e),
             );
+
+          // Force cache wipe out for good measure, though Better Auth's
+          // revoke mechanism will also attempt to clear the secondary cache
+          await invalidateUserCache(userId);
         }),
       },
       {
@@ -282,6 +323,9 @@ const auditLogPlugin = (): BetterAuthPlugin => ({
             .catch((e: unknown) =>
               console.error('[AuditLog] user_deleted failed:', e),
             );
+
+          // Force cache invalidation immediately prior to DB cascade deletion
+          await invalidateUserCache(targetUserId);
         }),
       },
     ],
@@ -532,6 +576,10 @@ export const auth = betterAuth({
               }
             }
           });
+
+          // Always invalidate cache on user update so changes
+          // are reflected immediately without waiting for session expiry.
+          await invalidateUserCache(u.id);
         },
       },
 
@@ -733,20 +781,6 @@ export const auth = betterAuth({
     updateAge: process.env.SESSION_UPDATE_AGE
       ? parseInt(process.env.SESSION_UPDATE_AGE)
       : 60 * 60 * 24, // 1 day
-
-    cookieCache: {
-      enabled: true,
-      /**
-       * `jwe` = encrypted cookie. Nobody can read session data client-side.
-       * Best for sensitive data and compliance.
-       * Trade-off: slightly larger cookie than `compact`/`jwt`.
-       * Docs: compact < jwt < jwe in size; jwe is the most secure.
-       */
-      strategy: 'jwe',
-      maxAge: process.env.SESSION_COOKIE_MAX_AGE
-        ? parseInt(process.env.SESSION_COOKIE_MAX_AGE)
-        : 60 * 5, // 5 minutes — short-lived cache, database hit every 5 min
-    },
   },
 
   // -------------------------------------------------------------------------
@@ -792,7 +826,7 @@ export const auth = betterAuth({
   // Advanced
   // -------------------------------------------------------------------------
   advanced: {
-    useSecureCookies,
+    useSecureCookies: true,
     ipAddress: {
       disableIpTracking: false,
       ipAddressHeaders: ['x-forwarded-for', 'x-real-ip'],
