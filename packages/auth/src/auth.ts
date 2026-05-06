@@ -1,4 +1,14 @@
 import { db } from '@repo/database';
+import { betterAuth } from 'better-auth';
+import { prismaAdapter } from 'better-auth/adapters/prisma';
+import { twoFactor } from 'better-auth/plugins/two-factor';
+import { admin } from 'better-auth/plugins/admin';
+import { jwt } from 'better-auth/plugins';
+import Redis from 'ioredis';
+import { Resend } from 'resend';
+import { ac, adminRole, superAdminRole, userRole } from './permissions';
+import { createAuthMiddleware, getSessionFromCtx } from 'better-auth/api';
+import type { BetterAuthPlugin } from 'better-auth';
 
 // Better Auth types `data` / `oldData` in databaseHooks as `{}` — these
 // interfaces let us safely cast to the actual shape without losing type safety
@@ -15,6 +25,8 @@ interface UserData {
 interface SessionData {
   userId: string;
   impersonatedBy?: string | null;
+  ipAddress?: string | null;
+  userAgent?: string | null;
 }
 
 /**
@@ -33,35 +45,54 @@ interface SessionData {
 const pendingUserUpdates = new Map<string, { data: UserData; ts: number }>();
 
 const PENDING_TTL_MS = 30_000;
-function storePendingUser(userId: string, data: UserData) {
-  pendingUserUpdates.set(userId, { data, ts: Date.now() });
+async function storePendingUser(userId: string, data: UserData) {
+  if (redis) {
+    await redis
+      .set(
+        `pending_user_update:${userId}`,
+        JSON.stringify(data),
+        'PX',
+        PENDING_TTL_MS,
+      )
+      .catch((e) => console.error('[Redis Error]', e));
+  } else {
+    pendingUserUpdates.set(userId, { data, ts: Date.now() });
+  }
 }
-function popPendingUser(userId: string): UserData | undefined {
-  const entry = pendingUserUpdates.get(userId);
-  pendingUserUpdates.delete(userId);
-  if (!entry) return undefined;
-  if (Date.now() - entry.ts > PENDING_TTL_MS) return undefined; // stale entry
-  return entry.data;
+async function popPendingUser(userId: string): Promise<UserData | undefined> {
+  if (redis) {
+    const raw = await redis.get(`pending_user_update:${userId}`).catch((e) => {
+      console.error('[Redis Error]', e);
+      return null;
+    });
+    if (raw) {
+      await redis
+        .del(`pending_user_update:${userId}`)
+        .catch((e) => console.error('[Redis Error]', e));
+      try {
+        return JSON.parse(raw) as UserData;
+      } catch (e) {
+        return undefined;
+      }
+    }
+    return undefined;
+  } else {
+    const entry = pendingUserUpdates.get(userId);
+    pendingUserUpdates.delete(userId);
+    if (!entry) return undefined;
+    if (Date.now() - entry.ts > PENDING_TTL_MS) return undefined; // stale entry
+    return entry.data;
+  }
 }
 
 // Sweep stale entries every 5 minutes so the map can't grow unbounded.
 setInterval(() => {
+  if (redis) return; // Redis handles TTL natively
   const cutoff = Date.now() - PENDING_TTL_MS;
   for (const [id, entry] of pendingUserUpdates) {
     if (entry.ts < cutoff) pendingUserUpdates.delete(id);
   }
-}, 5 * 60_000).unref(); // .unref() so this timer never prevents process exit
-
-import { betterAuth } from 'better-auth';
-import { prismaAdapter } from 'better-auth/adapters/prisma';
-import { twoFactor } from 'better-auth/plugins/two-factor';
-import { admin } from 'better-auth/plugins/admin';
-import { jwt } from 'better-auth/plugins';
-import Redis from 'ioredis';
-import { Resend } from 'resend';
-import { ac, adminRole, superAdminRole, userRole } from './permissions';
-import { createAuthMiddleware, getSessionFromCtx } from 'better-auth/api';
-import type { BetterAuthPlugin } from 'better-auth';
+}, 5 * 60_000).unref();
 
 // ---------------------------------------------------------------------------
 // Audit-log plugin
@@ -104,7 +135,7 @@ const auditLogPlugin = (): BetterAuthPlugin => ({
           const ipAddress = ctx.headers?.get('x-forwarded-for') ?? undefined;
           const userAgent = ctx.headers?.get('user-agent') ?? undefined;
 
-          db.auditLog
+          await db.auditLog
             .create({
               data: {
                 userId,
@@ -141,7 +172,7 @@ const auditLogPlugin = (): BetterAuthPlugin => ({
             return;
           }
 
-          db.auditLog
+          await db.auditLog
             .create({
               data: {
                 userId,
@@ -168,7 +199,7 @@ const auditLogPlugin = (): BetterAuthPlugin => ({
           const ipAddress = ctx.headers?.get('x-forwarded-for') ?? undefined;
           const userAgent = ctx.headers?.get('user-agent') ?? undefined;
 
-          db.auditLog
+          await db.auditLog
             .create({
               data: {
                 userId,
@@ -195,7 +226,7 @@ const auditLogPlugin = (): BetterAuthPlugin => ({
           const ipAddress = ctx.headers?.get('x-forwarded-for') ?? undefined;
           const userAgent = ctx.headers?.get('user-agent') ?? undefined;
 
-          db.auditLog
+          await db.auditLog
             .create({
               data: {
                 userId,
@@ -211,60 +242,41 @@ const auditLogPlugin = (): BetterAuthPlugin => ({
         }),
       },
       {
-        // Intercept impersonation start
-        matcher: (ctx) => ctx.path === '/admin/impersonate',
-        handler: createAuthMiddleware(async (ctx) => {
-          const body = ctx.body as { userId?: string } | undefined;
-          const userId = body?.userId;
-          if (!userId) return;
-
-          const session = await getSessionFromCtx(ctx);
-          const ipAddress = ctx.headers?.get('x-forwarded-for') ?? undefined;
-          const userAgent = ctx.headers?.get('user-agent') ?? undefined;
-
-          db.auditLog
-            .create({
-              data: {
-                userId,
-                action: 'user_impersonated',
-                actor: session?.user?.id,
-                ipAddress,
-                userAgent,
-              },
-            })
-            .catch((e: unknown) =>
-              console.error('[AuditLog] impersonate failed:', e),
-            );
-        }),
-      },
-      {
-        // Intercept user deletion
+        // Intercept user delete (admin hard deletes a user)
         matcher: (ctx) => ctx.path === '/admin/remove-user',
         handler: createAuthMiddleware(async (ctx) => {
           const body = ctx.body as { userId?: string } | undefined;
-          const userId = body?.userId;
-          if (!userId) return;
+          const targetUserId = body?.userId;
+          if (!targetUserId) return;
 
           const session = await getSessionFromCtx(ctx);
+          const actorId = session?.user?.id;
           const ipAddress = ctx.headers?.get('x-forwarded-for') ?? undefined;
           const userAgent = ctx.headers?.get('user-agent') ?? undefined;
 
-          // Get the user info before deletion
-          const userToDelete = await db.user
-            .findUnique({ where: { id: userId } })
+          // Skip logging if actor is deleting themselves
+          if (actorId === targetUserId) {
+            console.log(
+              '[AuditLog] Skipping self-delete attempt:',
+              targetUserId,
+            );
+            return;
+          }
+
+          // Fetch target user email for metadata before deletion
+          const targetUser = await db.user
+            .findUnique({ where: { id: targetUserId } })
             .catch(() => null);
 
-          db.auditLog
+          await db.auditLog
             .create({
               data: {
-                userId,
+                userId: targetUserId,
                 action: 'user_deleted',
-                actor: session?.user?.id,
+                actor: actorId,
                 ipAddress,
                 userAgent,
-                metadata: userToDelete
-                  ? { email: userToDelete.email }
-                  : undefined,
+                metadata: { email: targetUser?.email ?? null },
               },
             })
             .catch((e: unknown) =>
@@ -400,14 +412,37 @@ export const auth = betterAuth({
   databaseHooks: {
     user: {
       create: {
-        after: async (user) => {
+        after: async (user, ctx) => {
           const u = user as unknown as UserData;
           if (!u?.id) return;
+
+          const context = ctx as
+            | {
+                headers?: {
+                  get: (key: string) => string | null;
+                };
+                request?: {
+                  headers: { get: (key: string) => string | null };
+                };
+              }
+            | undefined;
+
+          const ipAddress =
+            context?.headers?.get('x-forwarded-for') ??
+            context?.request?.headers?.get('x-forwarded-for') ??
+            undefined;
+          const userAgent =
+            context?.headers?.get('user-agent') ??
+            context?.request?.headers?.get('user-agent') ??
+            undefined;
+
           db.auditLog
             .create({
               data: {
                 userId: u.id,
                 action: 'user_signed_up',
+                ipAddress,
+                userAgent,
                 metadata: { email: u.email, name: u.name },
               },
             })
@@ -428,7 +463,7 @@ export const auth = betterAuth({
           const oldUser = await db.user
             .findUnique({ where: { id: userId } })
             .catch(() => null);
-          if (oldUser) storePendingUser(userId, oldUser as UserData);
+          if (oldUser) await storePendingUser(userId, oldUser as UserData);
 
           return { data: userData };
         },
@@ -437,7 +472,7 @@ export const auth = betterAuth({
           const u = user as unknown as UserData;
           if (!u?.id) return;
 
-          const old = popPendingUser(u.id);
+          const old = await popPendingUser(u.id);
           if (!old) return; // no snapshot means admin-plugin partial update — skip
 
           const writes: Promise<unknown>[] = [];
@@ -500,24 +535,9 @@ export const auth = betterAuth({
         },
       },
 
-      // Hard user delete
-      delete: {
-        before: async (user) => {
-          const u = user as unknown as UserData;
-          if (!u?.id) return;
-          db.auditLog
-            .create({
-              data: {
-                userId: u.id,
-                action: 'user_deleted',
-                metadata: { email: u.email },
-              },
-            })
-            .catch((e: unknown) =>
-              console.error('[AuditLog] user_deleted failed:', e),
-            );
-        },
-      },
+      // Hard user delete - now handled by auditLogPlugin at HTTP layer
+      // to capture actor and IP. This database hook is removed to avoid
+      // duplicate entries (admin plugin bypasses this and goes through HTTP).
     },
 
     session: {
@@ -566,27 +586,36 @@ export const auth = betterAuth({
 
       // Fires on sign-out AND admin session revoke
       delete: {
-        before: async (session) => {
+        before: async (session, ctx) => {
           const s = session as unknown as SessionData;
           if (!s?.userId) return;
 
-          // Determine if this is user-initiated signout or admin revocation
-          // If impersonatedBy is set, it means admin is revoking (or impersonating session)
-          const isAdminRevoke = !!s.impersonatedBy;
+          const context = ctx as
+            | {
+                headers?: {
+                  get: (key: string) => string | null;
+                };
+              }
+            | undefined;
 
-          // Skip if admin already logged via auditLogPlugin (sessions_revoked)
-          // The auditLogPlugin handles the bulk admin action, so we skip individual
-          // session deletions that happen as part of that bulk action to avoid duplication
-          if (isAdminRevoke) {
-            return; // Already logged by auditLogPlugin
-          }
+          const ipAddress =
+            s.ipAddress ??
+            context?.headers?.get('x-forwarded-for') ??
+            context?.headers?.get('x-real-ip') ??
+            undefined;
+          const userAgent =
+            s.userAgent ?? context?.headers?.get('user-agent') ?? undefined;
 
-          db.auditLog
+          await db.auditLog
             .create({
               data: {
                 userId: s.userId,
-                action: 'user_signed_out',
-                actor: undefined,
+                action: s.impersonatedBy
+                  ? 'user_stop_impersonating'
+                  : 'user_signed_out',
+                actor: s.impersonatedBy ?? undefined,
+                ipAddress,
+                userAgent,
               },
             })
             .catch((e: unknown) =>
@@ -611,7 +640,6 @@ export const auth = betterAuth({
       banned: false,
       banReason: null,
       banExpires: null,
-      twoFactorEnabled: false,
       ...additionalFields,
       id,
     }),
@@ -859,8 +887,8 @@ export const auth = betterAuth({
       jwt: {
         expirationTime: '30m',
         definePayload: ({ user }) => ({
-          sub: user.id,
           email: user.email,
+          role: user.role,
         }),
         issuer: baseURL,
         audience: baseURL,
