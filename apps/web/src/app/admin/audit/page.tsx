@@ -43,6 +43,11 @@ const ACTION_CONFIG: Record<
     label: 'Email changed',
     color: 'text-amber-400',
   },
+  user_stop_impersonating: {
+    emoji: '👤',
+    label: 'Stopped impersonating',
+    color: 'text-yellow-400',
+  },
 };
 
 function formatAction(action: string) {
@@ -60,7 +65,8 @@ function formatMetadata(metadata: unknown) {
 
   return entries
     .map(([key, value]) => {
-      if (key === 'from' || key === 'to') return `from ${value} → to ${value}`;
+      if (key === 'from' || key === 'to')
+        return `${key === 'from' ? 'from' : 'to'} ${value}`;
       if (key === 'reason') return `reason: ${value}`;
       if (key === 'oldEmail') return `old: ${value}`;
       if (key === 'email') return `email: ${value}`;
@@ -69,6 +75,24 @@ function formatMetadata(metadata: unknown) {
     })
     .join(', ');
 }
+
+function formatUserDisplay(
+  user: { name: string | null; email: string } | undefined,
+  id: string,
+) {
+  if (!user) {
+    return { name: id.slice(0, 8), email: null, isPartial: true };
+  }
+  const displayName = user.name || user.email || id.slice(0, 8);
+  return { name: displayName, email: user.email, isPartial: false };
+}
+
+const USER_ACTIONS_WITHOUT_ACTOR = new Set([
+  'session_created',
+  'user_signed_out',
+  'user_signed_up',
+  'email_changed',
+]);
 
 export default async function AuditLogPage() {
   await requireAdmin();
@@ -83,6 +107,7 @@ export default async function AuditLogPage() {
       logs.flatMap((l) => [l.userId, l.actor].filter(Boolean) as string[]),
     ),
   ];
+
   const users =
     userIds.length > 0
       ? await db.user.findMany({
@@ -93,11 +118,9 @@ export default async function AuditLogPage() {
 
   const userMap = new Map(users.map((u) => [u.id, u]));
 
-  const getUserInfo = (id: string | null) => {
+  const getUserDisplay = (id: string | null) => {
     if (!id) return null;
-    const user = userMap.get(id);
-    if (!user) return id.slice(0, 8);
-    return user.name || user.email || id.slice(0, 8);
+    return formatUserDisplay(userMap.get(id) ?? undefined, id);
   };
 
   return (
@@ -115,10 +138,10 @@ export default async function AuditLogPage() {
                 Event
               </th>
               <th className="text-left px-4 py-3 font-medium text-muted-foreground">
-                User
+                Affected User
               </th>
               <th className="text-left px-4 py-3 font-medium text-muted-foreground">
-                Actor
+                Performed By
               </th>
               <th className="text-left px-4 py-3 font-medium text-muted-foreground">
                 Details
@@ -134,6 +157,11 @@ export default async function AuditLogPage() {
           <tbody>
             {logs.map((log) => {
               const action = formatAction(log.action);
+              const userDisplay = getUserDisplay(log.userId);
+              const actorDisplay = getUserDisplay(log.actor);
+              const isUserAction =
+                !log.actor && USER_ACTIONS_WITHOUT_ACTOR.has(log.action);
+
               return (
                 <tr
                   key={log.id}
@@ -145,14 +173,38 @@ export default async function AuditLogPage() {
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <span className="text-xs text-foreground">
-                      {getUserInfo(log.userId)}
-                    </span>
+                    <div className="flex flex-col">
+                      <span
+                        className={`text-xs ${
+                          userDisplay?.isPartial
+                            ? 'text-amber-500'
+                            : 'text-foreground'
+                        }`}
+                      >
+                        {userDisplay?.name ?? '—'}
+                      </span>
+                      {userDisplay?.email && (
+                        <span className="text-xs text-muted-foreground">
+                          {userDisplay.email}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3">
-                    {log.actor ? (
-                      <span className="text-xs text-muted-foreground">
-                        by {getUserInfo(log.actor)}
+                    {log.actor && actorDisplay ? (
+                      <div className="flex flex-col">
+                        <span className="text-xs text-foreground">
+                          {actorDisplay.name}
+                        </span>
+                        {actorDisplay.email && (
+                          <span className="text-xs text-muted-foreground">
+                            {actorDisplay.email}
+                          </span>
+                        )}
+                      </div>
+                    ) : isUserAction ? (
+                      <span className="text-xs text-green-500">
+                        (the user themselves)
                       </span>
                     ) : (
                       <span className="text-xs text-muted-foreground">—</span>
