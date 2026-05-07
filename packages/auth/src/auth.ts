@@ -10,6 +10,8 @@ import { ac, adminRole, superAdminRole, userRole } from './permissions';
 import { createAuthMiddleware, getSessionFromCtx } from 'better-auth/api';
 import type { BetterAuthPlugin } from 'better-auth';
 
+export const ADMIN_ROLES = ['admin', 'superAdmin'];
+
 // Better Auth types `data` / `oldData` in databaseHooks as `{}` — these
 // interfaces let us safely cast to the actual shape without losing type safety
 // everywhere else in the file.
@@ -910,7 +912,7 @@ export const auth = betterAuth({
         user: userRole,
         superAdmin: superAdminRole,
       },
-      adminRoles: ['admin', 'superAdmin'],
+      adminRoles: ADMIN_ROLES,
       defaultRole: 'user',
       defaultBanReason: 'Violated terms of service',
       bannedUserMessage:

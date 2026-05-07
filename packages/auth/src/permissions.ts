@@ -8,6 +8,7 @@ export const statement = {
   content: ['create', 'read', 'update', 'delete', 'publish'],
   analytics: ['read'],
   settings: ['read', 'update'],
+  dashboard: ['read', 'delete'],
 } as const;
 
 export const ac = createAccessControl(statement);
@@ -15,7 +16,9 @@ export const ac = createAccessControl(statement);
 // Regular user — can only manage their own content, nothing admin
 export const userRole = ac.newRole({
   content: ['create', 'read', 'update'],
+  analytics: [],
   settings: ['read'],
+  dashboard: ['read'],
 });
 
 // Admin — full built-in admin permissions + everything on your resources
@@ -24,6 +27,7 @@ export const adminRole = ac.newRole({
   content: ['create', 'read', 'update', 'delete', 'publish'],
   analytics: ['read'],
   settings: ['read', 'update'],
+  dashboard: ['read', 'delete'],
 });
 
 // Super-admin — can also impersonate other admins
@@ -33,4 +37,5 @@ export const superAdminRole = ac.newRole({
   content: ['create', 'read', 'update', 'delete', 'publish'],
   analytics: ['read'],
   settings: ['read', 'update'],
+  dashboard: ['read', 'delete'],
 });
