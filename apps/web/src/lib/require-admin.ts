@@ -1,22 +1,28 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { auth } from '@repo/auth';
-import type { Session } from './auth-client';
 
-const ADMIN_ROLES = ['admin', 'superAdmin'] as const;
+export type Session = typeof auth.$Infer.Session;
 
 export async function requireAdmin(): Promise<Session> {
-  const session = await auth.api.getSession({
-    headers: await headers(),
-  });
+  const h = await headers();
+  const session = await auth.api.getSession({ headers: h });
 
   if (!session) redirect('/auth/sign-in');
 
   const role = session.user.role as string | null;
+  if (!role) redirect('/dashboard');
 
-  if (!role || !ADMIN_ROLES.includes(role as any)) {
-    redirect('/dashboard'); // not an admin — send to regular dashboard
-  }
+  const result = await auth.api.userHasPermission({
+    body: {
+      role: role as 'user' | 'admin' | 'superAdmin',
+      permissions: {
+        user: ['list'],
+      },
+    },
+  });
 
-  return session as unknown as Session;
+  if (!result?.success) redirect('/dashboard');
+
+  return session;
 }

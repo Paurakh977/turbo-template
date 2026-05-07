@@ -3,7 +3,12 @@
 import { createAuthClient } from 'better-auth/react';
 import { twoFactorClient } from 'better-auth/client/plugins';
 import { adminClient } from 'better-auth/client/plugins';
-import { ac, adminRole, userRole, superAdminRole } from './permissions';
+import {
+  ac,
+  adminRole,
+  userRole,
+  superAdminRole,
+} from '@repo/auth/permissions';
 
 type AuthClientError = { error?: { status?: number } };
 

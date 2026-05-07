@@ -18,16 +18,18 @@ export default function DashboardPage() {
   } = authClient.useSession();
 
   // 2FA setup state
-  const[show2FASetup, setShow2FASetup] = useState(false);
-  const[totpURI, setTotpURI] = useState('');
+  const [show2FASetup, setShow2FASetup] = useState(false);
+  const [totpURI, setTotpURI] = useState('');
   const [backupCodes, setBackupCodes] = useState<any>([]);
   const [totpCode, setTotpCode] = useState('');
-  const[setupPassword, setSetupPassword] = useState('');
-  const [setupStep, setSetupStep] = useState<'password' | 'qr' | 'done'>('password');
+  const [setupPassword, setSetupPassword] = useState('');
+  const [setupStep, setSetupStep] = useState<'password' | 'qr' | 'done'>(
+    'password',
+  );
 
   // Account listing (used to detect whether a user has a local password/credential)
   const [userAccounts, setUserAccounts] = useState<any>([]);
-  const[hasFetchedAccounts, setHasFetchedAccounts] = useState(false);
+  const [hasFetchedAccounts, setHasFetchedAccounts] = useState(false);
 
   useEffect(() => {
     if (session?.user?.id && !isPending && !hasFetchedAccounts) {
@@ -35,13 +37,13 @@ export default function DashboardPage() {
       authClient
         .listAccounts()
         .then((response: any) => {
-          setUserAccounts(response.data ??[]);
+          setUserAccounts(response.data ?? []);
         })
         .catch(() => {
           setHasFetchedAccounts(false);
         });
     }
-  },[session?.user?.id, isPending, hasFetchedAccounts]);
+  }, [session?.user?.id, isPending, hasFetchedAccounts]);
 
   const hasPasswordAccount = userAccounts
     ? userAccounts.find((acc: any) => acc.providerId === 'credential')
@@ -71,9 +73,13 @@ export default function DashboardPage() {
 
   if (!session) return null;
 
-  // Role extraction
+  // Role extraction for display
   const role = (session.user as any).role ?? 'user';
-  const isAdmin = role === 'admin' || role === 'superAdmin';
+  const isAdmin = authClient.admin.checkRolePermission({
+    permissions: { user: ['list'] },
+    role,
+  });
+
 
   const handleSignOut = async () => {
     await authClient.signOut();
@@ -123,7 +129,9 @@ export default function DashboardPage() {
     if (error) {
       alert(error.message ?? 'Failed to send reset email.');
     } else {
-      alert(`A password setup link has been sent to ${session.user.email}. Check your inbox!`);
+      alert(
+        `A password setup link has been sent to ${session.user.email}. Check your inbox!`,
+      );
     }
   };
 
