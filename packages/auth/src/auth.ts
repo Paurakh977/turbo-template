@@ -6,11 +6,86 @@ import { admin } from 'better-auth/plugins/admin';
 import { jwt } from 'better-auth/plugins';
 import Redis from 'ioredis';
 import { Resend } from 'resend';
-import { ac, adminRole, superAdminRole, userRole } from './permissions';
-import { createAuthMiddleware, getSessionFromCtx } from 'better-auth/api';
+import {
+  ac,
+  adminRole,
+  operatorRole,
+  settingsLabsGrantRole,
+  settingsThemeGrantRole,
+  superAdminRole,
+  userRole,
+} from './permissions';
+import {
+  createAuthMiddleware,
+  getSessionFromCtx,
+  APIError,
+} from 'better-auth/api';
 import type { BetterAuthPlugin } from 'better-auth';
 
-export const ADMIN_ROLES = ['admin', 'superAdmin'];
+export const ADMIN_ROLES = ['admin', 'superAdmin'] as const;
+export type AdminRole = (typeof ADMIN_ROLES)[number];
+
+// ---------------------------------------------------------------------------
+// Role hierarchy — higher number = more privileged.
+// Used by enforceRoleHierarchy to block actors from acting on peers / superiors.
+// ---------------------------------------------------------------------------
+const ROLE_WEIGHT: Record<string, number> = {
+  user: 0,
+  operator: 1,
+  admin: 2,
+  superAdmin: 3,
+};
+
+function parseRoles(role: string | string[] | null | undefined): string[] {
+  if (!role) return ['user'];
+  if (Array.isArray(role)) {
+    const cleaned = role.map((r) => String(r).trim()).filter(Boolean);
+    return cleaned.length > 0 ? cleaned : ['user'];
+  }
+  const tokens = role
+    .split(',')
+    .map((r) => r.trim())
+    .filter(Boolean);
+  return tokens.length > 0 ? tokens : ['user'];
+}
+
+function getRoleWeight(role: string | string[] | null | undefined): number {
+  return Math.max(...parseRoles(role).map((r) => ROLE_WEIGHT[r] ?? 0));
+}
+
+/**
+ * Server-side hierarchy guard.
+ *
+ * Throws APIError('FORBIDDEN') — which Better Auth converts to a 403 — when
+ * the authenticated actor attempts to modify/delete/ban/impersonate a target
+ * user whose role weight is >= the actor's own role weight.
+ *
+ * Must be called inside a `before` hook (createAuthMiddleware).  Throwing
+ * inside a before hook is the documented way to abort the request chain.
+ * (see: better-auth.com/docs/concepts/hooks)
+ */
+async function enforceRoleHierarchy(
+  ctx: Parameters<Parameters<typeof createAuthMiddleware>[0]>[0],
+  targetUserId: string,
+): Promise<void> {
+  const session = await getSessionFromCtx(ctx);
+  if (!session) {
+    throw new APIError('UNAUTHORIZED', { message: 'Authentication required.' });
+  }
+
+  const actorRole = (session.user as { role?: string }).role ?? 'user';
+  const targetUser = await db.user
+    .findUnique({ where: { id: targetUserId } })
+    .catch(() => null);
+  const targetRole = (targetUser?.role as string | null) ?? 'user';
+
+  if (getRoleWeight(targetRole) >= getRoleWeight(actorRole)) {
+    throw new APIError('FORBIDDEN', {
+      message:
+        'You do not have permission to perform this action on a user with equal or higher privileges.',
+    });
+  }
+}
 
 // Better Auth types `data` / `oldData` in databaseHooks as `{}` — these
 // interfaces let us safely cast to the actual shape without losing type safety
@@ -147,21 +222,38 @@ const auditLogPlugin = (): BetterAuthPlugin => ({
         matcher: (ctx) => ctx.path === '/admin/set-role',
         handler: createAuthMiddleware(async (ctx) => {
           const body = ctx.body as
-            | { userId?: string; role?: string }
+            | { userId?: string; role?: string | string[] }
             | undefined;
           const userId = body?.userId;
           const newRole = body?.role;
 
           if (!userId || !newRole) return;
 
+          // 🔒 HIERARCHY GUARD — actor cannot change the role of a peer/superior.
+          await enforceRoleHierarchy(ctx, userId);
+
+          // 🔒 Also prevent assigning a role HIGHER than the actor's own role.
+          const session = await getSessionFromCtx(ctx);
+          const actorRole =
+            (session?.user as { role?: string })?.role ?? 'user';
+          const actorWeight = getRoleWeight(actorRole);
+          const nextRoles = parseRoles(newRole);
+          if (nextRoles.some((r) => getRoleWeight(r) >= actorWeight)) {
+            throw new APIError('FORBIDDEN', {
+              message:
+                'You cannot assign a role equal to or higher than your own.',
+            });
+          }
+
           const oldUser = await db.user
             .findUnique({ where: { id: userId } })
             .catch(() => null);
-          const oldRole = oldUser?.role ?? 'user';
+          const oldRoles = parseRoles(oldUser?.role ?? 'user');
+          const oldRole = oldRoles.join(',');
+          const nextRoleJoined = nextRoles.join(',');
 
-          if (oldRole === newRole) return; // no-op, skip log
+          if (oldRole === nextRoleJoined) return; // no-op, skip log
 
-          const session = await getSessionFromCtx(ctx);
           const ipAddress = ctx.headers?.get('x-forwarded-for') ?? undefined;
           const userAgent = ctx.headers?.get('user-agent') ?? undefined;
 
@@ -173,7 +265,7 @@ const auditLogPlugin = (): BetterAuthPlugin => ({
                 actor: session?.user?.id,
                 ipAddress,
                 userAgent,
-                metadata: { from: oldRole, to: newRole },
+                metadata: { from: oldRole, to: nextRoleJoined },
               },
             })
             .catch((e: unknown) =>
@@ -193,13 +285,14 @@ const auditLogPlugin = (): BetterAuthPlugin => ({
           const userId = body?.userId;
           if (!userId) return;
 
+          // 🔒 HIERARCHY GUARD
+          await enforceRoleHierarchy(ctx, userId);
+
           const session = await getSessionFromCtx(ctx);
           const actorId = session?.user?.id;
           const ipAddress = ctx.headers?.get('x-forwarded-for') ?? undefined;
           const userAgent = ctx.headers?.get('user-agent') ?? undefined;
 
-          // Skip logging if actor is banning themselves - this will fail anyway
-          // and creates noise in audit logs
           if (actorId === userId) {
             console.log('[AuditLog] Skipping self-ban attempt:', userId);
             return;
@@ -220,7 +313,6 @@ const auditLogPlugin = (): BetterAuthPlugin => ({
               console.error('[AuditLog] user_banned failed:', e),
             );
 
-          // Force cache invalidation so ban reflects instantly
           await invalidateUserCache(userId);
         }),
       },
@@ -230,6 +322,9 @@ const auditLogPlugin = (): BetterAuthPlugin => ({
           const body = ctx.body as { userId?: string } | undefined;
           const userId = body?.userId;
           if (!userId) return;
+
+          // 🔒 HIERARCHY GUARD
+          await enforceRoleHierarchy(ctx, userId);
 
           const session = await getSessionFromCtx(ctx);
           const ipAddress = ctx.headers?.get('x-forwarded-for') ?? undefined;
@@ -249,7 +344,6 @@ const auditLogPlugin = (): BetterAuthPlugin => ({
               console.error('[AuditLog] user_unbanned failed:', e),
             );
 
-          // Force cache invalidation so unban reflects instantly
           await invalidateUserCache(userId);
         }),
       },
@@ -260,6 +354,9 @@ const auditLogPlugin = (): BetterAuthPlugin => ({
           const body = ctx.body as { userId?: string } | undefined;
           const userId = body?.userId;
           if (!userId) return;
+
+          // 🔒 HIERARCHY GUARD
+          await enforceRoleHierarchy(ctx, userId);
 
           const session = await getSessionFromCtx(ctx);
           const ipAddress = ctx.headers?.get('x-forwarded-for') ?? undefined;
@@ -279,8 +376,6 @@ const auditLogPlugin = (): BetterAuthPlugin => ({
               console.error('[AuditLog] sessions_revoked failed:', e),
             );
 
-          // Force cache wipe out for good measure, though Better Auth's
-          // revoke mechanism will also attempt to clear the secondary cache
           await invalidateUserCache(userId);
         }),
       },
@@ -292,12 +387,14 @@ const auditLogPlugin = (): BetterAuthPlugin => ({
           const targetUserId = body?.userId;
           if (!targetUserId) return;
 
+          // 🔒 HIERARCHY GUARD
+          await enforceRoleHierarchy(ctx, targetUserId);
+
           const session = await getSessionFromCtx(ctx);
           const actorId = session?.user?.id;
           const ipAddress = ctx.headers?.get('x-forwarded-for') ?? undefined;
           const userAgent = ctx.headers?.get('user-agent') ?? undefined;
 
-          // Skip logging if actor is deleting themselves
           if (actorId === targetUserId) {
             console.log(
               '[AuditLog] Skipping self-delete attempt:',
@@ -306,7 +403,6 @@ const auditLogPlugin = (): BetterAuthPlugin => ({
             return;
           }
 
-          // Fetch target user email for metadata before deletion
           const targetUser = await db.user
             .findUnique({ where: { id: targetUserId } })
             .catch(() => null);
@@ -326,8 +422,44 @@ const auditLogPlugin = (): BetterAuthPlugin => ({
               console.error('[AuditLog] user_deleted failed:', e),
             );
 
-          // Force cache invalidation immediately prior to DB cascade deletion
           await invalidateUserCache(targetUserId);
+        }),
+      },
+      {
+        // Intercept impersonation — superAdmins may impersonate admins,
+        // but admins cannot impersonate other admins or superAdmins.
+        matcher: (ctx) => ctx.path === '/admin/impersonate-user',
+        handler: createAuthMiddleware(async (ctx) => {
+          const body = ctx.body as { userId?: string } | undefined;
+          const targetUserId = body?.userId;
+          if (!targetUserId) return;
+
+          // 🔒 HIERARCHY GUARD
+          await enforceRoleHierarchy(ctx, targetUserId);
+
+          const session = await getSessionFromCtx(ctx);
+          const actorId = session?.user?.id;
+          const ipAddress = ctx.headers?.get('x-forwarded-for') ?? undefined;
+          const userAgent = ctx.headers?.get('user-agent') ?? undefined;
+
+          const targetUser = await db.user
+            .findUnique({ where: { id: targetUserId } })
+            .catch(() => null);
+
+          await db.auditLog
+            .create({
+              data: {
+                userId: targetUserId,
+                action: 'user_impersonation_started',
+                actor: actorId,
+                ipAddress,
+                userAgent,
+                metadata: { targetEmail: targetUser?.email ?? null },
+              },
+            })
+            .catch((e: unknown) =>
+              console.error('[AuditLog] user_impersonation_started failed:', e),
+            );
         }),
       },
     ],
@@ -908,11 +1040,14 @@ export const auth = betterAuth({
     admin({
       ac,
       roles: {
-        admin: adminRole,
         user: userRole,
+        operator: operatorRole,
+        admin: adminRole,
         superAdmin: superAdminRole,
+        settingsThemeGrant: settingsThemeGrantRole,
+        settingsLabsGrant: settingsLabsGrantRole,
       },
-      adminRoles: ADMIN_ROLES,
+      adminRoles: ['admin', 'superAdmin'], // only admin + superAdmin get the admin panel
       defaultRole: 'user',
       defaultBanReason: 'Violated terms of service',
       bannedUserMessage:

@@ -25,12 +25,28 @@ model User {
   banned           Boolean?    @default(false)
   banReason        String?
   banExpires       DateTime?
+  notes            Note[]
   sessions         Session[]
   accounts         Account[]
   twofactors       TwoFactor[]
 
   @@unique([email])
   @@map("user")
+}
+
+/// Notes created by users — operators can write/edit, admins+ can delete.
+model Note {
+  id        String   @id @default(cuid())
+  title     String
+  content   String   @db.Text
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([authorId])
+  @@index([createdAt])
+  @@map("note")
 }
 
 model Session {
