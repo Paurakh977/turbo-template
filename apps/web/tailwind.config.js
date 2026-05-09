@@ -12,6 +12,17 @@ export default {
     extend: {
       ...sharedConfig.theme?.extend,
       colors: {
+        ...sharedConfig.theme?.extend?.colors,
+        background: "hsl(var(--background))",
+        foreground: "hsl(var(--foreground))",
+        card: "hsl(var(--card))",
+        border: "hsl(var(--border))",
+        muted: "hsl(var(--muted))",
+        "muted-foreground": "hsl(var(--muted-foreground))",
+        primary: "hsl(var(--primary))",
+        "primary-foreground": "hsl(var(--primary-foreground))",
+        secondary: "hsl(var(--secondary))",
+        "secondary-foreground": "hsl(var(--secondary-foreground))",
         brand: {
           50: "#F9F8F6",
           100: "#EFEBE6",
