@@ -63,10 +63,24 @@ function formatMetadata(metadata: unknown) {
   const entries = Object.entries(metadata as Record<string, unknown>);
   if (entries.length === 0) return null;
 
+  const formatRoleList = (value: unknown) => {
+    const raw = String(value ?? '');
+    const roles = raw
+      .split(',')
+      .map((r) => r.trim())
+      .filter(Boolean)
+      .map((r) => {
+        if (r === 'settingsThemeGrant') return 'grant:theme';
+        if (r === 'settingsLabsGrant') return 'grant:labs';
+        return r;
+      });
+    return roles.join(' + ');
+  };
+
   return entries
     .map(([key, value]) => {
       if (key === 'from' || key === 'to')
-        return `${key === 'from' ? 'from' : 'to'} ${value}`;
+        return `${key === 'from' ? 'from' : 'to'} ${formatRoleList(value)}`;
       if (key === 'reason') return `reason: ${value}`;
       if (key === 'oldEmail') return `old: ${value}`;
       if (key === 'email') return `email: ${value}`;
