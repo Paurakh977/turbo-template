@@ -6,6 +6,9 @@ import { adminClient } from 'better-auth/client/plugins';
 import {
   ac,
   adminRole,
+  operatorRole,
+  settingsLabsGrantRole,
+  settingsThemeGrantRole,
   userRole,
   superAdminRole,
 } from '@repo/auth/permissions';
@@ -37,9 +40,12 @@ export const authClient = createAuthClient({
     adminClient({
       ac,
       roles: {
-        admin: adminRole,
-        user: userRole,
+        user:       userRole,
+        operator:   operatorRole,
+        admin:      adminRole,
         superAdmin: superAdminRole,
+        settingsThemeGrant: settingsThemeGrantRole,
+        settingsLabsGrant: settingsLabsGrantRole,
       },
     }),
   ],
