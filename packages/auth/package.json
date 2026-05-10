@@ -19,6 +19,11 @@
       "types": "./src/permissions.ts",
       "import": "./dist/permissions.js",
       "require": "./dist/permissions.js"
+    },
+    "./roles": {
+      "types": "./src/roles.ts",
+      "import": "./dist/roles.js",
+      "require": "./dist/roles.js"
     }
   },
   "scripts": {

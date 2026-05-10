@@ -25,33 +25,12 @@ import type { BetterAuthPlugin } from 'better-auth';
 export const ADMIN_ROLES = ['admin', 'superAdmin'] as const;
 export type AdminRole = (typeof ADMIN_ROLES)[number];
 
-// ---------------------------------------------------------------------------
-// Role hierarchy — higher number = more privileged.
-// Used by enforceRoleHierarchy to block actors from acting on peers / superiors.
-// ---------------------------------------------------------------------------
-const ROLE_WEIGHT: Record<string, number> = {
-  user: 0,
-  operator: 1,
-  admin: 2,
-  superAdmin: 3,
-};
-
-function parseRoles(role: string | string[] | null | undefined): string[] {
-  if (!role) return ['user'];
-  if (Array.isArray(role)) {
-    const cleaned = role.map((r) => String(r).trim()).filter(Boolean);
-    return cleaned.length > 0 ? cleaned : ['user'];
-  }
-  const tokens = role
-    .split(',')
-    .map((r) => r.trim())
-    .filter(Boolean);
-  return tokens.length > 0 ? tokens : ['user'];
-}
-
-function getRoleWeight(role: string | string[] | null | undefined): number {
-  return Math.max(...parseRoles(role).map((r) => ROLE_WEIGHT[r] ?? 0));
-}
+import {
+  ROLE_WEIGHT,
+  parseRoles,
+  serializeRoles,
+  getMaxRoleWeight,
+} from './roles';
 
 /**
  * Server-side hierarchy guard.
@@ -79,7 +58,7 @@ async function enforceRoleHierarchy(
     .catch(() => null);
   const targetRole = (targetUser?.role as string | null) ?? 'user';
 
-  if (getRoleWeight(targetRole) >= getRoleWeight(actorRole)) {
+  if (getMaxRoleWeight(targetRole) >= getMaxRoleWeight(actorRole)) {
     throw new APIError('FORBIDDEN', {
       message:
         'You do not have permission to perform this action on a user with equal or higher privileges.',
@@ -236,9 +215,9 @@ const auditLogPlugin = (): BetterAuthPlugin => ({
           const session = await getSessionFromCtx(ctx);
           const actorRole =
             (session?.user as { role?: string })?.role ?? 'user';
-          const actorWeight = getRoleWeight(actorRole);
+          const actorWeight = getMaxRoleWeight(actorRole);
           const nextRoles = parseRoles(newRole);
-          if (nextRoles.some((r) => getRoleWeight(r) >= actorWeight)) {
+          if (nextRoles.some((r) => getMaxRoleWeight(r) >= actorWeight)) {
             throw new APIError('FORBIDDEN', {
               message:
                 'You cannot assign a role equal to or higher than your own.',
@@ -248,11 +227,13 @@ const auditLogPlugin = (): BetterAuthPlugin => ({
           const oldUser = await db.user
             .findUnique({ where: { id: userId } })
             .catch(() => null);
-          const oldRoles = parseRoles(oldUser?.role ?? 'user');
-          const oldRole = oldRoles.join(',');
-          const nextRoleJoined = nextRoles.join(',');
+          const oldRoles = parseRoles(
+            oldUser?.role as string | string[] | null | undefined,
+          );
+          const oldRole = serializeRoles(oldRoles);
+          const nextRoleJoined = serializeRoles(nextRoles);
 
-          if (oldRole === nextRoleJoined) return; // no-op, skip log
+          if (oldRole === nextRoleJoined) return;
 
           const ipAddress = ctx.headers?.get('x-forwarded-for') ?? undefined;
           const userAgent = ctx.headers?.get('user-agent') ?? undefined;
@@ -467,7 +448,82 @@ const auditLogPlugin = (): BetterAuthPlugin => ({
 });
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Json role normalization plugin
+//
+// Prisma 6 returns Json fields as { "$value": [...], "$type": "jsonb" }.
+// Better Auth's admin plugin calls .split(",") on session.user.role, which
+// crashes on JsonValue objects. This plugin normalizes the role to a JSON
+// string before any admin endpoint handler sees it.
+// ---------------------------------------------------------------------------
+const ROLE_WEIGHT_NORMALIZE: Record<string, number> = {
+  superAdmin: 4,
+  admin: 3,
+  operator: 2,
+  user: 1,
+};
+
+function normalizeRole(role: unknown): string {
+  if (!role) return 'user';
+
+  const pickHighest = (arr: string[]): string => {
+    let best = arr[0] ?? 'user';
+    let bestWeight = ROLE_WEIGHT_NORMALIZE[best] ?? 0;
+    for (const r of arr) {
+      const w = ROLE_WEIGHT_NORMALIZE[r] ?? 0;
+      if (w > bestWeight) {
+        bestWeight = w;
+        best = r;
+      }
+    }
+    return best;
+  };
+
+  if (typeof role === 'string') {
+    const trimmed = role.trim();
+    if (trimmed.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return pickHighest(parsed.map(String));
+        }
+      } catch {}
+    }
+    return role || 'user';
+  }
+
+  if (typeof role === 'object' && role !== null && !Array.isArray(role)) {
+    const obj = role as Record<string, unknown>;
+    if ('$value' in obj && Array.isArray(obj.$value) && obj.$value.length > 0) {
+      return pickHighest((obj.$value as unknown[]).map(String));
+    }
+  }
+
+  if (Array.isArray(role) && role.length > 0) {
+    return pickHighest(role.map(String));
+  }
+
+  return 'user';
+}
+
+const jsonRoleNormalizationPlugin = (): BetterAuthPlugin => ({
+  id: 'json-role-normalization',
+  hooks: {
+    before: [
+      {
+        matcher: (ctx) => Boolean(ctx.path),
+        handler: createAuthMiddleware(async (ctx) => {
+          const session = await getSessionFromCtx(ctx);
+          if (!session?.user?.role) return;
+          const raw = session.user.role as unknown;
+          const normalized = normalizeRole(raw);
+          if (normalized !== raw) {
+            (session.user as Record<string, unknown>).role = normalized;
+          }
+        }),
+      },
+    ],
+  },
+});
 // ---------------------------------------------------------------------------
 function getEnv(name: string, { required = true } = {}): string | undefined {
   const value = process.env[name]?.trim();
@@ -590,6 +646,18 @@ export const auth = betterAuth({
   databaseHooks: {
     user: {
       create: {
+        before: async (userData, _ctx) => {
+          const data = userData as Record<string, unknown>;
+          if (data.role !== undefined) {
+            const role = data.role;
+            if (Array.isArray(role)) {
+              data.role = JSON.stringify(role) as unknown;
+            }
+          }
+          return {
+            data: data as unknown as Parameters<typeof createAuthMiddleware>[0],
+          };
+        },
         after: async (user, ctx) => {
           const u = user as unknown as UserData;
           if (!u?.id) return;
@@ -631,19 +699,26 @@ export const auth = betterAuth({
       },
 
       update: {
-        // Snapshot the current user before the update so the `after` hook can
-        // see what actually changed. Guards against: no id in payload (admin
-        // plugin partial updates), stale entries (TTL above).
+        // Normalize role to JSON string for the Json column.
+        // Handles both single string and array from admin plugin.
         before: async (userData, _ctx) => {
+          const data = userData as Record<string, unknown>;
+          if (data.role !== undefined) {
+            const role = data.role;
+            if (Array.isArray(role)) {
+              data.role = JSON.stringify(role) as unknown;
+            }
+          }
+
           const userId = (userData as unknown as UserData).id;
-          if (!userId) return { data: userData };
+          if (!userId) return { data };
 
           const oldUser = await db.user
             .findUnique({ where: { id: userId } })
             .catch(() => null);
           if (oldUser) await storePendingUser(userId, oldUser as UserData);
 
-          return { data: userData };
+          return { data };
         },
 
         after: async (user) => {
@@ -818,7 +893,8 @@ export const auth = betterAuth({
     requireEmailVerification: canSendEmail,
     customSyntheticUser: ({ coreFields, additionalFields, id }) => ({
       ...coreFields,
-      role: 'user',
+      // Admin plugin fields — role is stored as a JSON array in the Json column
+      role: '["user"]',
       banned: false,
       banReason: null,
       banExpires: null,
@@ -1037,6 +1113,8 @@ export const auth = betterAuth({
         : 60 * 60 * 24 * 30,
     }),
 
+    jsonRoleNormalizationPlugin(),
+
     admin({
       ac,
       roles: {
@@ -1059,7 +1137,7 @@ export const auth = betterAuth({
         expirationTime: '30m',
         definePayload: ({ user }) => ({
           email: user.email,
-          role: user.role,
+          role: parseRoles(user.role as string | string[] | null | undefined),
         }),
         issuer: baseURL,
         audience: baseURL,
