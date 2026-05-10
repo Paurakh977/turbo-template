@@ -1,6 +1,7 @@
 import { headers } from 'next/headers';
 import { auth } from '@repo/auth';
 import { redirect } from 'next/navigation';
+import { getPrimaryRole } from '@repo/auth/roles';
 import { SettingsClient } from './_components/SettingsClient';
 
 export const dynamic = 'force-dynamic';
@@ -11,22 +12,15 @@ export default async function SettingsPage() {
   if (!session) redirect('/auth/sign-in');
 
   const roleRaw = (session.user as { role?: string }).role ?? 'user';
-  const roleTokens = roleRaw
-    .split(',')
-    .map((r) => r.trim())
-    .filter(Boolean);
-  const role = roleTokens.includes('superAdmin')
-    ? 'superAdmin'
-    : roleTokens.includes('admin')
-      ? 'admin'
-      : roleTokens.includes('operator')
-        ? 'operator'
-        : 'user';
+  const role = getPrimaryRole(roleRaw);
 
   const [canManageProfile, canManageTheme, canManageLabs, canManageDanger] =
     await Promise.all([
       auth.api.userHasPermission({
-        body: { userId: session.user.id, permissions: { settings: ['profile'] } },
+        body: {
+          userId: session.user.id,
+          permissions: { settings: ['profile'] },
+        },
       }),
       auth.api.userHasPermission({
         body: {
@@ -41,7 +35,10 @@ export default async function SettingsPage() {
         },
       }),
       auth.api.userHasPermission({
-        body: { userId: session.user.id, permissions: { settings: ['danger'] } },
+        body: {
+          userId: session.user.id,
+          permissions: { settings: ['danger'] },
+        },
       }),
     ]);
 
@@ -65,11 +62,11 @@ export default async function SettingsPage() {
 
         <SettingsClient
           user={{
-            id:            session.user.id,
-            name:          session.user.name,
-            email:         session.user.email,
+            id: session.user.id,
+            name: session.user.name,
+            email: session.user.email,
             emailVerified: session.user.emailVerified,
-            image:         session.user.image ?? null,
+            image: session.user.image ?? null,
             role,
           }}
           perms={{

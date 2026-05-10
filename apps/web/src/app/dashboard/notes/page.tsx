@@ -1,5 +1,5 @@
 import { headers } from 'next/headers';
-import { auth } from '@repo/auth';
+import { auth, hasAdminRole } from '@repo/auth';
 import { db } from '@repo/database';
 import { redirect } from 'next/navigation';
 import { NotesClient } from './_components/NotesClient';
@@ -12,7 +12,7 @@ export default async function NotesPage() {
   if (!session) redirect('/auth/sign-in');
 
   // Resolve permissions server-side using Better Auth
-  const [canCreate, canUpdate, canDelete] = await Promise.all([
+  const [canCreate, canUpdate, canDelete, canListAll] = await Promise.all([
     auth.api.userHasPermission({
       body: { userId: session.user.id, permissions: { notes: ['create'] } },
     }),
@@ -22,16 +22,23 @@ export default async function NotesPage() {
     auth.api.userHasPermission({
       body: { userId: session.user.id, permissions: { notes: ['delete'] } },
     }),
+    auth.api.userHasPermission({
+      body: { userId: session.user.id, permissions: { notes: ['list'] } },
+    }),
   ]);
 
   const perms = {
     canCreate: canCreate?.success === true,
     canUpdate: canUpdate?.success === true,
     canDelete: canDelete?.success === true,
+    canListAll: canListAll?.success === true,
   };
 
-  // Read notes directly from DB (Server Component — no route handler needed)
+  const roleRaw = (session.user as { role?: string }).role ?? 'user';
+  const isAdmin = hasAdminRole(roleRaw);
+
   const notes = await db.note.findMany({
+    where: perms.canListAll ? undefined : { authorId: session.user.id },
     orderBy: { createdAt: 'desc' },
     include: {
       author: { select: { id: true, name: true } },
@@ -64,6 +71,7 @@ export default async function NotesPage() {
           notes={notes}
           currentUserId={session.user.id}
           perms={perms}
+          isAdmin={isAdmin}
         />
       </div>
     </div>

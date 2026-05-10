@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { authClient } from '../../lib/auth-client';
+import { getPrimaryRole } from '@repo/auth/roles';
 import QRCode from 'react-qr-code';
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -74,30 +75,21 @@ export default function DashboardPage() {
 
   if (!session) return null;
 
-  // Role extraction for display
+  // Role extraction for display — use getPrimaryRole from @repo/auth/roles
+  // handles both old comma-string format and new JSON array format
   const roleRaw = (session.user as any).role ?? 'user';
-  const roleTokens = String(roleRaw)
-    .split(',')
-    .map((r) => r.trim())
-    .filter(Boolean);
-  const role = roleTokens.includes('superAdmin')
-    ? 'superAdmin'
-    : roleTokens.includes('admin')
-      ? 'admin'
-      : roleTokens.includes('operator')
-        ? 'operator'
-        : 'user';
+  const role = getPrimaryRole(roleRaw);
 
   // Admin check for UI - using Better Auth's checkRolePermission for proper AC system
   const isAdmin =
     authClient.admin.checkRolePermission({
-      permissions: { user: ['list'] },
-      role,
+      permissions: { user: ['ban'] },
+      role: role as never,
     }) ?? false;
   const isOperator =
     authClient.admin.checkRolePermission({
       permissions: { notes: ['create'] },
-      role,
+      role: role as never,
     }) ?? false;
 
   const handleSignOut = async () => {

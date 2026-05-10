@@ -3,7 +3,6 @@
 import { useRef, useState, useTransition } from 'react';
 import {
   updateDisplayNameAction,
-
   runLabsSettingAction,
   toggleThemePreferenceAction,
   deleteAccountAction,
@@ -27,27 +26,16 @@ type SettingsPerms = {
 
 const ROLE_COLOR: Record<string, string> = {
   superAdmin: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
-  admin:      'bg-blue-500/10   text-blue-400   border-blue-500/20',
-  operator:   'bg-amber-500/10  text-amber-400  border-amber-500/20',
-  user:       'bg-muted text-muted-foreground   border-border/50',
+  admin: 'bg-blue-500/10   text-blue-400   border-blue-500/20',
+  operator: 'bg-amber-500/10  text-amber-400  border-amber-500/20',
+  user: 'bg-muted text-muted-foreground   border-border/50',
 };
 
-function parseRoles(rawRole: string): string[] {
-  return rawRole
-    .split(',')
-    .map((r) => r.trim())
-    .filter(Boolean);
-}
-
-function getPrimaryRole(rawRole: string): string {
-  const tokens = parseRoles(rawRole);
-  if (tokens.includes('superAdmin')) return 'superAdmin';
-  if (tokens.includes('admin')) return 'admin';
-  if (tokens.includes('operator')) return 'operator';
-  return 'user';
-}
-
-function Section({ title, description, children }: {
+function Section({
+  title,
+  description,
+  children,
+}: {
   title: string;
   description?: string;
   children: React.ReactNode;
@@ -57,7 +45,9 @@ function Section({ title, description, children }: {
       <div className="border-b border-border/30 pb-3">
         <h2 className="text-[15px] font-semibold">{title}</h2>
         {description && (
-          <p className="text-[13px] text-muted-foreground mt-0.5">{description}</p>
+          <p className="text-[13px] text-muted-foreground mt-0.5">
+            {description}
+          </p>
         )}
       </div>
       {children}
@@ -65,7 +55,11 @@ function Section({ title, description, children }: {
   );
 }
 
-function FieldRow({ label, value, action }: {
+function FieldRow({
+  label,
+  value,
+  action,
+}: {
   label: string;
   value: React.ReactNode;
   action?: React.ReactNode;
@@ -74,11 +68,11 @@ function FieldRow({ label, value, action }: {
     <div className="flex items-center justify-between gap-4 py-1">
       <div className="min-w-0 flex-1">
         <p className="text-[13px] font-medium text-foreground">{label}</p>
-        <div className="text-[13px] text-muted-foreground truncate">{value}</div>
+        <div className="text-[13px] text-muted-foreground truncate">
+          {value}
+        </div>
       </div>
-      <div className="shrink-0">
-        {action}
-      </div>
+      <div className="shrink-0">{action}</div>
     </div>
   );
 }
@@ -102,7 +96,10 @@ function ProfileSection({
     fd.append('name', nameRef.current?.value ?? user.name);
     start(async () => {
       const res = await updateDisplayNameAction(fd);
-      if (res?.error) { setMsg(res.error); return; }
+      if (res?.error) {
+        setMsg(res.error);
+        return;
+      }
       setEditing(false);
       setMsg('Name updated!');
       setTimeout(() => setMsg(''), 3000);
@@ -114,38 +111,70 @@ function ProfileSection({
       <div className="flex items-center gap-4">
         <div className="w-14 h-14 rounded-full overflow-hidden border border-border/40 bg-secondary flex items-center justify-center text-xl font-bold text-foreground/50 shrink-0">
           {user.image ? (
-            <img src={user.image} alt={user.name} className="w-full h-full object-cover" />
+            <img
+              src={user.image}
+              alt={user.name}
+              className="w-full h-full object-cover"
+            />
           ) : (
-            <span>{(user.name || user.email).charAt(0).toUpperCase() || '?'}</span>
+            <span>
+              {(user.name || user.email).charAt(0).toUpperCase() || '?'}
+            </span>
           )}
         </div>
         <div>
           <p className="font-medium">{user.name}</p>
-          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border uppercase tracking-wide ${ROLE_COLOR[getPrimaryRole(user.role)] ?? ROLE_COLOR.user}`}>
-            {getPrimaryRole(user.role)}
+          <span
+            className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border uppercase tracking-wide ${ROLE_COLOR[user.role as keyof typeof ROLE_COLOR] ?? ROLE_COLOR.user}`}
+          >
+            {user.role}
           </span>
         </div>
       </div>
       <div className="space-y-4 mt-4">
         <FieldRow
           label="Display Name"
-          value={editing ? (
-            <input
-              ref={nameRef}
-              defaultValue={user.name}
-              className="mt-1 px-3 py-1.5 bg-background border border-border/60 rounded-lg text-sm outline-none focus:border-primary/50 w-full"
-            />
-          ) : user.name}
-          action={canManageProfile && editing ? (
-            <div className="flex gap-2">
-              <button onClick={handleSave} disabled={isPending} className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg">Save</button>
-              <button onClick={() => setEditing(false)} className="text-xs px-3 py-1.5 bg-secondary rounded-lg">Cancel</button>
-            </div>
-          ) : canManageProfile ? (
-            <button onClick={() => setEditing(true)} className="text-xs px-3 py-1.5 bg-muted border border-border/50 rounded-lg">Edit</button>
-          ) : (
-            <span className="text-xs text-muted-foreground/70">View only</span>
-          )}
+          value={
+            editing ? (
+              <input
+                ref={nameRef}
+                defaultValue={user.name}
+                className="mt-1 px-3 py-1.5 bg-background border border-border/60 rounded-lg text-sm outline-none focus:border-primary/50 w-full"
+              />
+            ) : (
+              user.name
+            )
+          }
+          action={
+            canManageProfile && editing ? (
+              <div className="flex gap-2">
+                <button
+                  onClick={handleSave}
+                  disabled={isPending}
+                  className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg"
+                >
+                  Save
+                </button>
+                <button
+                  onClick={() => setEditing(false)}
+                  className="text-xs px-3 py-1.5 bg-secondary rounded-lg"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : canManageProfile ? (
+              <button
+                onClick={() => setEditing(true)}
+                className="text-xs px-3 py-1.5 bg-muted border border-border/50 rounded-lg"
+              >
+                Edit
+              </button>
+            ) : (
+              <span className="text-xs text-muted-foreground/70">
+                View only
+              </span>
+            )
+          }
         />
         <FieldRow label="Email" value={user.email} />
       </div>
@@ -159,9 +188,10 @@ function DangerSection({ canManageDanger }: { canManageDanger: boolean }) {
 
   const handleDelete = () => {
     if (!canManageDanger) return;
-    const password = prompt('Confirm with your password to delete this account:')?.trim();
+    const password = prompt(
+      'Confirm with your password to delete this account:',
+    )?.trim();
     if (!password) return;
-
     start(async () => {
       const fd = new FormData();
       fd.append('password', password);
@@ -214,7 +244,11 @@ function ThemeSection({ canManageTheme }: { canManageTheme: boolean }) {
     >
       <FieldRow
         label="Dark / Light Theme"
-        value={canManageTheme ? 'Allowed for your account' : 'Restricted for your account'}
+        value={
+          canManageTheme
+            ? 'Allowed for your account'
+            : 'Restricted for your account'
+        }
         action={
           <button
             onClick={handleToggleTheme}
@@ -227,11 +261,7 @@ function ThemeSection({ canManageTheme }: { canManageTheme: boolean }) {
       />
       {msg && (
         <p
-          className={`text-xs ${
-            msg.toLowerCase().includes('permission')
-              ? 'text-red-400'
-              : 'text-green-400'
-          }`}
+          className={`text-xs ${msg.toLowerCase().includes('permission') ? 'text-red-400' : 'text-green-400'}`}
         >
           {msg}
         </p>
@@ -259,7 +289,11 @@ function LabsSection({ canManageLabs }: { canManageLabs: boolean }) {
     >
       <FieldRow
         label="Run Labs Toggle"
-        value={canManageLabs ? 'Allowed for your account' : 'Restricted for your account'}
+        value={
+          canManageLabs
+            ? 'Allowed for your account'
+            : 'Restricted for your account'
+        }
         action={
           <button
             onClick={handleLabsAction}
@@ -272,11 +306,7 @@ function LabsSection({ canManageLabs }: { canManageLabs: boolean }) {
       />
       {msg && (
         <p
-          className={`text-xs ${
-            msg.toLowerCase().includes('permission')
-              ? 'text-red-400'
-              : 'text-green-400'
-          }`}
+          className={`text-xs ${msg.toLowerCase().includes('permission') ? 'text-red-400' : 'text-green-400'}`}
         >
           {msg}
         </p>

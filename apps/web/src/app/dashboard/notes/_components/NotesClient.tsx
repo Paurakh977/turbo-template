@@ -18,54 +18,60 @@ type Note = {
   createdAt: Date;
   updatedAt: Date;
 };
-type Perms = { canCreate: boolean; canUpdate: boolean; canDelete: boolean };
+type Perms = {
+  canCreate: boolean;
+  canUpdate: boolean;
+  canDelete: boolean;
+  canListAll: boolean;
+};
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 function timeAgo(date: Date) {
   const diff = Date.now() - new Date(date).getTime();
   const m = Math.floor(diff / 60000);
-  if (m < 1)  return 'just now';
+  if (m < 1) return 'just now';
   if (m < 60) return `${m}m ago`;
   const h = Math.floor(m / 60);
   if (h < 24) return `${h}h ago`;
   return new Date(date).toLocaleDateString();
 }
 
-// ---------------------------------------------------------------------------
-// NoteCard
-// ---------------------------------------------------------------------------
+type NoteCardProps = {
+  note: Note;
+  currentUserId: string;
+  perms: Perms;
+  isAdmin: boolean;
+  onDeleted: (id: string) => void;
+};
+
 function NoteCard({
   note,
   currentUserId,
   perms,
+  isAdmin,
   onDeleted,
-}: {
-  note: Note;
-  currentUserId: string;
-  perms: Perms;
-  onDeleted: (id: string) => void;
-}) {
-  const [editing,    setEditing]    = useState(false);
-  const [deleting,   setDeleting]   = useState(false);
-  const [editError,  setEditError]  = useState('');
-  const [isPending,  startTransition] = useTransition();
-  const titleRef   = useRef<HTMLInputElement>(null);
+}: NoteCardProps) {
+  const [editing, setEditing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [editError, setEditError] = useState('');
+  const [isPending, startTransition] = useTransition();
+  const titleRef = useRef<HTMLInputElement>(null);
   const contentRef = useRef<HTMLTextAreaElement>(null);
 
-  const isAuthor   = note.authorId === currentUserId;
-  const canEdit    = perms.canUpdate && isAuthor;  // operators: own only; admins: any (handled server-side)
-  const showDelete = perms.canDelete;               // admin+ only
+  const isAuthor = note.authorId === currentUserId;
+  const canEdit = perms.canUpdate && (isAuthor || isAdmin);
+  const showDelete = perms.canDelete;
 
   const handleUpdate = () => {
     setEditError('');
     const fd = new FormData();
-    fd.append('title',   titleRef.current?.value   ?? note.title);
+    fd.append('title', titleRef.current?.value ?? note.title);
     fd.append('content', contentRef.current?.value ?? note.content);
     startTransition(async () => {
       const res = await updateNoteAction(note.id, fd);
-      if (res?.error) { setEditError(res.error); return; }
+      if (res?.error) {
+        setEditError(res.error);
+        return;
+      }
       setEditing(false);
     });
   };
@@ -75,7 +81,11 @@ function NoteCard({
     setDeleting(true);
     startTransition(async () => {
       const res = await deleteNoteAction(note.id);
-      if (res?.error) { alert(res.error); setDeleting(false); return; }
+      if (res?.error) {
+        alert(res.error);
+        setDeleting(false);
+        return;
+      }
       onDeleted(note.id);
     });
   };
@@ -115,7 +125,10 @@ function NoteCard({
               {isPending ? 'Saving…' : 'Save'}
             </button>
             <button
-              onClick={() => { setEditing(false); setEditError(''); }}
+              onClick={() => {
+                setEditing(false);
+                setEditError('');
+              }}
               className="px-3 py-1.5 bg-secondary rounded-lg text-xs hover:bg-secondary/80"
             >
               Cancel
@@ -125,7 +138,9 @@ function NoteCard({
       ) : (
         <>
           <div className="flex items-start justify-between gap-3 mb-2">
-            <h3 className="font-semibold text-[15px] leading-snug">{note.title}</h3>
+            <h3 className="font-semibold text-[15px] leading-snug">
+              {note.title}
+            </h3>
             <div className="flex items-center gap-1.5 shrink-0">
               {canEdit && (
                 <button
@@ -154,7 +169,9 @@ function NoteCard({
               by <span className="text-foreground/70">{note.author.name}</span>
             </span>
             <span className="text-muted-foreground/30">·</span>
-            <span className="text-[11px] text-muted-foreground/70">{timeAgo(note.createdAt)}</span>
+            <span className="text-[11px] text-muted-foreground/70">
+              {timeAgo(note.createdAt)}
+            </span>
           </div>
         </>
       )}
@@ -166,9 +183,9 @@ function NoteCard({
 // CreateNoteForm
 // ---------------------------------------------------------------------------
 function CreateNoteForm({ onCreated }: { onCreated: () => void }) {
-  const [open,    setOpen]    = useState(false);
-  const [error,   setError]   = useState('');
-  const [isPending, start]    = useTransition();
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState('');
+  const [isPending, start] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -177,7 +194,10 @@ function CreateNoteForm({ onCreated }: { onCreated: () => void }) {
     const fd = new FormData(formRef.current!);
     start(async () => {
       const res = await createNoteAction(fd);
-      if (res?.error) { setError(res.error); return; }
+      if (res?.error) {
+        setError(res.error);
+        return;
+      }
       formRef.current?.reset();
       setOpen(false);
       onCreated();
@@ -191,8 +211,16 @@ function CreateNoteForm({ onCreated }: { onCreated: () => void }) {
           onClick={() => setOpen(true)}
           className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-xl text-sm font-semibold hover:bg-primary/90 transition-colors shadow-sm"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+          >
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
           </svg>
           New Note
         </button>
@@ -231,7 +259,10 @@ function CreateNoteForm({ onCreated }: { onCreated: () => void }) {
             </button>
             <button
               type="button"
-              onClick={() => { setOpen(false); setError(''); }}
+              onClick={() => {
+                setOpen(false);
+                setError('');
+              }}
               className="px-4 py-2 bg-secondary rounded-xl text-xs hover:bg-secondary/80 transition-colors"
             >
               Cancel
@@ -250,17 +281,42 @@ export function NotesClient({
   notes: initialNotes,
   currentUserId,
   perms,
+  isAdmin,
 }: {
   notes: Note[];
   currentUserId: string;
   perms: Perms;
+  isAdmin: boolean;
 }) {
   const [notes, setNotes] = useState(initialNotes);
 
-  const handleDeleted = (id: string) => setNotes(prev => prev.filter(n => n.id !== id));
+  const handleDeleted = (id: string) =>
+    setNotes((prev) => prev.filter((n) => n.id !== id));
 
   return (
     <div className="space-y-4">
+      {/* View indicator - shows role-based view */}
+      {perms.canDelete && (
+        <div className="text-xs text-purple-400 bg-purple-500/10 px-3 py-1.5 rounded-lg border border-purple-500/20">
+          Viewing all notes (superAdmin - can delete)
+        </div>
+      )}
+      {perms.canListAll && !perms.canDelete && (
+        <div className="text-xs text-blue-400 bg-blue-500/10 px-3 py-1.5 rounded-lg border border-blue-500/20">
+          Viewing all notes (admin/operator)
+        </div>
+      )}
+      {perms.canCreate && !perms.canListAll && (
+        <div className="text-xs text-amber-400 bg-amber-500/10 px-3 py-1.5 rounded-lg border border-amber-500/20">
+          Viewing your notes only (operator)
+        </div>
+      )}
+      {!perms.canCreate && !perms.canListAll && (
+        <div className="text-xs text-muted-foreground/60 bg-muted/30 px-3 py-1.5 rounded-lg">
+          Viewing your notes only (user)
+        </div>
+      )}
+
       {/* Create button — only shown when permitted */}
       {perms.canCreate && (
         <CreateNoteForm onCreated={() => window.location.reload()} />
@@ -277,16 +333,19 @@ export function NotesClient({
             <div className="text-4xl mb-3">📝</div>
             <p className="text-sm">No notes yet.</p>
             {perms.canCreate && (
-              <p className="text-xs mt-1 text-muted-foreground/60">Click "New Note" to get started.</p>
+              <p className="text-xs mt-1 text-muted-foreground/60">
+                Click "New Note" to get started.
+              </p>
             )}
           </motion.div>
         ) : (
-          notes.map(note => (
+          notes.map((note) => (
             <NoteCard
               key={note.id}
               note={note}
               currentUserId={currentUserId}
               perms={perms}
+              isAdmin={isAdmin}
               onDeleted={handleDeleted}
             />
           ))
