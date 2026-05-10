@@ -1,6 +1,7 @@
 import { headers } from 'next/headers';
 import { auth } from '@repo/auth';
 import { requireAdmin } from '../../lib/require-admin';
+import { getPrimaryRole } from '@repo/auth/roles';
 import { AdminUserTable } from './_components/AdminUserTable';
 
 export const dynamic = 'force-dynamic';
@@ -18,17 +19,7 @@ export default async function AdminPage() {
   });
 
   const actorRoleRaw = (session.user as { role?: string }).role ?? 'user';
-  const actorRoleTokens = actorRoleRaw
-    .split(',')
-    .map((r) => r.trim())
-    .filter(Boolean);
-  const actorRole = actorRoleTokens.includes('superAdmin')
-    ? 'superAdmin'
-    : actorRoleTokens.includes('admin')
-      ? 'admin'
-      : actorRoleTokens.includes('operator')
-        ? 'operator'
-        : 'user';
+  const actorRole = getPrimaryRole(actorRoleRaw);
 
   return (
     <div>

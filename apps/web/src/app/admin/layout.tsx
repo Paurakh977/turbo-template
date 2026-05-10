@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { requireAdmin } from '../../lib/require-admin';
+import { getPrimaryRole } from '@repo/auth/roles';
 
 export default async function AdminLayout({
   children,
@@ -7,12 +8,8 @@ export default async function AdminLayout({
   children: React.ReactNode;
 }) {
   const session = await requireAdmin();
-  const roleRaw = (session.user as { role?: string }).role ?? 'admin';
-  const roleTokens = roleRaw
-    .split(',')
-    .map((r) => r.trim())
-    .filter(Boolean);
-  const role = roleTokens.includes('superAdmin') ? 'superAdmin' : 'admin';
+  const roleRaw = (session.user as { role?: string }).role ?? 'user';
+  const role = getPrimaryRole(roleRaw);
 
   return (
     <div className="min-h-screen bg-background">
@@ -20,7 +17,10 @@ export default async function AdminLayout({
         <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between gap-4">
           {/* Left — branding + role badge */}
           <div className="flex items-center gap-3">
-            <Link href="/admin" className="flex items-center gap-2 no-underline">
+            <Link
+              href="/admin"
+              className="flex items-center gap-2 no-underline"
+            >
               <span className="text-xs font-semibold uppercase tracking-widest text-primary bg-primary/10 px-2 py-1 rounded-md border border-primary/20">
                 {session.isSuperAdmin ? 'Super Admin' : 'Admin'}
               </span>

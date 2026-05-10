@@ -1,6 +1,8 @@
 import { db } from '@repo/database';
 import { requireAdmin } from '../../../lib/require-admin';
 import { formatDistanceToNow } from 'date-fns';
+import { THEME_GRANT_NAME, LABS_GRANT_NAME } from '@repo/auth/permissions';
+import { parseRoles } from '@repo/auth/roles';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,6 +39,11 @@ const ACTION_CONFIG: Record<
     label: 'Impersonated',
     color: 'text-yellow-400',
   },
+  user_impersonation_started: {
+    emoji: '👤',
+    label: 'Started impersonation',
+    color: 'text-yellow-400',
+  },
   user_deleted: { emoji: '🗑️', label: 'Deleted', color: 'text-red-600' },
   email_changed: {
     emoji: '📧',
@@ -47,6 +54,34 @@ const ACTION_CONFIG: Record<
     emoji: '👤',
     label: 'Stopped impersonating',
     color: 'text-yellow-400',
+  },
+  note_created: { emoji: '📝', label: 'Note created', color: 'text-green-400' },
+  note_updated: { emoji: '✏️', label: 'Note updated', color: 'text-blue-400' },
+  note_deleted: { emoji: '🗑️', label: 'Note deleted', color: 'text-red-400' },
+  profile_updated: {
+    emoji: '👤',
+    label: 'Profile updated',
+    color: 'text-blue-400',
+  },
+  password_reset_requested: {
+    emoji: '🔑',
+    label: 'Password reset requested',
+    color: 'text-amber-400',
+  },
+  account_deleted: {
+    emoji: '💀',
+    label: 'Account deleted',
+    color: 'text-red-600',
+  },
+  theme_changed: {
+    emoji: '🎨',
+    label: 'Theme changed',
+    color: 'text-purple-400',
+  },
+  labs_toggled: {
+    emoji: '🧪',
+    label: 'Labs toggled',
+    color: 'text-fuchsia-400',
   },
 };
 
@@ -64,17 +99,15 @@ function formatMetadata(metadata: unknown) {
   if (entries.length === 0) return null;
 
   const formatRoleList = (value: unknown) => {
-    const raw = String(value ?? '');
-    const roles = raw
-      .split(',')
-      .map((r) => r.trim())
-      .filter(Boolean)
+    const tokens = parseRoles(value as string | string[] | null | undefined);
+
+    return tokens
       .map((r) => {
-        if (r === 'settingsThemeGrant') return 'grant:theme';
-        if (r === 'settingsLabsGrant') return 'grant:labs';
+        if (r === THEME_GRANT_NAME) return 'grant:theme';
+        if (r === LABS_GRANT_NAME) return 'grant:labs';
         return r;
-      });
-    return roles.join(' + ');
+      })
+      .join(' + ');
   };
 
   return entries
@@ -106,6 +139,14 @@ const USER_ACTIONS_WITHOUT_ACTOR = new Set([
   'user_signed_out',
   'user_signed_up',
   'email_changed',
+  'note_created',
+  'note_updated',
+  'note_deleted',
+  'profile_updated',
+  'password_reset_requested',
+  'theme_changed',
+  'labs_toggled',
+  'account_deleted',
 ]);
 
 export default async function AuditLogPage() {
