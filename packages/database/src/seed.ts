@@ -27,17 +27,26 @@ async function seed() {
 
   if (existing) {
     // Already exists — just ensure they have the super admin role
-    if (existing.role !== 'superAdmin') {
+    // Handle both old comma-string format and new JSON array format
+    const existingRoles = existing.role;
+    const isAlreadySuperAdmin = Array.isArray(existingRoles)
+      ? existingRoles.includes('superAdmin')
+      : String(existingRoles ?? '')
+          .split(',')
+          .map((r) => r.trim())
+          .includes('superAdmin');
+
+    if (!isAlreadySuperAdmin) {
       await db.user.update({
         where: { email: adminEmail },
-        data: { role: 'superAdmin', emailVerified: true },
+        data: { role: '["superAdmin"]', emailVerified: true },
       });
       console.log(
         `[Seed] Promoted existing user ${adminEmail} to super admin.`,
       );
     } else {
       console.log(
-        `[Seed] Admin ${adminEmail} already exists with role "${existing.role}". Skipping.`,
+        `[Seed] Admin ${adminEmail} already exists with super admin role. Skipping.`,
       );
     }
     return;
@@ -70,10 +79,11 @@ async function seed() {
   const { user } = (await res.json()) as { user: { id: string } };
 
   // Promote to admin and force email verification
+  // Store role as JSON array — the format Better Auth expects for the Json column
   await db.user.update({
     where: { id: user.id },
     data: {
-      role: 'superAdmin',
+      role: '["superAdmin"]',
       emailVerified: true,
     },
   });

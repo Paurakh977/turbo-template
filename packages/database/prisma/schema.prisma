@@ -21,7 +21,7 @@ model User {
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
   twoFactorEnabled Boolean?    @default(false)
-  role             String?
+  role             Json?       @default("[\"user\"]")
   banned           Boolean?    @default(false)
   banReason        String?
   banExpires       DateTime?
@@ -31,6 +31,7 @@ model User {
   twofactors       TwoFactor[]
 
   @@unique([email])
+  @@index([banned])
   @@map("user")
 }
 
@@ -134,10 +135,10 @@ model Jwks {
 model AuditLog {
   id        String   @id @default(cuid())
   userId    String?
-  action    String // e.g. "sign_in", "role_changed", "user_banned"
-  actor     String? // who performed the action (for admin actions)
-  targetId  String? // target user id (for admin actions on another user)
-  metadata  Json? // any extra structured data
+  action    String
+  actor     String?
+  targetId  String?
+  metadata  Json?
   ipAddress String?
   userAgent String?
   createdAt DateTime @default(now())
@@ -145,5 +146,8 @@ model AuditLog {
   @@index([userId])
   @@index([action])
   @@index([createdAt])
+  @@index([actor])
+  @@index([userId, action, createdAt])
+  @@index([action, createdAt])
   @@map("audit_log")
 }
