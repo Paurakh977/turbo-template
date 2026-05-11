@@ -21,7 +21,7 @@ model User {
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
   twoFactorEnabled Boolean?    @default(false)
-  role             Json?       @default("[\"user\"]")
+  role             String      @default("user")
   banned           Boolean?    @default(false)
   banReason        String?
   banExpires       DateTime?

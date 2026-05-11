@@ -1,6 +1,45 @@
 // packages/database/src/seed.ts
 import { PrismaClient } from '@prisma/client';
-import { createHash, randomBytes } from 'crypto';
+
+function parseRoles(role: unknown): string[] {
+  if (!role) return ['user'];
+
+  if (Array.isArray(role)) {
+    const tokens = role.map((value) => String(value).trim()).filter(Boolean);
+    return tokens.length > 0 ? tokens : ['user'];
+  }
+
+  if (typeof role === 'string') {
+    const trimmed = role.trim();
+
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        const tokens = parsed
+          .map((value) => String(value).trim())
+          .filter(Boolean);
+        return tokens.length > 0 ? tokens : ['user'];
+      }
+    } catch {}
+
+    const tokens = trimmed
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
+    return tokens.length > 0 ? tokens : ['user'];
+  }
+
+  return ['user'];
+}
+
+function serializeRoles(roles: string[]): string {
+  const tokens = roles
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .filter((value, index, arr) => arr.indexOf(value) === index);
+
+  return (tokens.length > 0 ? tokens : ['user']).join(',');
+}
 
 const db = new PrismaClient();
 
@@ -26,25 +65,29 @@ async function seed() {
   const existing = await db.user.findUnique({ where: { email: adminEmail } });
 
   if (existing) {
-    // Already exists — just ensure they have the super admin role
-    // Handle both old comma-string format and new JSON array format
-    const existingRoles = existing.role;
-    const isAlreadySuperAdmin = Array.isArray(existingRoles)
-      ? existingRoles.includes('superAdmin')
-      : String(existingRoles ?? '')
-          .split(',')
-          .map((r) => r.trim())
-          .includes('superAdmin');
+    // Already exists — ensure canonical role format and superAdmin assignment
+    const existingRoles = parseRoles(existing.role);
+    const isAlreadySuperAdmin = existingRoles.includes('superAdmin');
 
     if (!isAlreadySuperAdmin) {
       await db.user.update({
         where: { email: adminEmail },
-        data: { role: '["superAdmin"]', emailVerified: true },
+        data: {
+          role: serializeRoles(['superAdmin']),
+          emailVerified: true,
+        },
       });
       console.log(
         `[Seed] Promoted existing user ${adminEmail} to super admin.`,
       );
     } else {
+      const normalizedRole = serializeRoles(existingRoles);
+      if (normalizedRole !== existing.role) {
+        await db.user.update({
+          where: { email: adminEmail },
+          data: { role: normalizedRole },
+        });
+      }
       console.log(
         `[Seed] Admin ${adminEmail} already exists with super admin role. Skipping.`,
       );
@@ -78,12 +121,11 @@ async function seed() {
 
   const { user } = (await res.json()) as { user: { id: string } };
 
-  // Promote to admin and force email verification
-  // Store role as JSON array — the format Better Auth expects for the Json column
+  // Promote to super admin and force email verification
   await db.user.update({
     where: { id: user.id },
     data: {
-      role: '["superAdmin"]',
+      role: serializeRoles(['superAdmin']),
       emailVerified: true,
     },
   });
