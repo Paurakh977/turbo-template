@@ -1,3 +1,5 @@
+export type BaseRole = 'user' | 'operator' | 'admin' | 'superAdmin';
+
 export const ROLE_WEIGHT: Record<string, number> = {
   user: 0,
   operator: 1,
@@ -5,65 +7,82 @@ export const ROLE_WEIGHT: Record<string, number> = {
   superAdmin: 3,
 };
 
-function tryParseJson(value: unknown): unknown | null {
-  if (typeof value === 'string') {
-    try {
-      const parsed = JSON.parse(value);
-      if (Array.isArray(parsed)) return parsed;
-      return null;
-    } catch {
-      return null;
+const BASE_ROLES: BaseRole[] = ['superAdmin', 'admin', 'operator', 'user'];
+const BASE_ROLE_SET = new Set<string>(BASE_ROLES);
+
+function normalizeRoleTokens(tokens: string[]): string[] {
+  const cleaned = tokens
+    .map((role) => role.trim())
+    .filter(Boolean)
+    .filter((role, index, arr) => arr.indexOf(role) === index);
+
+  let baseRole: BaseRole = 'user';
+  let maxWeight = ROLE_WEIGHT.user ?? 0;
+
+  for (const role of cleaned) {
+    if (!BASE_ROLE_SET.has(role)) continue;
+    const weight = ROLE_WEIGHT[role] ?? ROLE_WEIGHT.user ?? 0;
+    if (weight > maxWeight) {
+      maxWeight = weight;
+      baseRole = role as BaseRole;
     }
   }
-  if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+
+  const grants = cleaned.filter((role) => !BASE_ROLE_SET.has(role));
+  return [baseRole, ...grants];
+}
+
+function tryParseJson(value: unknown): unknown[] | null {
+  if (Array.isArray(value)) return value;
+
+  if (typeof value === 'object' && value !== null) {
     const obj = value as Record<string, unknown>;
     if ('$value' in obj && Array.isArray(obj.$value)) {
-      return obj.$value;
+      return obj.$value as unknown[];
     }
-    if (Array.isArray(value)) return value;
+    return null;
   }
-  return null;
+
+  if (typeof value !== 'string') return null;
+
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) return parsed;
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      '$value' in parsed &&
+      Array.isArray((parsed as { $value?: unknown[] }).$value)
+    ) {
+      return (parsed as { $value: unknown[] }).$value;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 export function parseRoles(role: unknown): string[] {
   if (!role) return ['user'];
 
-  const tryParseJson = (value: unknown): unknown | null => {
-    if (typeof value === 'string') {
-      try {
-        const parsed = JSON.parse(value);
-        if (Array.isArray(parsed)) return parsed;
-        return null;
-      } catch {
-        return null;
-      }
-    }
-    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-      const obj = value as Record<string, unknown>;
-      if ('$value' in obj && Array.isArray(obj.$value)) return obj.$value;
-    }
-    if (Array.isArray(value)) return value;
-    return null;
-  };
-
   const jsonArr = tryParseJson(role);
   if (jsonArr !== null) {
-    const cleaned = (jsonArr as unknown[])
-      .map((r) => String(r).trim())
-      .filter(Boolean);
-    return cleaned.length > 0 ? cleaned : ['user'];
+    return normalizeRoleTokens(jsonArr.map((r) => String(r)));
   }
 
-  const roleStr = String(role);
-  const tokens = roleStr
+  const tokens = String(role)
     .split(',')
     .map((r) => r.trim())
     .filter(Boolean);
-  return tokens.length > 0 ? tokens : ['user'];
+
+  return normalizeRoleTokens(tokens);
 }
 
 export function serializeRoles(roles: string[]): string {
-  return JSON.stringify(roles.length > 0 ? roles : ['user']);
+  return parseRoles(roles).join(',');
 }
 
 export function getMaxRoleWeight(role: unknown): number {
@@ -71,7 +90,7 @@ export function getMaxRoleWeight(role: unknown): number {
   return Math.max(...tokens.map((r) => ROLE_WEIGHT[r] ?? 0));
 }
 
-export function getPrimaryRole(role: unknown): string {
+export function getPrimaryRole(role: unknown): BaseRole {
   const tokens = parseRoles(role);
   if (tokens.includes('superAdmin')) return 'superAdmin';
   if (tokens.includes('admin')) return 'admin';
