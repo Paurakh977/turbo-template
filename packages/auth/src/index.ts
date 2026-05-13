@@ -1,6 +1,7 @@
 export { auth, ADMIN_ROLES } from './auth';
 export type { Auth } from './auth';
 export {
+  type BaseRole,
   ROLE_WEIGHT,
   parseRoles,
   serializeRoles,
