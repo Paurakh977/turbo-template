@@ -25,12 +25,7 @@ import type { BetterAuthPlugin } from 'better-auth';
 export const ADMIN_ROLES = ['admin', 'superAdmin'] as const;
 export type AdminRole = (typeof ADMIN_ROLES)[number];
 
-import {
-  ROLE_WEIGHT,
-  parseRoles,
-  serializeRoles,
-  getMaxRoleWeight,
-} from './roles';
+import { parseRoles, serializeRoles, getMaxRoleWeight } from './roles';
 
 /**
  * Server-side hierarchy guard.
@@ -409,16 +404,32 @@ const auditLogPlugin = (): BetterAuthPlugin => ({
       {
         // Intercept impersonation — superAdmins may impersonate admins,
         // but admins cannot impersonate other admins or superAdmins.
+        // Also block nested impersonation (impersonating while already being impersonated).
         matcher: (ctx) => ctx.path === '/admin/impersonate-user',
         handler: createAuthMiddleware(async (ctx) => {
           const body = ctx.body as { userId?: string } | undefined;
           const targetUserId = body?.userId;
           if (!targetUserId) return;
 
+          // Get session and check if already being impersonated
+          const session = await getSessionFromCtx(ctx);
+          const currentImpersonatedBy = (
+            session as unknown as {
+              session?: { impersonatedBy?: string | null };
+            }
+          )?.session?.impersonatedBy;
+
+          // 🔒 BLOCK NESTED IMPERSONATION - cannot impersonate while already being impersonated
+          if (currentImpersonatedBy) {
+            throw new APIError('FORBIDDEN', {
+              message:
+                'Cannot start impersonation while being impersonated. Stop current impersonation first.',
+            });
+          }
+
           // 🔒 HIERARCHY GUARD
           await enforceRoleHierarchy(ctx, targetUserId);
 
-          const session = await getSessionFromCtx(ctx);
           const actorId = session?.user?.id;
           const ipAddress = ctx.headers?.get('x-forwarded-for') ?? undefined;
           const userAgent = ctx.headers?.get('user-agent') ?? undefined;
@@ -447,84 +458,6 @@ const auditLogPlugin = (): BetterAuthPlugin => ({
   },
 });
 
-// ---------------------------------------------------------------------------
-// Json role normalization plugin
-//
-// Prisma 6 returns Json fields as { "$value": [...], "$type": "jsonb" }.
-// Better Auth's admin plugin calls .split(",") on session.user.role, which
-// crashes on JsonValue objects. This plugin normalizes the role to a JSON
-// string before any admin endpoint handler sees it.
-// ---------------------------------------------------------------------------
-const ROLE_WEIGHT_NORMALIZE: Record<string, number> = {
-  superAdmin: 4,
-  admin: 3,
-  operator: 2,
-  user: 1,
-};
-
-function normalizeRole(role: unknown): string {
-  if (!role) return 'user';
-
-  const pickHighest = (arr: string[]): string => {
-    let best = arr[0] ?? 'user';
-    let bestWeight = ROLE_WEIGHT_NORMALIZE[best] ?? 0;
-    for (const r of arr) {
-      const w = ROLE_WEIGHT_NORMALIZE[r] ?? 0;
-      if (w > bestWeight) {
-        bestWeight = w;
-        best = r;
-      }
-    }
-    return best;
-  };
-
-  if (typeof role === 'string') {
-    const trimmed = role.trim();
-    if (trimmed.startsWith('[')) {
-      try {
-        const parsed = JSON.parse(trimmed);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return pickHighest(parsed.map(String));
-        }
-      } catch {}
-    }
-    return role || 'user';
-  }
-
-  if (typeof role === 'object' && role !== null && !Array.isArray(role)) {
-    const obj = role as Record<string, unknown>;
-    if ('$value' in obj && Array.isArray(obj.$value) && obj.$value.length > 0) {
-      return pickHighest((obj.$value as unknown[]).map(String));
-    }
-  }
-
-  if (Array.isArray(role) && role.length > 0) {
-    return pickHighest(role.map(String));
-  }
-
-  return 'user';
-}
-
-const jsonRoleNormalizationPlugin = (): BetterAuthPlugin => ({
-  id: 'json-role-normalization',
-  hooks: {
-    before: [
-      {
-        matcher: (ctx) => Boolean(ctx.path),
-        handler: createAuthMiddleware(async (ctx) => {
-          const session = await getSessionFromCtx(ctx);
-          if (!session?.user?.role) return;
-          const raw = session.user.role as unknown;
-          const normalized = normalizeRole(raw);
-          if (normalized !== raw) {
-            (session.user as Record<string, unknown>).role = normalized;
-          }
-        }),
-      },
-    ],
-  },
-});
-// ---------------------------------------------------------------------------
 function getEnv(name: string, { required = true } = {}): string | undefined {
   const value = process.env[name]?.trim();
   if (value) return value;
@@ -649,10 +582,7 @@ export const auth = betterAuth({
         before: async (userData, _ctx) => {
           const data = userData as Record<string, unknown>;
           if (data.role !== undefined) {
-            const role = data.role;
-            if (Array.isArray(role)) {
-              data.role = JSON.stringify(role) as unknown;
-            }
+            data.role = serializeRoles(parseRoles(data.role));
           }
           return {
             data: data as unknown as Parameters<typeof createAuthMiddleware>[0],
@@ -699,15 +629,11 @@ export const auth = betterAuth({
       },
 
       update: {
-        // Normalize role to JSON string for the Json column.
-        // Handles both single string and array from admin plugin.
+        // Canonicalize role to Better Auth's comma-separated storage format.
         before: async (userData, _ctx) => {
           const data = userData as Record<string, unknown>;
           if (data.role !== undefined) {
-            const role = data.role;
-            if (Array.isArray(role)) {
-              data.role = JSON.stringify(role) as unknown;
-            }
+            data.role = serializeRoles(parseRoles(data.role));
           }
 
           const userId = (userData as unknown as UserData).id;
@@ -893,8 +819,7 @@ export const auth = betterAuth({
     requireEmailVerification: canSendEmail,
     customSyntheticUser: ({ coreFields, additionalFields, id }) => ({
       ...coreFields,
-      // Admin plugin fields — role is stored as a JSON array in the Json column
-      role: '["user"]',
+      role: 'user',
       banned: false,
       banReason: null,
       banExpires: null,
@@ -1112,8 +1037,6 @@ export const auth = betterAuth({
         ? parseInt(process.env.TRUST_DEVICE_MAX_AGE)
         : 60 * 60 * 24 * 30,
     }),
-
-    jsonRoleNormalizationPlugin(),
 
     admin({
       ac,
