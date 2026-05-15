@@ -3,7 +3,11 @@ import { redirect } from 'next/navigation';
 import { auth, hasSuperAdminRole, hasAdminRole } from '@repo/auth';
 
 export type Session = typeof auth.$Infer.Session;
-export type SessionWithRole = Session & { isSuperAdmin: boolean };
+export type SessionWithRole = Session & {
+  isSuperAdmin: boolean;
+  isImpersonating: boolean;
+  impersonatedBy: string | null;
+};
 
 /**
  * Server-side admin guard.
@@ -13,8 +17,15 @@ export type SessionWithRole = Session & { isSuperAdmin: boolean };
  * for 'admin' or 'superAdmin' tokens. This is Better Auth's documented pattern
  * for role-based guards.
  *
- * Returns the session enriched with `isSuperAdmin` so Admin Panel pages can
- * conditionally show superAdmin-only controls without an extra DB call.
+ * Impersonation handling: When an admin impersonates another user, the session's
+ * user.role reflects the IMPERSONATED user's role (correctly). We allow
+ * impersonated admins to access admin features so they can do what that user
+ * can do (true meaning of impersonation).
+ *
+ * Returns the session enriched with:
+ * - isSuperAdmin: whether user has superAdmin role
+ * - isImpersonating: whether session is being impersonated by another admin
+ * - impersonatedBy: the admin ID who started the impersonation (if any)
  */
 export async function requireAdmin(): Promise<SessionWithRole> {
   const h = await headers();
@@ -22,9 +33,9 @@ export async function requireAdmin(): Promise<SessionWithRole> {
 
   if (!session) redirect('/auth/sign-in');
 
-  const impersonatedBy = (session.user as { impersonatedBy?: string })
-    .impersonatedBy;
-  if (impersonatedBy) redirect('/dashboard');
+  const impersonatedBy =
+    (session as { session?: { impersonatedBy?: string | null } }).session
+      ?.impersonatedBy ?? null;
 
   const roleRaw = (session.user as { role?: string }).role ?? 'user';
 
@@ -35,5 +46,7 @@ export async function requireAdmin(): Promise<SessionWithRole> {
   return {
     ...session,
     isSuperAdmin: hasSuperAdminRole(roleRaw),
+    isImpersonating: impersonatedBy !== null,
+    impersonatedBy,
   };
 }
