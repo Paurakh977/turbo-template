@@ -9,6 +9,14 @@ import { getPrimaryRole } from '@repo/auth/roles';
 import QRCode from 'react-qr-code';
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { ActionDialog } from '../_components/ActionDialog';
+import {
+  ToastRegion,
+  type ToastItem,
+  type ToastKind,
+} from '../_components/ToastRegion';
+
+type Account = { providerId: string };
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -21,24 +29,61 @@ export default function DashboardPage() {
   // 2FA setup state
   const [show2FASetup, setShow2FASetup] = useState(false);
   const [totpURI, setTotpURI] = useState('');
-  const [backupCodes, setBackupCodes] = useState<any>([]);
+  const [backupCodes, setBackupCodes] = useState<string[]>([]);
   const [totpCode, setTotpCode] = useState('');
   const [setupPassword, setSetupPassword] = useState('');
-  const [setupStep, setSetupStep] = useState<'password' | 'qr' | 'done'>(
-    'password',
-  );
+  const [setupStep, setSetupStep] = useState<'password' | 'qr'>('password');
+  const [setupError, setSetupError] = useState('');
+
+  const [showDisable2FA, setShowDisable2FA] = useState(false);
+  const [disablePassword, setDisablePassword] = useState('');
+  const [disableError, setDisableError] = useState('');
+  const [disablePending, setDisablePending] = useState(false);
+
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
 
   // Account listing (used to detect whether a user has a local password/credential)
-  const [userAccounts, setUserAccounts] = useState<any>([]);
+  const [userAccounts, setUserAccounts] = useState<Account[]>([]);
   const [hasFetchedAccounts, setHasFetchedAccounts] = useState(false);
+
+  const pushToast = (kind: ToastKind, message: string) => {
+    const id = Date.now() + Math.floor(Math.random() * 1000);
+    setToasts((prev) => [...prev, { id, kind, message }]);
+  };
+
+  const dismissToast = (id: number) => {
+    setToasts((prev) => prev.filter((toast) => toast.id !== id));
+  };
+
+  useEffect(() => {
+    if (toasts.length === 0) return;
+    const timers = toasts.map((toast) =>
+      window.setTimeout(() => dismissToast(toast.id), 3500),
+    );
+    return () => {
+      for (const timer of timers) window.clearTimeout(timer);
+    };
+  }, [toasts]);
 
   useEffect(() => {
     if (session?.user?.id && !isPending && !hasFetchedAccounts) {
       setHasFetchedAccounts(true);
       authClient
         .listAccounts()
-        .then((response: any) => {
-          setUserAccounts(response.data ?? []);
+        .then((response) => {
+          const data = (
+            response as {
+              data?: Array<{ providerId?: string }> | null;
+            }
+          ).data;
+          const normalized: Account[] = Array.isArray(data)
+            ? data
+                .map((account) => ({
+                  providerId: account.providerId ?? '',
+                }))
+                .filter((account) => account.providerId.length > 0)
+            : [];
+          setUserAccounts(normalized);
         })
         .catch(() => {
           setHasFetchedAccounts(false);
@@ -47,7 +92,7 @@ export default function DashboardPage() {
   }, [session?.user?.id, isPending, hasFetchedAccounts]);
 
   const hasPasswordAccount = userAccounts
-    ? userAccounts.find((acc: any) => acc.providerId === 'credential')
+    ? userAccounts.find((acc) => acc.providerId === 'credential')
     : false;
   const isOAuthOnly = hasFetchedAccounts && !hasPasswordAccount;
 
@@ -99,47 +144,84 @@ export default function DashboardPage() {
   const handleStopImpersonation = async () => {
     const { error } = await authClient.admin.stopImpersonating();
     if (error) {
-      alert('Failed to stop impersonation: ' + error.message);
+      pushToast('error', `Failed to stop impersonation: ${error.message}`);
       return;
     }
-    // Force a hard navigation to refresh session state properly
     window.location.href = '/dashboard';
   };
 
   const isImpersonating = (session as any).session?.impersonatedBy != null;
 
   const handleEnable2FA = async () => {
+    const password = setupPassword.trim();
+    if (!password) {
+      setSetupError('Password is required.');
+      return;
+    }
+
     const { data, error } = await authClient.twoFactor.enable({
-      password: setupPassword,
+      password,
     });
     if (error) {
-      alert(error.message);
+      setSetupError(error.message ?? 'Unable to enable 2FA.');
       return;
     }
     if (data) {
       setTotpURI(data.totpURI);
       setBackupCodes(data.backupCodes);
       setSetupStep('qr');
+      setSetupError('');
     }
   };
 
   const handleVerify2FA = async () => {
+    if (!/^\d{6}$/.test(totpCode.trim())) {
+      setSetupError('Enter a valid 6-digit code.');
+      return;
+    }
+
     const { error } = await authClient.twoFactor.verifyTotp({ code: totpCode });
     if (error) {
-      alert('Invalid code, try again');
+      setSetupError('Invalid code, try again.');
     } else {
-      setSetupStep('done');
       setShow2FASetup(false);
-      alert('2FA enabled successfully!');
+      setSetupStep('password');
+      setSetupPassword('');
+      setTotpCode('');
+      setSetupError('');
+      pushToast('success', '2FA enabled successfully.');
     }
   };
 
+  const close2FASetup = () => {
+    setShow2FASetup(false);
+    setSetupStep('password');
+    setSetupPassword('');
+    setTotpCode('');
+    setSetupError('');
+  };
+
   const handleDisable2FA = async () => {
-    const password = prompt('Enter your password to disable 2FA:');
-    if (!password) return;
+    const password = disablePassword.trim();
+    if (!password) {
+      setDisableError('Password is required.');
+      return;
+    }
+
+    setDisablePending(true);
     const { error } = await authClient.twoFactor.disable({ password });
-    if (error) alert(error.message);
-    else alert('2FA disabled.');
+    if (error) {
+      setDisableError(error.message ?? 'Unable to disable 2FA.');
+      setDisablePending(false);
+      return;
+    }
+
+    setDisablePending(false);
+    setDisablePassword('');
+    setDisableError('');
+    setShowDisable2FA(false);
+    pushToast('success', '2FA disabled.');
+    router.refresh();
   };
 
   const handleSetPassword = async () => {
@@ -149,10 +231,11 @@ export default function DashboardPage() {
       redirectTo: `${window.location.origin}/auth/reset-password`,
     });
     if (error) {
-      alert(error.message ?? 'Failed to send reset email.');
+      pushToast('error', error.message ?? 'Failed to send reset email.');
     } else {
-      alert(
-        `A password setup link has been sent to ${session.user.email}. Check your inbox!`,
+      pushToast(
+        'success',
+        `Password setup link sent to ${session.user.email}.`,
       );
     }
   };
@@ -167,7 +250,7 @@ export default function DashboardPage() {
     visible: {
       opacity: 1,
       y: 0,
-      transition: { duration: 0.4, ease: 'easeOut' },
+      transition: { duration: 0.4 },
     },
   };
 
@@ -222,7 +305,7 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      <main className="flex-1 max-w-[760px] w-full mx-auto px-6 py-12">
+      <main className="flex-1 max-w-[800px] w-full mx-auto px-4 sm:px-6 py-8 sm:py-12">
         <motion.div
           variants={containerVariants}
           initial="hidden"
@@ -241,7 +324,7 @@ export default function DashboardPage() {
           {/* Profile Quick Card */}
           <motion.div
             variants={itemVariants}
-            className="bg-card border border-border/50 rounded-[24px] p-6 flex items-center gap-6 shadow-sm relative overflow-hidden group"
+            className="bg-card border border-border/50 rounded-xl p-6 flex items-center gap-6 shadow-sm relative overflow-hidden group"
           >
             <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
               <svg
@@ -300,7 +383,7 @@ export default function DashboardPage() {
           >
             <Link
               href="/dashboard/notes"
-              className="bg-card border border-border/50 rounded-2xl p-5 hover:border-primary/40 hover:bg-primary/[0.02] transition-all group flex flex-col"
+              className="bg-card border border-border/50 rounded-lg p-5 hover:border-primary/40 hover:bg-primary/[0.02] transition-all group flex flex-col"
             >
               <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
                 <svg
@@ -330,7 +413,7 @@ export default function DashboardPage() {
 
             <Link
               href="/dashboard/settings"
-              className="bg-card border border-border/50 rounded-2xl p-5 hover:border-primary/40 hover:bg-primary/[0.02] transition-all group flex flex-col"
+              className="bg-card border border-border/50 rounded-lg p-5 hover:border-primary/40 hover:bg-primary/[0.02] transition-all group flex flex-col"
             >
               <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-500 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
                 <svg
@@ -357,7 +440,7 @@ export default function DashboardPage() {
           {/* Security Overview & Actions */}
           <motion.div
             variants={itemVariants}
-            className="bg-card border border-border/50 rounded-[24px] p-6 shadow-sm"
+            className="bg-card border border-border/50 rounded-xl p-6 shadow-sm"
           >
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-[15px] font-semibold flex items-center gap-2">
@@ -423,7 +506,11 @@ export default function DashboardPage() {
                   </div>
                   {(session.user as any).twoFactorEnabled ? (
                     <button
-                      onClick={handleDisable2FA}
+                      onClick={() => {
+                        setDisablePassword('');
+                        setDisableError('');
+                        setShowDisable2FA(true);
+                      }}
                       disabled={isOAuthOnly}
                       className="text-xs px-4 py-2 border border-red-500/30 text-red-500 bg-red-500/5 hover:bg-red-500/10 rounded-lg font-medium transition-colors disabled:opacity-50"
                     >
@@ -464,7 +551,7 @@ export default function DashboardPage() {
           {isAdmin && (
             <motion.div
               variants={itemVariants}
-              className="p-6 rounded-[24px] bg-primary/[0.03] border border-primary/20 relative overflow-hidden"
+              className="p-6 rounded-xl bg-primary/[0.03] border border-primary/20 relative overflow-hidden"
             >
               <div className="absolute top-0 right-0 p-4 opacity-5">
                 <svg
@@ -516,10 +603,10 @@ export default function DashboardPage() {
               initial={{ scale: 0.95, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.95, opacity: 0, y: 20 }}
-              className="bg-card border border-border/50 rounded-[24px] p-6 sm:p-8 w-full max-w-[440px] shadow-2xl relative"
+              className="bg-card border border-border/50 rounded-xl p-6 sm:p-8 w-full max-w-[440px] shadow-2xl relative"
             >
               <button
-                onClick={() => setShow2FASetup(false)}
+                onClick={close2FASetup}
                 className="absolute top-5 right-5 text-muted-foreground hover:text-foreground"
               >
                 <svg
@@ -550,9 +637,17 @@ export default function DashboardPage() {
                     type="password"
                     placeholder="Your password"
                     value={setupPassword}
-                    onChange={(e) => setSetupPassword(e.target.value)}
+                    onChange={(e) => {
+                      setSetupPassword(e.target.value);
+                      if (setupError) setSetupError('');
+                    }}
                     className="w-full px-4 py-2.5 bg-background border border-border/60 rounded-xl text-[14px] outline-none focus:border-primary/50"
                   />
+                  {setupError ? (
+                    <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                      {setupError}
+                    </p>
+                  ) : null}
                   <div className="flex gap-3 pt-2">
                     <button
                       onClick={handleEnable2FA}
@@ -561,7 +656,7 @@ export default function DashboardPage() {
                       Continue
                     </button>
                     <button
-                      onClick={() => setShow2FASetup(false)}
+                      onClick={close2FASetup}
                       className="flex-1 py-2.5 bg-secondary text-secondary-foreground rounded-xl text-[13px] font-medium border border-border/40"
                     >
                       Cancel
@@ -575,17 +670,25 @@ export default function DashboardPage() {
                   <p className="text-[13px] text-muted-foreground text-left">
                     Scan this QR code in your authenticator app.
                   </p>
-                  <div className="bg-white p-4 rounded-2xl flex justify-center w-fit mx-auto shadow-sm border border-border/20">
+                  <div className="bg-white p-4 rounded-lg flex justify-center w-fit mx-auto shadow-sm border border-border/20">
                     <QRCode value={totpURI} size={160} />
                   </div>
                   <input
                     type="text"
                     placeholder="000000"
                     value={totpCode}
-                    onChange={(e) => setTotpCode(e.target.value)}
+                    onChange={(e) => {
+                      setTotpCode(e.target.value);
+                      if (setupError) setSetupError('');
+                    }}
                     maxLength={6}
                     className="w-full px-4 py-3 bg-background border border-border/60 rounded-xl text-[18px] outline-none text-center tracking-[0.25em] font-mono"
                   />
+                  {setupError ? (
+                    <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-left text-xs text-red-300">
+                      {setupError}
+                    </p>
+                  ) : null}
 
                   {backupCodes.length > 0 && (
                     <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-3 text-left">
@@ -617,6 +720,38 @@ export default function DashboardPage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <ActionDialog
+        open={showDisable2FA}
+        title="Disable two-factor authentication"
+        description="Enter your password to remove 2FA protection from this account."
+        confirmLabel="Disable 2FA"
+        destructive
+        pending={disablePending}
+        onClose={() => {
+          if (disablePending) return;
+          setShowDisable2FA(false);
+          setDisablePassword('');
+          setDisableError('');
+        }}
+        onConfirm={handleDisable2FA}
+      >
+        <input
+          type="password"
+          value={disablePassword}
+          onChange={(event) => {
+            setDisablePassword(event.target.value);
+            if (disableError) setDisableError('');
+          }}
+          placeholder="Confirm password"
+          className="w-full rounded-lg border border-border/70 bg-background px-3 py-2 text-sm outline-none transition-colors focus:border-primary/50"
+        />
+        {disableError ? (
+          <p className="mt-2 text-xs text-red-300">{disableError}</p>
+        ) : null}
+      </ActionDialog>
+
+      <ToastRegion toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

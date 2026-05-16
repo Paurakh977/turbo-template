@@ -1,12 +1,18 @@
 'use client';
 
-import { useRef, useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   createNoteAction,
   updateNoteAction,
   deleteNoteAction,
 } from '../actions';
+import { ActionDialog } from '../../../_components/ActionDialog';
+import {
+  ToastRegion,
+  type ToastItem,
+  type ToastKind,
+} from '../../../_components/ToastRegion';
 
 type Author = { id: string; name: string };
 type Note = {
@@ -15,8 +21,8 @@ type Note = {
   content: string;
   authorId: string;
   author: Author;
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt: Date | string;
+  updatedAt: Date | string;
 };
 type Perms = {
   canCreate: boolean;
@@ -25,7 +31,11 @@ type Perms = {
   canListAll: boolean;
 };
 
-function timeAgo(date: Date) {
+type ToastApi = {
+  pushToast: (kind: ToastKind, message: string) => void;
+};
+
+function timeAgo(date: Date | string) {
   const diff = Date.now() - new Date(date).getTime();
   const m = Math.floor(diff / 60000);
   if (m < 1) return 'just now';
@@ -41,6 +51,8 @@ type NoteCardProps = {
   perms: Perms;
   isAdmin: boolean;
   onDeleted: (id: string) => void;
+  onUpdated: (id: string, title: string, content: string) => void;
+  toastApi: ToastApi;
 };
 
 function NoteCard({
@@ -49,10 +61,13 @@ function NoteCard({
   perms,
   isAdmin,
   onDeleted,
+  onUpdated,
+  toastApi,
 }: NoteCardProps) {
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [editError, setEditError] = useState('');
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const titleRef = useRef<HTMLInputElement>(null);
   const contentRef = useRef<HTMLTextAreaElement>(null);
@@ -63,47 +78,63 @@ function NoteCard({
 
   const handleUpdate = () => {
     setEditError('');
+    const title = (titleRef.current?.value ?? note.title).trim();
+    const content = (contentRef.current?.value ?? note.content).trim();
+
+    if (!title) {
+      setEditError('Title is required.');
+      return;
+    }
+    if (!content) {
+      setEditError('Content is required.');
+      return;
+    }
+
     const fd = new FormData();
-    fd.append('title', titleRef.current?.value ?? note.title);
-    fd.append('content', contentRef.current?.value ?? note.content);
+    fd.append('title', title);
+    fd.append('content', content);
+
     startTransition(async () => {
       const res = await updateNoteAction(note.id, fd);
       if (res?.error) {
         setEditError(res.error);
+        toastApi.pushToast('error', res.error);
         return;
       }
+      onUpdated(note.id, title, content);
       setEditing(false);
+      toastApi.pushToast('success', 'Note updated.');
     });
   };
 
   const handleDelete = () => {
-    if (!confirm(`Delete "${note.title}"? This cannot be undone.`)) return;
     setDeleting(true);
     startTransition(async () => {
       const res = await deleteNoteAction(note.id);
       if (res?.error) {
-        alert(res.error);
+        toastApi.pushToast('error', res.error);
         setDeleting(false);
         return;
       }
       onDeleted(note.id);
+      toastApi.pushToast('success', 'Note deleted.');
     });
   };
 
   return (
-    <motion.div
+    <motion.article
       layout
-      initial={{ opacity: 0, y: 12 }}
+      initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: deleting ? 0 : 1, y: 0 }}
       exit={{ opacity: 0, y: -8 }}
-      className="bg-card border border-border/50 rounded-2xl p-5 shadow-sm"
+      className="rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm sm:p-5"
     >
       {editing ? (
         <div className="space-y-3">
           <input
             ref={titleRef}
             defaultValue={note.title}
-            className="w-full px-3 py-2 bg-background border border-border/60 rounded-lg text-sm font-medium outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+            className="w-full rounded-lg border border-border/70 bg-background px-3 py-2 text-sm font-medium outline-none transition-colors focus:border-primary/50"
             placeholder="Title"
             maxLength={200}
           />
@@ -111,25 +142,31 @@ function NoteCard({
             ref={contentRef}
             defaultValue={note.content}
             rows={5}
-            className="w-full px-3 py-2 bg-background border border-border/60 rounded-lg text-sm outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 resize-none"
-            placeholder="Content…"
+            className="w-full resize-none rounded-lg border border-border/70 bg-background px-3 py-2 text-sm outline-none transition-colors focus:border-primary/50"
+            placeholder="Content"
             maxLength={5000}
           />
-          {editError && <p className="text-xs text-red-400">{editError}</p>}
+          {editError ? (
+            <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+              {editError}
+            </p>
+          ) : null}
           <div className="flex gap-2">
             <button
+              type="button"
               onClick={handleUpdate}
               disabled={isPending}
-              className="px-3 py-1.5 bg-primary text-primary-foreground rounded-lg text-xs font-semibold hover:bg-primary/90 disabled:opacity-50"
+              className="rounded-lg bg-foreground px-3 py-1.5 text-xs font-semibold text-background transition-colors hover:bg-foreground/90 disabled:opacity-60"
             >
-              {isPending ? 'Saving…' : 'Save'}
+              {isPending ? 'Saving...' : 'Save'}
             </button>
             <button
+              type="button"
               onClick={() => {
                 setEditing(false);
                 setEditError('');
               }}
-              className="px-3 py-1.5 bg-secondary rounded-lg text-xs hover:bg-secondary/80"
+              className="rounded-lg border border-border/70 bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
             >
               Cancel
             </button>
@@ -137,52 +174,71 @@ function NoteCard({
         </div>
       ) : (
         <>
-          <div className="flex items-start justify-between gap-3 mb-2">
-            <h3 className="font-semibold text-[15px] leading-snug">
+          <div className="mb-2 flex items-start justify-between gap-3">
+            <h3 className="text-sm font-semibold leading-snug text-foreground">
               {note.title}
             </h3>
-            <div className="flex items-center gap-1.5 shrink-0">
-              {canEdit && (
+            <div className="flex shrink-0 items-center gap-1.5">
+              {canEdit ? (
                 <button
+                  type="button"
                   onClick={() => setEditing(true)}
-                  className="text-xs px-2 py-1 rounded-md bg-muted text-muted-foreground border border-border/50 hover:bg-muted/80 transition-colors"
+                  className="rounded-md border border-border/70 bg-background px-2 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-muted/40"
                 >
                   Edit
                 </button>
-              )}
-              {showDelete && (
+              ) : null}
+              {showDelete ? (
                 <button
-                  onClick={handleDelete}
+                  type="button"
+                  onClick={() => setDeleteOpen(true)}
                   disabled={isPending}
-                  className="text-xs px-2 py-1 rounded-md bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors disabled:opacity-50"
+                  className="rounded-md border border-red-500/30 bg-red-500/10 px-2 py-1 text-[11px] font-semibold text-red-300 transition-colors hover:bg-red-500/20 disabled:opacity-60"
                 >
                   Delete
                 </button>
-              )}
+              ) : null}
             </div>
           </div>
-          <p className="text-[13px] text-muted-foreground leading-relaxed whitespace-pre-wrap">
+          <p className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
             {note.content}
           </p>
-          <div className="flex items-center gap-2 mt-3 pt-3 border-t border-border/30">
-            <span className="text-[11px] text-muted-foreground/70">
-              by <span className="text-foreground/70">{note.author.name}</span>
+          <div className="mt-3 flex items-center gap-2 border-t border-border/40 pt-3">
+            <span className="text-[11px] text-muted-foreground">
+              by <span className="text-foreground/80">{note.author.name}</span>
             </span>
-            <span className="text-muted-foreground/30">·</span>
-            <span className="text-[11px] text-muted-foreground/70">
+            <span className="text-muted-foreground/40">-</span>
+            <span className="text-[11px] text-muted-foreground">
               {timeAgo(note.createdAt)}
             </span>
           </div>
         </>
       )}
-    </motion.div>
+
+      <ActionDialog
+        open={deleteOpen}
+        title="Delete note"
+        description={`Delete "${note.title}" permanently? This cannot be undone.`}
+        confirmLabel="Delete"
+        destructive
+        pending={isPending}
+        onConfirm={handleDelete}
+        onClose={() => {
+          if (isPending) return;
+          setDeleteOpen(false);
+        }}
+      />
+    </motion.article>
   );
 }
 
-// ---------------------------------------------------------------------------
-// CreateNoteForm
-// ---------------------------------------------------------------------------
-function CreateNoteForm({ onCreated }: { onCreated: () => void }) {
+function CreateNoteForm({
+  onCreated,
+  toastApi,
+}: {
+  onCreated: (note: Note) => void;
+  toastApi: ToastApi;
+}) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState('');
   const [isPending, start] = useTransition();
@@ -191,16 +247,34 @@ function CreateNoteForm({ onCreated }: { onCreated: () => void }) {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    const fd = new FormData(formRef.current!);
+
+    const form = formRef.current;
+    if (!form) return;
+
+    const fd = new FormData(form);
+    const title = ((fd.get('title') as string) ?? '').trim();
+    const content = ((fd.get('content') as string) ?? '').trim();
+
+    if (!title || !content) {
+      setError('Title and content are required.');
+      return;
+    }
+
     start(async () => {
       const res = await createNoteAction(fd);
       if (res?.error) {
         setError(res.error);
+        toastApi.pushToast('error', res.error);
         return;
       }
-      formRef.current?.reset();
+
+      if (res && typeof res === 'object' && 'note' in res && res.note) {
+        onCreated(res.note as Note);
+      }
+
+      form.reset();
       setOpen(false);
-      onCreated();
+      toastApi.pushToast('success', 'Note created.');
     });
   };
 
@@ -208,8 +282,9 @@ function CreateNoteForm({ onCreated }: { onCreated: () => void }) {
     <div>
       {!open ? (
         <button
+          type="button"
           onClick={() => setOpen(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-xl text-sm font-semibold hover:bg-primary/90 transition-colors shadow-sm"
+          className="inline-flex items-center gap-2 rounded-xl bg-foreground px-4 py-2 text-sm font-semibold text-background transition-colors hover:bg-foreground/90"
         >
           <svg
             width="14"
@@ -228,34 +303,38 @@ function CreateNoteForm({ onCreated }: { onCreated: () => void }) {
         <motion.form
           ref={formRef}
           onSubmit={handleSubmit}
-          initial={{ opacity: 0, y: -8 }}
+          initial={{ opacity: 0, y: -6 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-card border border-primary/20 rounded-2xl p-5 shadow-sm space-y-3"
+          className="space-y-3 rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm"
         >
-          <h3 className="text-sm font-semibold">New Note</h3>
+          <h3 className="text-sm font-semibold text-foreground">Create Note</h3>
           <input
             name="title"
             required
             maxLength={200}
             placeholder="Title"
-            className="w-full px-3 py-2 bg-background border border-border/60 rounded-lg text-sm font-medium outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+            className="w-full rounded-lg border border-border/70 bg-background px-3 py-2 text-sm font-medium outline-none transition-colors focus:border-primary/50"
           />
           <textarea
             name="content"
             required
             rows={4}
             maxLength={5000}
-            placeholder="Write your note…"
-            className="w-full px-3 py-2 bg-background border border-border/60 rounded-lg text-sm outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 resize-none"
+            placeholder="Write your note"
+            className="w-full resize-none rounded-lg border border-border/70 bg-background px-3 py-2 text-sm outline-none transition-colors focus:border-primary/50"
           />
-          {error && <p className="text-xs text-red-400">{error}</p>}
+          {error ? (
+            <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+              {error}
+            </p>
+          ) : null}
           <div className="flex gap-2">
             <button
               type="submit"
               disabled={isPending}
-              className="px-4 py-2 bg-primary text-primary-foreground rounded-xl text-xs font-semibold hover:bg-primary/90 disabled:opacity-50 transition-colors"
+              className="rounded-lg bg-foreground px-3 py-1.5 text-xs font-semibold text-background transition-colors hover:bg-foreground/90 disabled:opacity-60"
             >
-              {isPending ? 'Creating…' : 'Create Note'}
+              {isPending ? 'Creating...' : 'Create'}
             </button>
             <button
               type="button"
@@ -263,7 +342,7 @@ function CreateNoteForm({ onCreated }: { onCreated: () => void }) {
                 setOpen(false);
                 setError('');
               }}
-              className="px-4 py-2 bg-secondary rounded-xl text-xs hover:bg-secondary/80 transition-colors"
+              className="rounded-lg border border-border/70 bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
             >
               Cancel
             </button>
@@ -274,9 +353,28 @@ function CreateNoteForm({ onCreated }: { onCreated: () => void }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// NotesClient  — main export
-// ---------------------------------------------------------------------------
+function ViewHint({ perms }: { perms: Perms }) {
+  if (perms.canDelete) {
+    return (
+      <div className="rounded-lg border border-border/70 bg-card/70 px-3 py-2 text-xs text-muted-foreground">
+        Scope: all notes (super admin)
+      </div>
+    );
+  }
+  if (perms.canListAll) {
+    return (
+      <div className="rounded-lg border border-border/70 bg-card/70 px-3 py-2 text-xs text-muted-foreground">
+        Scope: all notes (admin or operator)
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-lg border border-border/70 bg-card/70 px-3 py-2 text-xs text-muted-foreground">
+      Scope: your notes
+    </div>
+  );
+}
+
 export function NotesClient({
   notes: initialNotes,
   currentUserId,
@@ -289,68 +387,91 @@ export function NotesClient({
   isAdmin: boolean;
 }) {
   const [notes, setNotes] = useState(initialNotes);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+
+  const pushToast = (kind: ToastKind, message: string) => {
+    const id = Date.now() + Math.floor(Math.random() * 1000);
+    setToasts((prev) => [...prev, { id, kind, message }]);
+  };
+
+  const dismissToast = (id: number) => {
+    setToasts((prev) => prev.filter((toast) => toast.id !== id));
+  };
+
+  useEffect(() => {
+    if (toasts.length === 0) return;
+    const timers = toasts.map((toast) =>
+      window.setTimeout(() => dismissToast(toast.id), 3500),
+    );
+    return () => {
+      for (const timer of timers) window.clearTimeout(timer);
+    };
+  }, [toasts]);
 
   const handleDeleted = (id: string) =>
-    setNotes((prev) => prev.filter((n) => n.id !== id));
+    setNotes((prev) => prev.filter((note) => note.id !== id));
+
+  const handleUpdated = (id: string, title: string, content: string) => {
+    setNotes((prev) =>
+      prev.map((note) =>
+        note.id === id
+          ? {
+              ...note,
+              title,
+              content,
+              updatedAt: new Date(),
+            }
+          : note,
+      ),
+    );
+  };
+
+  const handleCreated = (note: Note) => {
+    setNotes((prev) => [note, ...prev]);
+  };
 
   return (
-    <div className="space-y-4">
-      {/* View indicator - shows role-based view */}
-      {perms.canDelete && (
-        <div className="text-xs text-purple-400 bg-purple-500/10 px-3 py-1.5 rounded-lg border border-purple-500/20">
-          Viewing all notes (superAdmin - can delete)
-        </div>
-      )}
-      {perms.canListAll && !perms.canDelete && (
-        <div className="text-xs text-blue-400 bg-blue-500/10 px-3 py-1.5 rounded-lg border border-blue-500/20">
-          Viewing all notes (admin/operator)
-        </div>
-      )}
-      {perms.canCreate && !perms.canListAll && (
-        <div className="text-xs text-amber-400 bg-amber-500/10 px-3 py-1.5 rounded-lg border border-amber-500/20">
-          Viewing your notes only (operator)
-        </div>
-      )}
-      {!perms.canCreate && !perms.canListAll && (
-        <div className="text-xs text-muted-foreground/60 bg-muted/30 px-3 py-1.5 rounded-lg">
-          Viewing your notes only (user)
-        </div>
-      )}
+    <>
+      <div className="space-y-4">
+        <ViewHint perms={perms} />
 
-      {/* Create button — only shown when permitted */}
-      {perms.canCreate && (
-        <CreateNoteForm onCreated={() => window.location.reload()} />
-      )}
+        {perms.canCreate ? (
+          <CreateNoteForm onCreated={handleCreated} toastApi={{ pushToast }} />
+        ) : null}
 
-      {/* Notes list */}
-      <AnimatePresence mode="popLayout">
-        {notes.length === 0 ? (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="text-center py-16 text-muted-foreground"
-          >
-            <div className="text-4xl mb-3">📝</div>
-            <p className="text-sm">No notes yet.</p>
-            {perms.canCreate && (
-              <p className="text-xs mt-1 text-muted-foreground/60">
-                Click "New Note" to get started.
+        <AnimatePresence mode="popLayout">
+          {notes.length === 0 ? (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="rounded-2xl border border-dashed border-border/70 bg-card/40 py-14 text-center"
+            >
+              <p className="text-sm font-medium text-foreground">
+                No notes yet
               </p>
-            )}
-          </motion.div>
-        ) : (
-          notes.map((note) => (
-            <NoteCard
-              key={note.id}
-              note={note}
-              currentUserId={currentUserId}
-              perms={perms}
-              isAdmin={isAdmin}
-              onDeleted={handleDeleted}
-            />
-          ))
-        )}
-      </AnimatePresence>
-    </div>
+              {perms.canCreate ? (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Create your first note to get started.
+                </p>
+              ) : null}
+            </motion.div>
+          ) : (
+            notes.map((note) => (
+              <NoteCard
+                key={note.id}
+                note={note}
+                currentUserId={currentUserId}
+                perms={perms}
+                isAdmin={isAdmin}
+                onDeleted={handleDeleted}
+                onUpdated={handleUpdated}
+                toastApi={{ pushToast }}
+              />
+            ))
+          )}
+        </AnimatePresence>
+      </div>
+      <ToastRegion toasts={toasts} onDismiss={dismissToast} />
+    </>
   );
 }

@@ -28,7 +28,7 @@ const baseURL =
     ? window.location.origin
     : process.env.BETTER_AUTH_URL || 'http://localhost:3000';
 
-export const authClient = createAuthClient({
+const client = createAuthClient({
   baseURL,
   basePath: '/api/auth',
   plugins: [
@@ -40,9 +40,9 @@ export const authClient = createAuthClient({
     adminClient({
       ac,
       roles: {
-        user:       userRole,
-        operator:   operatorRole,
-        admin:      adminRole,
+        user: userRole,
+        operator: operatorRole,
+        admin: adminRole,
         superAdmin: superAdminRole,
         settingsThemeGrant: settingsThemeGrantRole,
         settingsLabsGrant: settingsLabsGrantRole,
@@ -57,5 +57,5 @@ export const authClient = createAuthClient({
   },
 });
 
-export const { signIn, signUp, signOut, useSession, getSession } = authClient;
+export const authClient: typeof client = client;
 export type Session = typeof authClient.$Infer.Session;

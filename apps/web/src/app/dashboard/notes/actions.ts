@@ -55,12 +55,22 @@ export async function createNoteAction(formData: FormData) {
 
   const note = await db.note.create({
     data: { title, content, authorId: session.user.id },
+    include: {
+      author: { select: { id: true, name: true } },
+    },
   });
 
   await logAudit(session.user.id, 'note_created', { noteId: note.id, title });
 
   revalidatePath('/dashboard/notes');
-  return { success: true };
+  return {
+    success: true,
+    note: {
+      ...note,
+      createdAt: note.createdAt.toISOString(),
+      updatedAt: note.updatedAt.toISOString(),
+    },
+  };
 }
 
 export async function updateNoteAction(noteId: string, formData: FormData) {

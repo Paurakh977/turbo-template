@@ -5,28 +5,28 @@
 
 :root {
   --background: 0 0% 100%;
-  --foreground: 222 47% 11%;
+  --foreground: 0 0% 9%;
   --card: 0 0% 100%;
-  --border: 214 32% 91%;
-  --muted: 210 40% 96%;
-  --muted-foreground: 215 16% 47%;
-  --primary: 221 83% 53%;
-  --primary-foreground: 210 40% 98%;
-  --secondary: 210 40% 96%;
-  --secondary-foreground: 222 47% 11%;
+  --border: 0 0% 89%;
+  --muted: 0 0% 96%;
+  --muted-foreground: 0 0% 45%;
+  --primary: 0 0% 9%;
+  --primary-foreground: 0 0% 98%;
+  --secondary: 0 0% 96%;
+  --secondary-foreground: 0 0% 9%;
 }
 
 html.dark {
-  --background: 222 47% 11%;
-  --foreground: 210 40% 98%;
-  --card: 222 47% 14%;
-  --border: 217 19% 27%;
-  --muted: 217 19% 21%;
-  --muted-foreground: 215 20% 72%;
-  --primary: 217 91% 60%;
-  --primary-foreground: 222 47% 11%;
-  --secondary: 217 19% 21%;
-  --secondary-foreground: 210 40% 98%;
+  --background: 0 0% 0%;
+  --foreground: 0 0% 93%;
+  --card: 0 0% 0%;
+  --border: 0 0% 15%;
+  --muted: 0 0% 6%;
+  --muted-foreground: 0 0% 63%;
+  --primary: 0 0% 100%;
+  --primary-foreground: 0 0% 0%;
+  --secondary: 0 0% 12%;
+  --secondary-foreground: 0 0% 93%;
 }
 
 html,
