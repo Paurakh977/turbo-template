@@ -7,6 +7,7 @@ import {
   getMaxRoleWeight,
   hasGrantRole,
   canActOn,
+  type BaseRole,
 } from '@repo/auth/roles';
 import { THEME_GRANT_NAME, LABS_GRANT_NAME } from '@repo/auth/permissions';
 
@@ -31,19 +32,22 @@ type Props = {
 
 const SETTINGS_THEME_GRANT_ROLE = THEME_GRANT_NAME;
 const SETTINGS_LABS_GRANT_ROLE = LABS_GRANT_NAME;
+type RoleToken =
+  | BaseRole
+  | typeof SETTINGS_THEME_GRANT_ROLE
+  | typeof SETTINGS_LABS_GRANT_ROLE;
 
 function buildRoleSet(
-  currentRole: string | null | undefined,
-  nextBaseRole: string,
+  nextBaseRole: BaseRole,
   grants: { theme: boolean; labs: boolean },
-): string[] {
-  const out = [nextBaseRole];
+): RoleToken[] {
+  const out: RoleToken[] = [nextBaseRole];
   if (grants.theme) out.push(SETTINGS_THEME_GRANT_ROLE);
   if (grants.labs) out.push(SETTINGS_LABS_GRANT_ROLE);
   return out;
 }
 
-function assignableRoles(actorRole: string): string[] {
+function assignableRoles(actorRole: string): BaseRole[] {
   if (actorRole === 'superAdmin') return ['user', 'operator', 'admin'];
   if (actorRole === 'admin') return ['user', 'operator'];
   return [];
@@ -73,13 +77,12 @@ export function AdminUserTable({
 
   const refresh = () => window.location.reload();
 
-  const setRole = async (userId: string, role: string[]) => {
+  const setRole = async (userId: string, role: RoleToken[]) => {
     clearError();
     setLoading(userId);
     const { error } = await authClient.admin.setRole({
       userId,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      role: role as any,
+      role,
     });
     if (error) handleError(error.message);
     else refresh();
@@ -300,7 +303,7 @@ export function AdminUserTable({
                               onChange={(e) =>
                                 setRole(
                                   user.id,
-                                  buildRoleSet(user.role, e.target.value, {
+                                  buildRoleSet(e.target.value as BaseRole, {
                                     theme: hasThemeGrant,
                                     labs: hasLabsGrant,
                                   }),
@@ -327,7 +330,7 @@ export function AdminUserTable({
                               onClick={() =>
                                 setRole(
                                   user.id,
-                                  buildRoleSet(user.role ?? 'user', baseRole, {
+                                  buildRoleSet(baseRole as BaseRole, {
                                     theme: !hasThemeGrant,
                                     labs: hasLabsGrant,
                                   }),
@@ -345,7 +348,7 @@ export function AdminUserTable({
                               onClick={() =>
                                 setRole(
                                   user.id,
-                                  buildRoleSet(user.role ?? 'user', baseRole, {
+                                  buildRoleSet(baseRole as BaseRole, {
                                     theme: hasThemeGrant,
                                     labs: !hasLabsGrant,
                                   }),

@@ -75,8 +75,7 @@ export default function DashboardPage() {
 
   if (!session) return null;
 
-  // Role extraction for display — use getPrimaryRole from @repo/auth/roles
-  // handles both old comma-string format and new JSON array format
+  // Role extraction for display from canonical role tokens.
   const roleRaw = (session.user as any).role ?? 'user';
   const role = getPrimaryRole(roleRaw);
 
@@ -96,6 +95,18 @@ export default function DashboardPage() {
     await authClient.signOut();
     router.push('/auth');
   };
+
+  const handleStopImpersonation = async () => {
+    const { error } = await authClient.admin.stopImpersonating();
+    if (error) {
+      alert('Failed to stop impersonation: ' + error.message);
+      return;
+    }
+    // Force a hard navigation to refresh session state properly
+    window.location.href = '/dashboard';
+  };
+
+  const isImpersonating = (session as any).session?.impersonatedBy != null;
 
   const handleEnable2FA = async () => {
     const { data, error } = await authClient.twoFactor.enable({
@@ -192,6 +203,14 @@ export default function DashboardPage() {
               >
                 Admin Panel
               </Link>
+            )}
+            {isImpersonating && (
+              <button
+                onClick={handleStopImpersonation}
+                className="text-xs px-3 py-1.5 bg-amber-500/10 text-amber-500 border border-amber-500/30 rounded-lg font-semibold hover:bg-amber-500/20 transition-colors"
+              >
+                Stop Impersonating
+              </button>
             )}
             <button
               onClick={handleSignOut}
