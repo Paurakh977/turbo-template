@@ -1,15 +1,21 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { authClient } from '../../../lib/auth-client';
 import {
   getPrimaryRole,
-  getMaxRoleWeight,
   hasGrantRole,
   canActOn,
   type BaseRole,
 } from '@repo/auth/roles';
 import { THEME_GRANT_NAME, LABS_GRANT_NAME } from '@repo/auth/permissions';
+import { ActionDialog } from '../../_components/ActionDialog';
+import {
+  ToastRegion,
+  type ToastItem,
+  type ToastKind,
+} from '../../_components/ToastRegion';
 
 type User = {
   id: string;
@@ -54,110 +60,191 @@ function assignableRoles(actorRole: string): BaseRole[] {
 }
 
 const ROLE_BADGE: Record<string, string> = {
-  superAdmin: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
-  admin: 'bg-blue-500/10   text-blue-400   border-blue-500/20',
-  operator: 'bg-amber-500/10  text-amber-400  border-amber-500/20',
-  user: 'bg-muted text-muted-foreground border-border/50',
+  superAdmin: 'bg-purple-500/10 text-purple-300 border-purple-500/30',
+  admin: 'bg-blue-500/10 text-blue-300 border-blue-500/30',
+  operator: 'bg-amber-500/10 text-amber-300 border-amber-500/30',
+  user: 'bg-muted/50 text-muted-foreground border-border/70',
 };
 
 export function AdminUserTable({
   users,
+  total,
   actorId,
   actorRole,
   isSuperAdmin,
 }: Props) {
+  const router = useRouter();
   const [list, setList] = useState(users);
   const [loading, setLoading] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
 
-  const clearError = () => setError(null);
+  const [banDialog, setBanDialog] = useState<{
+    open: boolean;
+    userId: string;
+    name: string;
+    reason: string;
+  }>({
+    open: false,
+    userId: '',
+    name: '',
+    reason: 'Violated terms of service',
+  });
+
+  const [confirmDialog, setConfirmDialog] = useState<{
+    open: boolean;
+    kind: 'revoke' | 'impersonate' | 'delete' | null;
+    userId: string;
+    name: string;
+    email: string;
+  }>({
+    open: false,
+    kind: null,
+    userId: '',
+    name: '',
+    email: '',
+  });
+
+  const pushToast = (kind: ToastKind, message: string) => {
+    const id = Date.now() + Math.floor(Math.random() * 1000);
+    setToasts((prev) => [...prev, { id, kind, message }]);
+  };
+
+  const dismissToast = (id: number) => {
+    setToasts((prev) => prev.filter((toast) => toast.id !== id));
+  };
+
+  useEffect(() => {
+    setList(users);
+  }, [users]);
+
+  useEffect(() => {
+    if (toasts.length === 0) return;
+    const timers = toasts.map((toast) =>
+      window.setTimeout(() => dismissToast(toast.id), 3500),
+    );
+    return () => {
+      for (const timer of timers) window.clearTimeout(timer);
+    };
+  }, [toasts]);
 
   const handleError = (msg: string | undefined) =>
-    setError(msg ?? 'An unexpected error occurred.');
-
-  const refresh = () => window.location.reload();
+    pushToast('error', msg ?? 'An unexpected error occurred.');
 
   const setRole = async (userId: string, role: RoleToken[]) => {
-    clearError();
     setLoading(userId);
-    const { error } = await authClient.admin.setRole({
-      userId,
-      role,
-    });
-    if (error) handleError(error.message);
-    else refresh();
+    const { error } = await authClient.admin.setRole({ userId, role });
+    if (error) {
+      handleError(error.message);
+    } else {
+      pushToast('success', 'Role updated.');
+      router.refresh();
+    }
     setLoading(null);
   };
 
-  const ban = async (userId: string) => {
-    clearError();
-    const reason =
-      prompt('Ban reason (optional):') ?? 'Violated terms of service';
-    setLoading(userId);
+  const ban = async () => {
+    setLoading(banDialog.userId);
     const { error } = await authClient.admin.banUser({
-      userId,
-      banReason: reason,
+      userId: banDialog.userId,
+      banReason: banDialog.reason.trim() || 'Violated terms of service',
     });
-    if (error) handleError(error.message);
-    else
+    if (error) {
+      handleError(error.message);
+    } else {
       setList((prev) =>
         prev.map((u) =>
-          u.id === userId ? { ...u, banned: true, banReason: reason } : u,
+          u.id === banDialog.userId
+            ? {
+                ...u,
+                banned: true,
+                banReason:
+                  banDialog.reason.trim() || 'Violated terms of service',
+              }
+            : u,
         ),
       );
+      pushToast('success', 'User banned.');
+      setBanDialog({
+        open: false,
+        userId: '',
+        name: '',
+        reason: 'Violated terms of service',
+      });
+    }
     setLoading(null);
   };
 
   const unban = async (userId: string) => {
-    clearError();
     setLoading(userId);
     const { error } = await authClient.admin.unbanUser({ userId });
-    if (error) handleError(error.message);
-    else
+    if (error) {
+      handleError(error.message);
+    } else {
       setList((prev) =>
         prev.map((u) =>
           u.id === userId ? { ...u, banned: false, banReason: null } : u,
         ),
       );
+      pushToast('success', 'User unbanned.');
+    }
     setLoading(null);
   };
 
-  const revokeSessions = async (userId: string) => {
-    clearError();
-    if (
-      !confirm(
-        'Revoke ALL active sessions for this user? They will be signed out immediately.',
-      )
-    )
-      return;
-    setLoading(userId);
-    const { error } = await authClient.admin.revokeUserSessions({ userId });
-    if (error) handleError(error.message);
-    else alert('All sessions revoked.');
+  const revokeSessions = async () => {
+    setLoading(confirmDialog.userId);
+    const { error } = await authClient.admin.revokeUserSessions({
+      userId: confirmDialog.userId,
+    });
+    if (error) {
+      handleError(error.message);
+    } else {
+      pushToast('success', 'All active sessions revoked.');
+      setConfirmDialog({
+        open: false,
+        kind: null,
+        userId: '',
+        name: '',
+        email: '',
+      });
+    }
     setLoading(null);
   };
 
-  const impersonate = async (userId: string, name: string) => {
-    clearError();
-    if (
-      !confirm(
-        `Impersonate "${name}"? You will be redirected to their dashboard.`,
-      )
-    )
+  const impersonate = async () => {
+    setLoading(confirmDialog.userId);
+    const { error } = await authClient.admin.impersonateUser({
+      userId: confirmDialog.userId,
+    });
+    if (error) {
+      handleError(error.message);
+      setLoading(null);
       return;
-    const { error } = await authClient.admin.impersonateUser({ userId });
-    if (error) handleError(error.message);
-    else window.location.href = '/dashboard';
+    }
+
+    pushToast('success', `Now impersonating ${confirmDialog.name}.`);
+    setLoading(null);
+    window.location.href = '/dashboard';
   };
 
-  const removeUser = async (userId: string, email: string) => {
-    clearError();
-    if (!confirm(`Permanently delete "${email}"? This cannot be undone.`))
-      return;
-    setLoading(userId);
-    const { error } = await authClient.admin.removeUser({ userId });
-    if (error) handleError(error.message);
-    else setList((prev) => prev.filter((u) => u.id !== userId));
+  const removeUser = async () => {
+    setLoading(confirmDialog.userId);
+    const { error } = await authClient.admin.removeUser({
+      userId: confirmDialog.userId,
+    });
+    if (error) {
+      handleError(error.message);
+    } else {
+      setList((prev) => prev.filter((u) => u.id !== confirmDialog.userId));
+      pushToast('success', 'User removed.');
+      setConfirmDialog({
+        open: false,
+        kind: null,
+        userId: '',
+        name: '',
+        email: '',
+      });
+    }
     setLoading(null);
   };
 
@@ -173,255 +260,387 @@ export function AdminUserTable({
       role: actorRole as never,
     }) ?? false;
 
+  const filtered = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return list;
+    return list.filter((user) => {
+      const role = getPrimaryRole(user.role ?? 'user');
+      return (
+        user.name.toLowerCase().includes(query) ||
+        user.email.toLowerCase().includes(query) ||
+        role.toLowerCase().includes(query)
+      );
+    });
+  }, [list, search]);
+
   return (
-    <div className="space-y-4">
-      {error && (
-        <div className="flex items-start gap-3 px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            className="shrink-0 mt-0.5"
-          >
-            <circle cx="12" cy="12" r="10" />
-            <line x1="12" y1="8" x2="12" y2="12" />
-            <line x1="12" y1="16" x2="12.01" y2="16" />
-          </svg>
-          <span className="flex-1">{error}</span>
-          <button
-            onClick={clearError}
-            className="text-red-400/60 hover:text-red-400"
-          >
-            ✕
-          </button>
+    <>
+      <div className="space-y-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs text-muted-foreground">
+            Manage roles, grants, status, and account security actions. Showing{' '}
+            {filtered.length} of {total} users.
+          </p>
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search users"
+            className="w-full rounded-lg border border-border/70 bg-card px-3 py-2 text-xs text-foreground outline-none transition-colors focus:border-primary/50 sm:w-56"
+          />
         </div>
-      )}
 
-      <div className="rounded-2xl border border-border/50 bg-card/60 overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border/50 bg-muted/30">
-              <th className="text-left px-4 py-3 font-medium text-muted-foreground">
-                User
-              </th>
-              <th className="text-left px-4 py-3 font-medium text-muted-foreground">
-                Role
-              </th>
-              <th className="text-left px-4 py-3 font-medium text-muted-foreground">
-                Status
-              </th>
-              <th className="text-left px-4 py-3 font-medium text-muted-foreground">
-                Joined
-              </th>
-              <th className="text-right px-4 py-3 font-medium text-muted-foreground">
-                Actions
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {list.map((user) => {
-              const canAct =
-                user.id !== actorId && canActOn(actorRole, user.role ?? 'user');
-              const isSelf = user.id === actorId;
-              const baseRole = getPrimaryRole(user.role ?? 'user');
-              const userRoleBadge = ROLE_BADGE[baseRole] ?? ROLE_BADGE.user;
-              const hasThemeGrant = hasGrantRole(
-                user.role ?? 'user',
-                SETTINGS_THEME_GRANT_ROLE,
-              );
-              const hasLabsGrant = hasGrantRole(
-                user.role ?? 'user',
-                SETTINGS_LABS_GRANT_ROLE,
-              );
-
-              return (
-                <tr
-                  key={user.id}
-                  className="border-b border-border/30 last:border-0 hover:bg-muted/20 transition-colors"
-                >
-                  <td className="px-4 py-3">
-                    <div className="font-medium flex items-center gap-2">
-                      {user.name}
-                      {isSelf && (
-                        <span className="text-[10px] bg-primary/10 text-primary border border-primary/20 px-1.5 py-0.5 rounded font-semibold">
-                          You
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      {user.email}
-                    </div>
-                    {!user.emailVerified && (
-                      <span className="text-[10px] text-yellow-500">
-                        ⚠ unverified
-                      </span>
-                    )}
-                  </td>
-
-                  <td className="px-4 py-3">
-                    <span
-                      className={`text-xs font-semibold px-2 py-0.5 rounded-md border ${userRoleBadge}`}
-                    >
-                      {baseRole}
-                    </span>
-                  </td>
-
-                  <td className="px-4 py-3">
-                    {user.banned ? (
-                      <span
-                        className="text-xs text-red-400"
-                        title={user.banReason ?? ''}
-                      >
-                        🚫 Banned
-                        {user.banReason
-                          ? `: ${user.banReason.slice(0, 28)}…`
-                          : ''}
-                      </span>
-                    ) : (
-                      <span className="text-xs text-green-400">● Active</span>
-                    )}
-                  </td>
-
-                  <td className="px-4 py-3 text-xs text-muted-foreground">
-                    {new Date(user.createdAt).toLocaleDateString()}
-                  </td>
-
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-end gap-1.5 flex-wrap">
-                      {loading === user.id ? (
-                        <span className="text-xs text-muted-foreground animate-pulse">
-                          Working…
-                        </span>
-                      ) : canAct ? (
-                        <>
-                          {allowed.length > 0 && (
-                            <select
-                              value={baseRole}
-                              onChange={(e) =>
-                                setRole(
-                                  user.id,
-                                  buildRoleSet(e.target.value as BaseRole, {
-                                    theme: hasThemeGrant,
-                                    labs: hasLabsGrant,
-                                  }),
-                                )
-                              }
-                              className="text-xs px-2 py-1 rounded-md bg-background border border-border/60 text-foreground focus:outline-none focus:ring-1 focus:ring-primary/30 cursor-pointer"
-                              title="Change role"
-                            >
-                              {!allowed.includes(baseRole) && (
-                                <option value={baseRole} disabled>
-                                  {baseRole}
-                                </option>
-                              )}
-                              {allowed.map((r) => (
-                                <option key={r} value={r}>
-                                  {r}
-                                </option>
-                              ))}
-                            </select>
-                          )}
-
-                          {actorCanManageTheme && (
-                            <button
-                              onClick={() =>
-                                setRole(
-                                  user.id,
-                                  buildRoleSet(baseRole as BaseRole, {
-                                    theme: !hasThemeGrant,
-                                    labs: hasLabsGrant,
-                                  }),
-                                )
-                              }
-                              className="text-xs px-2 py-1 rounded-md bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 hover:bg-indigo-500/20 transition-colors"
-                              title="Grant settings theme toggle without changing base role"
-                            >
-                              {hasThemeGrant ? 'Revoke Theme' : 'Grant Theme'}
-                            </button>
-                          )}
-
-                          {actorCanManageLabs && (
-                            <button
-                              onClick={() =>
-                                setRole(
-                                  user.id,
-                                  buildRoleSet(baseRole as BaseRole, {
-                                    theme: hasThemeGrant,
-                                    labs: !hasLabsGrant,
-                                  }),
-                                )
-                              }
-                              className="text-xs px-2 py-1 rounded-md bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-500/20 hover:bg-fuchsia-500/20 transition-colors"
-                              title="Grant Labs settings access without changing base role"
-                            >
-                              {hasLabsGrant ? 'Revoke Labs' : 'Grant Labs'}
-                            </button>
-                          )}
-
-                          {user.banned ? (
-                            <button
-                              onClick={() => unban(user.id)}
-                              className="text-xs px-2 py-1 rounded-md bg-green-500/10 text-green-400 border border-green-500/20 hover:bg-green-500/20 transition-colors"
-                            >
-                              Unban
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => ban(user.id)}
-                              className="text-xs px-2 py-1 rounded-md bg-orange-500/10 text-orange-400 border border-orange-500/20 hover:bg-orange-500/20 transition-colors"
-                            >
-                              Ban
-                            </button>
-                          )}
-
-                          <button
-                            onClick={() => revokeSessions(user.id)}
-                            className="text-xs px-2 py-1 rounded-md bg-muted text-muted-foreground border border-border/50 hover:bg-muted/80 transition-colors"
-                          >
-                            Revoke Sessions
-                          </button>
-
-                          <button
-                            onClick={() => impersonate(user.id, user.name)}
-                            className="text-xs px-2 py-1 rounded-md bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 hover:bg-yellow-500/20 transition-colors"
-                          >
-                            Impersonate
-                          </button>
-
-                          <button
-                            onClick={() => removeUser(user.id, user.email)}
-                            className="text-xs px-2 py-1 rounded-md bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors"
-                          >
-                            Delete
-                          </button>
-                        </>
-                      ) : (
-                        !isSelf && (
-                          <span
-                            className="text-xs text-muted-foreground/50 select-none"
-                            title="You cannot modify a user with equal or higher privileges"
-                          >
-                            🔒 Protected
-                          </span>
-                        )
-                      )}
-                    </div>
+        <div className="overflow-x-auto rounded-2xl border border-border/70 bg-card/70">
+          <table className="min-w-[980px] w-full text-sm">
+            <thead>
+              <tr className="border-b border-border/60 bg-muted/30">
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  User
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Role
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Status
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Joined
+                </th>
+                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={5}
+                    className="px-4 py-10 text-center text-sm text-muted-foreground"
+                  >
+                    No users found for this filter.
                   </td>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
+              ) : (
+                filtered.map((user) => {
+                  const canAct =
+                    user.id !== actorId &&
+                    canActOn(actorRole, user.role ?? 'user');
+                  const isSelf = user.id === actorId;
+                  const baseRole = getPrimaryRole(user.role ?? 'user');
+                  const userRoleBadge = ROLE_BADGE[baseRole] ?? ROLE_BADGE.user;
+                  const hasThemeGrant = hasGrantRole(
+                    user.role ?? 'user',
+                    SETTINGS_THEME_GRANT_ROLE,
+                  );
+                  const hasLabsGrant = hasGrantRole(
+                    user.role ?? 'user',
+                    SETTINGS_LABS_GRANT_ROLE,
+                  );
+
+                  return (
+                    <tr
+                      key={user.id}
+                      className="border-b border-border/40 align-top last:border-0 hover:bg-muted/20"
+                    >
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <p className="font-semibold text-foreground">
+                            {user.name}
+                          </p>
+                          {isSelf ? (
+                            <span className="rounded-md border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                              You
+                            </span>
+                          ) : null}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {user.email}
+                        </p>
+                        {!user.emailVerified ? (
+                          <span className="mt-1 inline-block text-[10px] text-amber-300">
+                            Email not verified
+                          </span>
+                        ) : null}
+                      </td>
+
+                      <td className="px-4 py-3">
+                        <span
+                          className={`inline-flex rounded-md border px-2 py-0.5 text-[11px] font-semibold ${userRoleBadge}`}
+                        >
+                          {baseRole}
+                        </span>
+                      </td>
+
+                      <td className="px-4 py-3">
+                        {user.banned ? (
+                          <span className="text-xs text-red-300">
+                            Banned
+                            {user.banReason
+                              ? `: ${user.banReason.slice(0, 32)}`
+                              : ''}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-emerald-300">
+                            Active
+                          </span>
+                        )}
+                      </td>
+
+                      <td className="px-4 py-3 text-xs text-muted-foreground">
+                        {new Date(user.createdAt).toLocaleDateString()}
+                      </td>
+
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap items-center justify-end gap-1.5">
+                          {loading === user.id ? (
+                            <span className="text-xs text-muted-foreground">
+                              Working...
+                            </span>
+                          ) : canAct ? (
+                            <>
+                              {allowed.length > 0 ? (
+                                <select
+                                  value={baseRole}
+                                  onChange={(e) =>
+                                    setRole(
+                                      user.id,
+                                      buildRoleSet(e.target.value as BaseRole, {
+                                        theme: hasThemeGrant,
+                                        labs: hasLabsGrant,
+                                      }),
+                                    )
+                                  }
+                                  className="cursor-pointer rounded-md border border-border/70 bg-background px-2 py-1 text-xs text-foreground outline-none transition-colors focus:border-primary/50"
+                                  title="Change role"
+                                >
+                                  {!allowed.includes(baseRole) ? (
+                                    <option value={baseRole} disabled>
+                                      {baseRole}
+                                    </option>
+                                  ) : null}
+                                  {allowed.map((r) => (
+                                    <option key={r} value={r}>
+                                      {r}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : null}
+
+                              {actorCanManageTheme ? (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setRole(
+                                      user.id,
+                                      buildRoleSet(baseRole as BaseRole, {
+                                        theme: !hasThemeGrant,
+                                        labs: hasLabsGrant,
+                                      }),
+                                    )
+                                  }
+                                  className="rounded-md border border-indigo-500/30 bg-indigo-500/10 px-2 py-1 text-xs font-medium text-indigo-300 hover:bg-indigo-500/20"
+                                >
+                                  {hasThemeGrant
+                                    ? 'Revoke Theme'
+                                    : 'Grant Theme'}
+                                </button>
+                              ) : null}
+
+                              {actorCanManageLabs ? (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setRole(
+                                      user.id,
+                                      buildRoleSet(baseRole as BaseRole, {
+                                        theme: hasThemeGrant,
+                                        labs: !hasLabsGrant,
+                                      }),
+                                    )
+                                  }
+                                  className="rounded-md border border-fuchsia-500/30 bg-fuchsia-500/10 px-2 py-1 text-xs font-medium text-fuchsia-300 hover:bg-fuchsia-500/20"
+                                >
+                                  {hasLabsGrant ? 'Revoke Labs' : 'Grant Labs'}
+                                </button>
+                              ) : null}
+
+                              {user.banned ? (
+                                <button
+                                  type="button"
+                                  onClick={() => unban(user.id)}
+                                  className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-300 hover:bg-emerald-500/20"
+                                >
+                                  Unban
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setBanDialog({
+                                      open: true,
+                                      userId: user.id,
+                                      name: user.name,
+                                      reason: 'Violated terms of service',
+                                    })
+                                  }
+                                  className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-300 hover:bg-amber-500/20"
+                                >
+                                  Ban
+                                </button>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setConfirmDialog({
+                                    open: true,
+                                    kind: 'revoke',
+                                    userId: user.id,
+                                    name: user.name,
+                                    email: user.email,
+                                  })
+                                }
+                                className="rounded-md border border-border/70 bg-background px-2 py-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+                              >
+                                Revoke
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setConfirmDialog({
+                                    open: true,
+                                    kind: 'impersonate',
+                                    userId: user.id,
+                                    name: user.name,
+                                    email: user.email,
+                                  })
+                                }
+                                className="rounded-md border border-yellow-500/30 bg-yellow-500/10 px-2 py-1 text-xs font-medium text-yellow-300 hover:bg-yellow-500/20"
+                              >
+                                Impersonate
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setConfirmDialog({
+                                    open: true,
+                                    kind: 'delete',
+                                    userId: user.id,
+                                    name: user.name,
+                                    email: user.email,
+                                  })
+                                }
+                                className="rounded-md border border-red-500/30 bg-red-500/10 px-2 py-1 text-xs font-medium text-red-300 hover:bg-red-500/20"
+                              >
+                                Delete
+                              </button>
+                            </>
+                          ) : !isSelf ? (
+                            <span
+                              className="text-xs text-muted-foreground/70"
+                              title="You cannot modify a user with equal or higher privileges"
+                            >
+                              Protected
+                            </span>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {!isSuperAdmin ? (
+          <p className="text-right text-xs text-muted-foreground/80">
+            Admin accounts are protected. Only a super admin can modify them.
+          </p>
+        ) : null}
       </div>
 
-      {!isSuperAdmin && (
-        <p className="text-xs text-muted-foreground/60 text-right">
-          🔒 Admin accounts are protected. Only a superAdmin can modify them.
-        </p>
-      )}
-    </div>
+      <ActionDialog
+        open={banDialog.open}
+        title={`Ban ${banDialog.name}`}
+        description="Provide a reason shown in admin records."
+        confirmLabel="Ban user"
+        destructive
+        pending={loading === banDialog.userId}
+        onClose={() => {
+          if (loading === banDialog.userId) return;
+          setBanDialog({
+            open: false,
+            userId: '',
+            name: '',
+            reason: 'Violated terms of service',
+          });
+        }}
+        onConfirm={ban}
+      >
+        <input
+          value={banDialog.reason}
+          onChange={(event) =>
+            setBanDialog((prev) => ({ ...prev, reason: event.target.value }))
+          }
+          className="w-full rounded-lg border border-border/70 bg-background px-3 py-2 text-sm outline-none transition-colors focus:border-primary/50"
+          placeholder="Ban reason"
+        />
+      </ActionDialog>
+
+      <ActionDialog
+        open={confirmDialog.open}
+        title={
+          confirmDialog.kind === 'revoke'
+            ? `Revoke sessions for ${confirmDialog.name}?`
+            : confirmDialog.kind === 'impersonate'
+              ? `Impersonate ${confirmDialog.name}?`
+              : `Delete ${confirmDialog.email}?`
+        }
+        description={
+          confirmDialog.kind === 'revoke'
+            ? 'All active sessions will be terminated immediately.'
+            : confirmDialog.kind === 'impersonate'
+              ? 'You will be redirected to the user dashboard.'
+              : 'This action is permanent and cannot be undone.'
+        }
+        confirmLabel={
+          confirmDialog.kind === 'revoke'
+            ? 'Revoke sessions'
+            : confirmDialog.kind === 'impersonate'
+              ? 'Impersonate'
+              : 'Delete user'
+        }
+        destructive={confirmDialog.kind === 'delete'}
+        pending={loading === confirmDialog.userId}
+        onClose={() => {
+          if (loading === confirmDialog.userId) return;
+          setConfirmDialog({
+            open: false,
+            kind: null,
+            userId: '',
+            name: '',
+            email: '',
+          });
+        }}
+        onConfirm={() => {
+          if (confirmDialog.kind === 'revoke') {
+            void revokeSessions();
+            return;
+          }
+          if (confirmDialog.kind === 'impersonate') {
+            void impersonate();
+            return;
+          }
+          if (confirmDialog.kind === 'delete') {
+            void removeUser();
+          }
+        }}
+      />
+
+      <ToastRegion toasts={toasts} onDismiss={dismissToast} />
+    </>
   );
 }

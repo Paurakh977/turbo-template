@@ -22,10 +22,15 @@ export default async function AdminPage() {
   const actorRole = getPrimaryRole(actorRoleRaw);
 
   return (
-    <div>
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold tracking-tight">User Management</h1>
-        <p className="text-muted-foreground text-sm mt-1">
+    <div className="space-y-6">
+      <div className="rounded-2xl border border-border/70 bg-card/70 p-4 shadow-sm sm:p-5">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Administration
+        </p>
+        <h1 className="mt-1 text-2xl font-semibold tracking-tight text-foreground">
+          User Management
+        </h1>
+        <p className="mt-1 text-sm text-muted-foreground">
           {result.total} total users
         </p>
       </div>
