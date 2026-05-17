@@ -35,7 +35,6 @@ model User {
   @@map("user")
 }
 
-/// Notes created by users — operators can write/edit, admins+ can delete.
 model Note {
   id        String   @id @default(cuid())
   title     String
