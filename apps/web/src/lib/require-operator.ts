@@ -18,7 +18,7 @@ export async function requireOperator(): Promise<Session> {
   const h = await headers();
   const session = await auth.api.getSession({ headers: h });
 
-  if (!session) redirect('/auth/sign-in');
+  if (!session) redirect('/auth');
 
   const roleRaw = (session.user as { role?: string }).role ?? 'user';
 

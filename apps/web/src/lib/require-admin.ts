@@ -31,7 +31,7 @@ export async function requireAdmin(): Promise<SessionWithRole> {
   const h = await headers();
   const session = await auth.api.getSession({ headers: h });
 
-  if (!session) redirect('/auth/sign-in');
+  if (!session) redirect('/auth');
 
   const impersonatedBy =
     (session as { session?: { impersonatedBy?: string | null } }).session
