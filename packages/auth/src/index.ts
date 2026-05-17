@@ -15,6 +15,8 @@ export {
   canActOn,
 } from './roles';
 export {
+  AUTH_BASE_PATH,
+  ADMIN_PLUGIN_ROLES,
   ac,
   adminRole,
   userRole,

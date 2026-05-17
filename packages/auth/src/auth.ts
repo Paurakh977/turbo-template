@@ -4,17 +4,10 @@ import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { twoFactor } from 'better-auth/plugins/two-factor';
 import { admin } from 'better-auth/plugins/admin';
 import { jwt } from 'better-auth/plugins';
+import { nextCookies } from 'better-auth/next-js';
 import Redis from 'ioredis';
 import { Resend } from 'resend';
-import {
-  ac,
-  adminRole,
-  operatorRole,
-  settingsLabsGrantRole,
-  settingsThemeGrantRole,
-  superAdminRole,
-  userRole,
-} from './permissions';
+import { AUTH_BASE_PATH, ADMIN_PLUGIN_ROLES, ac } from './permissions';
 import {
   createAuthMiddleware,
   getSessionFromCtx,
@@ -26,6 +19,64 @@ export const ADMIN_ROLES = ['admin', 'superAdmin'] as const;
 export type AdminRole = (typeof ADMIN_ROLES)[number];
 
 import { parseRoles, serializeRoles, getMaxRoleWeight } from './roles';
+
+// Deletion request context
+// Stashed in the before hook (where headers are available) and consumed in
+// databaseHooks.user.delete.after (where headers are not).
+interface PendingDeletionMeta {
+  ipAddress: string | null;
+  userAgent: string | null;
+  email: string | null;
+  sessionToken: string | null; 
+  sessionId: string | null;    
+}
+
+async function storePendingDeletion(userId: string, meta: PendingDeletionMeta) {
+  if (redis) {
+    await redis
+      .set(
+        `pending_deletion:${userId}`,
+        JSON.stringify(meta),
+        'PX',
+        PENDING_TTL_MS,
+      )
+      .catch((e) => console.error('[Redis Error] storePendingDeletion:', e));
+  } else {
+    pendingUserUpdates.set(`deletion:${userId}`, {
+      data: meta as unknown as UserData,
+      ts: Date.now(),
+    });
+  }
+}
+
+async function popPendingDeletion(
+  userId: string,
+): Promise<PendingDeletionMeta | undefined> {
+  if (redis) {
+    const raw = await redis.get(`pending_deletion:${userId}`).catch((e) => {
+      console.error('[Redis Error] popPendingDeletion:', e);
+      return null;
+    });
+    if (raw) {
+      await redis
+        .del(`pending_deletion:${userId}`)
+        .catch((e) => console.error('[Redis Error]', e));
+      try {
+        return JSON.parse(raw) as PendingDeletionMeta;
+      } catch {
+        return undefined;
+      }
+    }
+    return undefined;
+  } else {
+    const key = `deletion:${userId}`;
+    const entry = pendingUserUpdates.get(key);
+    pendingUserUpdates.delete(key);
+    if (!entry) return undefined;
+    if (Date.now() - entry.ts > PENDING_TTL_MS) return undefined;
+    return entry.data as unknown as PendingDeletionMeta;
+  }
+}
 
 /**
  * Server-side hierarchy guard.
@@ -142,7 +193,10 @@ async function popPendingUser(userId: string): Promise<UserData | undefined> {
 // the next request misses the cache, hits the DB, and fetches the fresh data
 // (like new roles, ban status, etc) instantly.
 // ---------------------------------------------------------------------------
-async function invalidateUserCache(userId: string) {
+async function invalidateUserCache(
+  userId: string,
+  options?: { sessionToken?: string | null; sessionId?: string | null },
+) {
   if (!redis) return;
   try {
     const userSessions = await db.session.findMany({ where: { userId } });
@@ -157,6 +211,15 @@ async function invalidateUserCache(userId: string) {
     // Also delete any cached user record directly
     pipeline.del(userId);
     pipeline.del(`user:${userId}`);
+
+    if (options?.sessionToken) {
+      pipeline.del(options.sessionToken);
+      pipeline.del(`session:${options.sessionToken}`);
+    }
+    if (options?.sessionId) {
+      pipeline.del(`session:${options.sessionId}`);
+    }
+
     await pipeline.exec();
     console.log(`[Cache] Invalidated secondary storage for user ${userId}`);
   } catch (e) {
@@ -455,44 +518,71 @@ const auditLogPlugin = (): BetterAuthPlugin => ({
         }),
       },
       {
-        // Intercept self-user deletion (user deleting their own account)
+        // Intercept self-user deletion (user deleting their own account).
+        //
+        // ⚠️  AUDIT LOG REMOVED FROM HERE intentionally.
+        //
+        // Previously, `account_deleted` was written in this before hook, which
+        // fired even when Better Auth subsequently rejected the request due to
+        // an incorrect password — producing a false audit entry for a deletion
+        // that never happened.
+        //
+        // The audit log is now written in databaseHooks.user.delete.after,
+        // which only fires after the DB row is actually removed, guaranteeing
+        // the log entry reflects a real deletion.
+        //
+        // This hook now only:
+        //   1. Guards against a missing password for credential accounts.
+        //   2. Stashes IP, user-agent, email, and session context for the
+        //      databaseHooks.user.delete.after audit log + cache invalidation.
         matcher: (ctx) => ctx.path === '/delete-user',
         handler: createAuthMiddleware(async (ctx) => {
           const session = await getSessionFromCtx(ctx);
           if (!session?.user?.id) return;
 
           const userId = session.user.id;
-          const ipAddress = ctx.headers?.get('x-forwarded-for') ?? undefined;
-          const userAgent = ctx.headers?.get('user-agent') ?? undefined;
+          const currentSession = (
+          session as {
+            session?: { token?: string | null; id?: string | null };
+          }
+        ).session;
+          const body = ctx.body as { password?: string } | undefined;
+          const accounts = await db.account.findMany({
+            where: { userId },
+            select: { providerId: true },
+          });
 
+          const hasCredentialAccount = accounts.some(
+            (acc) => acc.providerId === 'credential',
+          );
+
+          if (hasCredentialAccount && !body?.password) {
+            throw new APIError('BAD_REQUEST', {
+              message: 'Password is required to confirm account deletion.',
+            });
+          }
+
+          // Stash request context now (headers available here) so the
+          // databaseHooks after callback can attach them to the audit entry.
+          // The entry is only consumed if deletion actually commits.
           const targetUser = await db.user
             .findUnique({ where: { id: userId } })
             .catch(() => null);
 
-          // Use account_deleted (no actor) so it shows as "Self" in audit log
-          await db.auditLog
-            .create({
-              data: {
-                userId,
-                action: 'account_deleted',
-                actor: null,
-                ipAddress,
-                userAgent,
-                metadata: { email: targetUser?.email ?? null },
-              },
-            })
-            .catch((e: unknown) =>
-              console.error('[AuditLog] account_deleted failed:', e),
-            );
+          await storePendingDeletion(userId, {
+            ipAddress: ctx.headers?.get('x-forwarded-for') ?? null,
+            userAgent: ctx.headers?.get('user-agent') ?? null,
+            email: targetUser?.email ?? null,
+            sessionToken: currentSession?.token ?? null, 
+            sessionId: currentSession?.id ?? null,
+          });
 
-          // Invalidate cache to clear sessions and user data from Redis
-          await invalidateUserCache(userId);
+          // invalidate cache is implemented in the databaseHooks.user.delete.after
         }),
       },
     ],
   },
 });
-
 function getEnv(name: string, { required = true } = {}): string | undefined {
   const value = process.env[name]?.trim();
   if (value) return value;
@@ -572,7 +662,7 @@ async function sendEmail({
 export const auth = betterAuth({
   appName,
   baseURL,
-  basePath: '/api/auth',
+  basePath: AUTH_BASE_PATH,
   secret,
 
   account: {
@@ -759,9 +849,44 @@ export const auth = betterAuth({
         },
       },
 
-      // Hard user delete - now handled by auditLogPlugin at HTTP layer
-      // to capture actor and IP. This database hook is removed to avoid
-      // duplicate entries (admin plugin bypasses this and goes through HTTP).
+      delete: {
+        after: async (user) => {
+          const u = user as unknown as UserData;
+          if (!u?.id) return;
+
+          const meta = await popPendingDeletion(u.id);
+
+          if (meta) {
+            await db.auditLog
+              .create({
+                data: {
+                  userId: u.id,
+                  action: 'account_deleted',
+                  actor: null,
+                  ipAddress: meta.ipAddress ?? null,
+                  userAgent: meta.userAgent ?? null,
+                  metadata: { email: meta.email ?? u.email ?? null },
+                },
+              })
+              .catch((e: unknown) =>
+                console.error('[AuditLog] account_deleted failed:', e),
+              );
+          }
+
+          // Pass session token/id from the stash — by this point the sessions are
+          // already deleted from the DB, so findMany returns []. Without these options
+          // the session-specific Redis keys would survive until natural TTL expiry,
+          // leaving a window where the deleted user's token could still authenticate.
+          await invalidateUserCache(u.id, {
+            sessionToken: meta?.sessionToken ?? null,
+            sessionId: meta?.sessionId ?? null,
+          });
+        },
+      },
+
+      // Self-deletion: audit log + cache invalidation handled in delete.after above.
+      // Admin-initiated deletion: audit log is in auditLogPlugin's /admin/remove-user
+      // hook to capture the actor's identity and IP address.
     },
 
     session: {
@@ -957,6 +1082,10 @@ export const auth = betterAuth({
     updateAge: process.env.SESSION_UPDATE_AGE
       ? parseInt(process.env.SESSION_UPDATE_AGE)
       : 60 * 60 * 24, // 1 day
+
+    freshAge: process.env.SESSION_FRESH_AGE
+      ? parseInt(process.env.SESSION_FRESH_AGE)
+      : 60 * 15, // 15 minutes for destructive actions like delete-user
   },
 
   // -------------------------------------------------------------------------
@@ -1081,14 +1210,7 @@ export const auth = betterAuth({
 
     admin({
       ac,
-      roles: {
-        user: userRole,
-        operator: operatorRole,
-        admin: adminRole,
-        superAdmin: superAdminRole,
-        settingsThemeGrant: settingsThemeGrantRole,
-        settingsLabsGrant: settingsLabsGrantRole,
-      },
+      roles: ADMIN_PLUGIN_ROLES,
       adminRoles: ['admin', 'superAdmin'], // only admin + superAdmin get the admin panel
       defaultRole: 'user',
       defaultBanReason: 'Violated terms of service',
@@ -1114,6 +1236,10 @@ export const auth = betterAuth({
     }),
 
     auditLogPlugin(),
+
+    // Must be last for Next.js Server Actions so Set-Cookie headers from
+    // auth.api.* calls (e.g. deleteUser/signOut) are applied to the response.
+    nextCookies(),
   ],
 });
 
