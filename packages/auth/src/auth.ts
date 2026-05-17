@@ -454,6 +454,41 @@ const auditLogPlugin = (): BetterAuthPlugin => ({
             );
         }),
       },
+      {
+        // Intercept self-user deletion (user deleting their own account)
+        matcher: (ctx) => ctx.path === '/delete-user',
+        handler: createAuthMiddleware(async (ctx) => {
+          const session = await getSessionFromCtx(ctx);
+          if (!session?.user?.id) return;
+
+          const userId = session.user.id;
+          const ipAddress = ctx.headers?.get('x-forwarded-for') ?? undefined;
+          const userAgent = ctx.headers?.get('user-agent') ?? undefined;
+
+          const targetUser = await db.user
+            .findUnique({ where: { id: userId } })
+            .catch(() => null);
+
+          // Use account_deleted (no actor) so it shows as "Self" in audit log
+          await db.auditLog
+            .create({
+              data: {
+                userId,
+                action: 'account_deleted',
+                actor: null,
+                ipAddress,
+                userAgent,
+                metadata: { email: targetUser?.email ?? null },
+              },
+            })
+            .catch((e: unknown) =>
+              console.error('[AuditLog] account_deleted failed:', e),
+            );
+
+          // Invalidate cache to clear sessions and user data from Redis
+          await invalidateUserCache(userId);
+        }),
+      },
     ],
   },
 });
@@ -542,6 +577,12 @@ export const auth = betterAuth({
 
   account: {
     encryptOAuthTokens: true,
+  },
+
+  user: {
+    deleteUser: {
+      enabled: true,
+    },
   },
 
   // -------------------------------------------------------------------------
