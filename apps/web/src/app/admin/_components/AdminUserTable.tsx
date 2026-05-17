@@ -60,10 +60,10 @@ function assignableRoles(actorRole: string): BaseRole[] {
 }
 
 const ROLE_BADGE: Record<string, string> = {
-  superAdmin: 'bg-purple-500/10 text-purple-300 border-purple-500/30',
-  admin: 'bg-blue-500/10 text-blue-300 border-blue-500/30',
-  operator: 'bg-amber-500/10 text-amber-300 border-amber-500/30',
-  user: 'bg-muted/50 text-muted-foreground border-border/70',
+  superAdmin: 'bg-primary text-primary-foreground',
+  admin: 'bg-primary text-primary-foreground',
+  operator: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20',
+  user: 'bg-muted text-muted-foreground border border-border/50',
 };
 
 export function AdminUserTable({
@@ -156,11 +156,11 @@ export function AdminUserTable({
         prev.map((u) =>
           u.id === banDialog.userId
             ? {
-                ...u,
-                banned: true,
-                banReason:
-                  banDialog.reason.trim() || 'Violated terms of service',
-              }
+              ...u,
+              banned: true,
+              banReason:
+                banDialog.reason.trim() || 'Violated terms of service',
+            }
             : u,
         ),
       );
@@ -289,23 +289,23 @@ export function AdminUserTable({
           />
         </div>
 
-        <div className="overflow-x-auto rounded-2xl border border-border/70 bg-card/70">
+        <div className="overflow-hidden rounded-2xl border border-border/60 bg-card shadow-sm dark:bg-white/[0.01] dark:shadow-[0_4px_24px_rgba(0,0,0,0.2)]">
           <table className="min-w-[980px] w-full text-sm">
             <thead>
-              <tr className="border-b border-border/60 bg-muted/30">
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <tr className="border-b border-border/40 bg-muted/20">
+                <th className="px-5 py-4 text-left text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
                   User
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <th className="px-5 py-4 text-left text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
                   Role
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <th className="px-5 py-4 text-left text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
                   Status
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <th className="px-5 py-4 text-left text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
                   Joined
                 </th>
-                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <th className="px-5 py-4 text-right text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
                   Actions
                 </th>
               </tr>
@@ -340,7 +340,7 @@ export function AdminUserTable({
                   return (
                     <tr
                       key={user.id}
-                      className="border-b border-border/40 align-top last:border-0 hover:bg-muted/20"
+                      className="border-b border-border/30 align-top last:border-0 hover:bg-muted/30 transition-colors"
                     >
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
@@ -363,30 +363,32 @@ export function AdminUserTable({
                         ) : null}
                       </td>
 
-                      <td className="px-4 py-3">
+                      <td className="px-5 py-4">
                         <span
-                          className={`inline-flex rounded-md border px-2 py-0.5 text-[11px] font-semibold ${userRoleBadge}`}
+                          className={`inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${userRoleBadge}`}
                         >
                           {baseRole}
                         </span>
                       </td>
 
-                      <td className="px-4 py-3">
+                      <td className="px-5 py-4">
                         {user.banned ? (
-                          <span className="text-xs text-red-300">
+                          <span className="text-[13px] font-medium text-destructive flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-destructive"></span>
                             Banned
                             {user.banReason
                               ? `: ${user.banReason.slice(0, 32)}`
                               : ''}
                           </span>
                         ) : (
-                          <span className="text-xs text-emerald-300">
+                          <span className="text-[13px] font-medium text-muted-foreground flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
                             Active
                           </span>
                         )}
                       </td>
 
-                      <td className="px-4 py-3 text-xs text-muted-foreground">
+                      <td className="px-5 py-4 text-[13px] text-muted-foreground">
                         {new Date(user.createdAt).toLocaleDateString()}
                       </td>
 
@@ -410,7 +412,7 @@ export function AdminUserTable({
                                       }),
                                     )
                                   }
-                                  className="cursor-pointer rounded-md border border-border/70 bg-background px-2 py-1 text-xs text-foreground outline-none transition-colors focus:border-primary/50"
+                                  className="cursor-pointer rounded-md border border-border bg-background px-2 py-1 text-[11px] font-medium text-foreground outline-none transition-colors focus:border-primary/50"
                                   title="Change role"
                                 >
                                   {!allowed.includes(baseRole) ? (
@@ -438,7 +440,7 @@ export function AdminUserTable({
                                       }),
                                     )
                                   }
-                                  className="rounded-md border border-indigo-500/30 bg-indigo-500/10 px-2 py-1 text-xs font-medium text-indigo-300 hover:bg-indigo-500/20"
+                                  className="rounded-lg border border-indigo-500/20 bg-indigo-500/10 px-2.5 py-1.5 text-[11px] font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/20 transition-colors"
                                 >
                                   {hasThemeGrant
                                     ? 'Revoke Theme'
@@ -458,7 +460,7 @@ export function AdminUserTable({
                                       }),
                                     )
                                   }
-                                  className="rounded-md border border-fuchsia-500/30 bg-fuchsia-500/10 px-2 py-1 text-xs font-medium text-fuchsia-300 hover:bg-fuchsia-500/20"
+                                  className="rounded-lg border border-fuchsia-500/20 bg-fuchsia-500/10 px-2.5 py-1.5 text-[11px] font-medium text-fuchsia-600 dark:text-fuchsia-400 hover:bg-fuchsia-500/20 transition-colors"
                                 >
                                   {hasLabsGrant ? 'Revoke Labs' : 'Grant Labs'}
                                 </button>
@@ -468,7 +470,7 @@ export function AdminUserTable({
                                 <button
                                   type="button"
                                   onClick={() => unban(user.id)}
-                                  className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-300 hover:bg-emerald-500/20"
+                                  className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 transition-colors"
                                 >
                                   Unban
                                 </button>
@@ -483,7 +485,7 @@ export function AdminUserTable({
                                       reason: 'Violated terms of service',
                                     })
                                   }
-                                  className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-300 hover:bg-amber-500/20"
+                                  className="rounded-lg border border-destructive/20 bg-destructive/10 px-2.5 py-1.5 text-[11px] font-medium text-destructive hover:bg-destructive/20 transition-colors"
                                 >
                                   Ban
                                 </button>
@@ -500,7 +502,7 @@ export function AdminUserTable({
                                     email: user.email,
                                   })
                                 }
-                                className="rounded-md border border-border/70 bg-background px-2 py-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+                                className="rounded-lg border border-border/60 bg-background px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
                               >
                                 Revoke
                               </button>
@@ -516,7 +518,7 @@ export function AdminUserTable({
                                     email: user.email,
                                   })
                                 }
-                                className="rounded-md border border-yellow-500/30 bg-yellow-500/10 px-2 py-1 text-xs font-medium text-yellow-300 hover:bg-yellow-500/20"
+                                className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-2.5 py-1.5 text-[11px] font-medium text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 transition-colors"
                               >
                                 Impersonate
                               </button>
@@ -532,7 +534,7 @@ export function AdminUserTable({
                                     email: user.email,
                                   })
                                 }
-                                className="rounded-md border border-red-500/30 bg-red-500/10 px-2 py-1 text-xs font-medium text-red-300 hover:bg-red-500/20"
+                                className="rounded-lg border border-destructive/20 bg-destructive/10 px-2.5 py-1.5 text-[11px] font-medium text-destructive hover:bg-destructive/20 transition-colors"
                               >
                                 Delete
                               </button>

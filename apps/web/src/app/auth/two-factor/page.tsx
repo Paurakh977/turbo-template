@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { authClient } from '../../../lib/auth-client';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -18,6 +19,20 @@ export default function TwoFactorPage() {
 
   const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();
+    const nextCode =
+      method === 'backup' ? code.trim() : code.replace(/\D/g, '').slice(0, 6);
+    setCode(nextCode);
+
+    if (method !== 'backup' && !/^\d{6}$/.test(nextCode)) {
+      setError('Enter a valid 6-digit code.');
+      return;
+    }
+
+    if (method === 'backup' && !nextCode) {
+      setError('Backup code is required.');
+      return;
+    }
+
     setLoading(true);
     setError('');
     setInfo('');
@@ -25,12 +40,18 @@ export default function TwoFactorPage() {
     let result;
 
     if (method === 'totp') {
-      result = await authClient.twoFactor.verifyTotp({ code, trustDevice });
+      result = await authClient.twoFactor.verifyTotp({
+        code: nextCode,
+        trustDevice,
+      });
     } else if (method === 'otp') {
-      result = await authClient.twoFactor.verifyOtp({ code, trustDevice });
+      result = await authClient.twoFactor.verifyOtp({
+        code: nextCode,
+        trustDevice,
+      });
     } else {
       result = await authClient.twoFactor.verifyBackupCode({
-        code,
+        code: nextCode,
         trustDevice,
       });
     }
@@ -55,17 +76,14 @@ export default function TwoFactorPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background text-foreground font-sans relative overflow-hidden p-4">
-      {/* Ambient background blur */}
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-primary/5 rounded-[100%] blur-[100px] pointer-events-none opacity-50"></div>
-
       <motion.div
         initial={{ opacity: 0, scale: 0.96 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-        className="relative z-10 bg-card/80 backdrop-blur-2xl border border-border/50 rounded-[24px] p-8 sm:p-10 w-full max-w-[400px] shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.2)]"
+        className="relative z-10 bg-card border border-border/50 rounded-xl p-8 sm:p-10 w-full max-w-[420px] shadow-sm"
       >
         <div className="mb-8 text-center">
-          <a href="/" style={{ textDecoration: 'none' }}>
+          <Link href="/" className="inline-block no-underline">
             <motion.div className="w-16 h-16 bg-white border border-border/60 rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-sm">
               <img
                 src="/logo.svg"
@@ -73,7 +91,7 @@ export default function TwoFactorPage() {
                 className="w-10 h-10 object-contain"
               />
             </motion.div>
-          </a>
+          </Link>
           <h1 className="text-2xl font-bold tracking-tight mb-1.5">
             Two-Step Verification
           </h1>
@@ -151,10 +169,17 @@ export default function TwoFactorPage() {
             type="text"
             placeholder={method === 'backup' ? 'Backup code' : '000000'}
             value={code}
-            onChange={(e) => setCode(e.target.value)}
+            onChange={(e) => {
+              const raw = e.target.value;
+              setCode(
+                method === 'backup' ? raw : raw.replace(/\D/g, '').slice(0, 6),
+              );
+            }}
             maxLength={method === 'backup' ? 20 : 6}
             required
             autoComplete="one-time-code"
+            inputMode={method === 'backup' ? 'text' : 'numeric'}
+            pattern={method === 'backup' ? undefined : '[0-9]*'}
           />
 
           <label className="flex items-center gap-2.5 text-[13px] text-muted-foreground cursor-pointer justify-center mt-4">

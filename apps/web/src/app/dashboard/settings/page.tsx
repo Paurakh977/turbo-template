@@ -1,5 +1,6 @@
 import { headers } from 'next/headers';
 import { auth } from '@repo/auth';
+import { db } from '@repo/database';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { getPrimaryRole } from '@repo/auth/roles';
@@ -10,58 +11,71 @@ export const dynamic = 'force-dynamic';
 export default async function SettingsPage() {
   const h = await headers();
   const session = await auth.api.getSession({ headers: h });
-  if (!session) redirect('/auth/sign-in');
+  if (!session) redirect('/auth');
 
   const roleRaw = (session.user as { role?: string }).role ?? 'user';
   const role = getPrimaryRole(roleRaw);
 
-  const [canManageProfile, canManageTheme, canManageLabs, canManageDanger] =
-    await Promise.all([
-      auth.api.userHasPermission({
-        body: {
-          userId: session.user.id,
-          permissions: { settings: ['profile'] },
-        },
-      }),
-      auth.api.userHasPermission({
-        body: {
-          userId: session.user.id,
-          permissions: { settings: ['theme'] },
-        },
-      }),
-      auth.api.userHasPermission({
-        body: {
-          userId: session.user.id,
-          permissions: { settings: ['labs'] },
-        },
-      }),
-      auth.api.userHasPermission({
-        body: {
-          userId: session.user.id,
-          permissions: { settings: ['danger'] },
-        },
-      }),
-    ]);
+  const [
+    canManageProfile,
+    canManageTheme,
+    canManageLabs,
+    canManageDanger,
+    accounts,
+  ] = await Promise.all([
+    auth.api.userHasPermission({
+      body: {
+        userId: session.user.id,
+        permissions: { settings: ['profile'] },
+      },
+    }),
+    auth.api.userHasPermission({
+      body: {
+        userId: session.user.id,
+        permissions: { settings: ['theme'] },
+      },
+    }),
+    auth.api.userHasPermission({
+      body: {
+        userId: session.user.id,
+        permissions: { settings: ['labs'] },
+      },
+    }),
+    auth.api.userHasPermission({
+      body: {
+        userId: session.user.id,
+        permissions: { settings: ['danger'] },
+      },
+    }),
+    db.account.findMany({
+      where: { userId: session.user.id },
+      select: { providerId: true },
+    }),
+  ]);
+
+  const hasPasswordAccount = accounts.some(
+    (acc) => acc.providerId === 'credential',
+  );
 
   return (
     <div className="min-h-screen bg-background text-foreground">
       <div className="mx-auto max-w-[680px] space-y-6 px-4 py-8 sm:px-6 sm:py-10">
-        <div className="rounded-2xl border border-border/70 bg-card/70 p-4 shadow-sm sm:p-5">
+        <div className="rounded-xl border border-border bg-card p-4 shadow-sm sm:p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <p className="text-[12px] font-medium text-muted-foreground">
                 Account
               </p>
               <h1 className="mt-1 text-2xl font-semibold tracking-tight">
                 Settings
               </h1>
-              <p className="mt-1 text-sm text-muted-foreground">
+              <p className="mt-1 text-[13px] text-muted-foreground">
                 Manage your profile, access, and account safety controls.
               </p>
             </div>
             <Link
               href="/dashboard"
-              className="rounded-lg border border-border/70 bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+              className="rounded-lg border border-border bg-background px-3 py-1.5 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground"
             >
               Back
             </Link>
@@ -83,6 +97,7 @@ export default async function SettingsPage() {
             canManageLabs: canManageLabs?.success === true,
             canManageDanger: canManageDanger?.success === true,
           }}
+          hasPasswordAccount={hasPasswordAccount}
         />
       </div>
     </div>

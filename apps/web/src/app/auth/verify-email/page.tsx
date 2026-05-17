@@ -2,6 +2,7 @@
 
 import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { authClient } from '../../../lib/auth-client';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -14,28 +15,53 @@ function VerifyEmailContent() {
   const [message, setMessage] = useState('');
 
   useEffect(() => {
-    authClient.getSession().then(({ data }) => {
-      if (data?.session) {
+    let isMounted = true;
+    const token = searchParams.get('token');
+
+    if (!token) {
+      setStatus('error');
+      setMessage('Invalid verification link. Please request a new one.');
+      return;
+    }
+
+    authClient
+      .verifyEmail({
+        query: { token },
+      })
+      .then(({ error }) => {
+        if (!isMounted) return;
+        if (error) {
+          setStatus('error');
+          setMessage(
+            error.message ??
+              'Verification link may have expired. Please request a new one.',
+          );
+          return;
+        }
+
         setStatus('success');
-        setTimeout(() => router.push('/dashboard'), 2000);
-      } else {
+        window.setTimeout(() => {
+          router.push('/dashboard');
+        }, 1200);
+      })
+      .catch(() => {
+        if (!isMounted) return;
         setStatus('error');
-        setMessage(
-          'Verification link may have expired. Please request a new one.',
-        );
-      }
-    });
-  }, [router]);
+        setMessage('Unable to verify email right now. Please try again.');
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [router, searchParams]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background text-foreground font-sans relative overflow-hidden p-4">
-      <div className="absolute inset-0 z-0 bg-[radial-gradient(circle_at_center,var(--primary)/0.03_0,transparent_100%)]"></div>
-
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.4 }}
-        className="relative z-10 bg-card/80 backdrop-blur-xl border border-border/50 rounded-[24px] p-10 w-full max-w-[400px] shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.2)] text-center"
+        className="relative z-10 bg-card border border-border/50 rounded-xl p-10 w-full max-w-[420px] shadow-sm text-center"
       >
         <AnimatePresence mode="wait">
           {status === 'loading' && (
@@ -62,7 +88,7 @@ function VerifyEmailContent() {
               animate={{ opacity: 1, scale: 1 }}
               transition={{ type: 'spring' }}
             >
-              <a href="/" style={{ textDecoration: 'none' }}>
+              <Link href="/" className="inline-block no-underline">
                 <div className="w-20 h-20 bg-white border border-border/60 rounded-full flex items-center justify-center mx-auto mb-6 shadow-sm">
                   <img
                     src="/logo.svg"
@@ -70,7 +96,7 @@ function VerifyEmailContent() {
                     className="w-12 h-12 object-contain"
                   />
                 </div>
-              </a>
+              </Link>
               <h2 className="text-xl font-bold tracking-tight">
                 Email verified!
               </h2>
@@ -87,7 +113,7 @@ function VerifyEmailContent() {
               animate={{ opacity: 1, scale: 1 }}
               transition={{ type: 'spring' }}
             >
-              <a href="/" style={{ textDecoration: 'none' }}>
+              <Link href="/" className="inline-block no-underline">
                 <div className="w-20 h-20 bg-white border border-border/60 rounded-full flex items-center justify-center mx-auto mb-6 shadow-sm">
                   <img
                     src="/logo.svg"
@@ -95,19 +121,19 @@ function VerifyEmailContent() {
                     className="w-12 h-12 object-contain"
                   />
                 </div>
-              </a>
+              </Link>
               <h2 className="text-xl font-bold tracking-tight">
                 Verification failed
               </h2>
               <p className="text-muted-foreground text-sm mt-2 mb-8 leading-relaxed">
                 {message}
               </p>
-              <a
+              <Link
                 href="/auth"
                 className="inline-block w-full py-2.5 bg-secondary text-secondary-foreground hover:bg-secondary/80 rounded-xl text-sm font-medium transition-all border border-border/50"
               >
                 Back to sign in
-              </a>
+              </Link>
             </motion.div>
           )}
         </AnimatePresence>

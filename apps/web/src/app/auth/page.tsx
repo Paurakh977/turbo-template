@@ -2,8 +2,10 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { authClient } from '../../lib/auth-client';
 import { motion, AnimatePresence } from 'framer-motion';
+import { PasswordInput } from '../_components/PasswordInput';
 
 export default function AuthPage() {
   const router = useRouter();
@@ -25,13 +27,48 @@ export default function AuthPage() {
   const [loading, setLoading] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
   const [resendSent, setResendSent] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<{
+    name?: string;
+    email?: string;
+    password?: string;
+  }>({});
   const APP_URL = process.env.NEXT_PUBLIC_APP_URL as string;
+  const appUrl =
+    APP_URL || (typeof window !== 'undefined' ? window.location.origin : '');
+
+  const isEmailValid = (value: string) => /^\S+@\S+\.\S+$/.test(value);
+
+  const validate = () => {
+    const nextErrors: { name?: string; email?: string; password?: string } = {};
+    const emailValue = email.trim();
+    const passwordValue = password.trim();
+    const nameValue = name.trim();
+
+    if (!isEmailValid(emailValue)) {
+      nextErrors.email = 'Enter a valid email address.';
+    }
+
+    if (passwordValue.length < 8) {
+      nextErrors.password = 'Password must be at least 8 characters.';
+    }
+
+    if (mode === 'signup') {
+      if (!nameValue) {
+        nextErrors.name = 'Name is required.';
+      } else if (nameValue.length > 80) {
+        nextErrors.name = 'Name must be 80 characters or less.';
+      }
+    }
+
+    setFieldErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  };
 
   const handleResendVerification = async () => {
     setResendLoading(true);
     const { error } = await authClient.sendVerificationEmail({
-      email,
-      callbackURL: `${APP_URL}/dashboard`,
+      email: email.trim(),
+      callbackURL: `${appUrl}/dashboard`,
     });
     if (error) setError(error.message ?? 'Failed to resend.');
     else setResendSent(true);
@@ -40,15 +77,16 @@ export default function AuthPage() {
 
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
     setError('');
+    if (!validate()) return;
+    setLoading(true);
 
     if (mode === 'signup') {
       const { error } = await authClient.signUp.email({
-        email,
+        email: email.trim(),
         password,
-        name,
-        callbackURL: `${APP_URL}/dashboard`,
+        name: name.trim(),
+        callbackURL: `${appUrl}/dashboard`,
       });
       if (error) {
         setError(error.message ?? 'Sign up failed');
@@ -58,8 +96,8 @@ export default function AuthPage() {
         return;
       }
     } else {
-      const { data, error } = await authClient.signIn.email(
-        { email, password, callbackURL: `${APP_URL}/dashboard` },
+      const { error } = await authClient.signIn.email(
+        { email: email.trim(), password, callbackURL: `${appUrl}/dashboard` },
         {
           onSuccess(ctx) {
             if (ctx.data?.twoFactorRedirect) return;
@@ -83,14 +121,14 @@ export default function AuthPage() {
   const handleGoogleSignIn = async () => {
     await authClient.signIn.social({
       provider: 'google',
-      callbackURL: `${APP_URL}/dashboard`,
+      callbackURL: `${appUrl}/dashboard`,
     });
   };
 
   const handleGithubSignIn = async () => {
     await authClient.signIn.social({
       provider: 'github',
-      callbackURL: `${APP_URL}/dashboard`,
+      callbackURL: `${appUrl}/dashboard`,
     });
   };
 
@@ -121,11 +159,10 @@ export default function AuthPage() {
   if (mode === 'verify-email') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background text-foreground font-sans relative overflow-hidden p-4">
-        <div className="absolute inset-0 z-0 bg-[radial-gradient(circle_at_center,hsl(var(--primary))/0.03_0,transparent_100%)]"></div>
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="relative z-10 bg-card border border-border/40 rounded-[24px] p-8 sm:p-10 w-full max-w-md shadow-2xl shadow-black/5"
+          className="relative z-10 bg-card border border-border/40 rounded-xl p-8 sm:p-10 w-full max-w-[420px] shadow-sm"
         >
           <div className="text-center">
             <motion.div
@@ -134,7 +171,7 @@ export default function AuthPage() {
               transition={{ type: 'spring', stiffness: 200, damping: 15 }}
               className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-6 text-2xl border border-primary/20"
             >
-              âœ‰ï¸
+              @
             </motion.div>
             <h2 className="text-2xl font-semibold tracking-tight mb-2">
               Check your email
@@ -151,7 +188,7 @@ export default function AuthPage() {
                 animate={{ opacity: 1 }}
                 className="text-green-500 text-sm font-medium mb-4 bg-green-500/10 py-2.5 rounded-xl border border-green-500/20"
               >
-                âœ“ Verification email resent
+                Verification email resent
               </motion.p>
             ) : (
               <button
@@ -170,10 +207,11 @@ export default function AuthPage() {
                 setMode('signin');
                 setError('');
                 setResendSent(false);
+                setFieldErrors({});
               }}
               className="mt-4 text-xs text-muted-foreground hover:text-foreground transition-colors font-medium"
             >
-              â† Back to sign in
+              Back to sign in
             </button>
           </div>
         </motion.div>
@@ -183,17 +221,14 @@ export default function AuthPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background text-foreground font-sans relative overflow-hidden p-4">
-      {/* Ambient background blur */}
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-primary/10 rounded-[100%] blur-[120px] pointer-events-none opacity-50"></div>
-
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-        className="relative z-10 bg-card/60 backdrop-blur-2xl border border-border/50 rounded-[28px] p-8 sm:p-10 w-full max-w-[420px] shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.2)]"
+        className="relative z-10 bg-card border border-border/50 rounded-xl p-8 sm:p-10 w-full max-w-[420px] shadow-sm"
       >
         <div className="mb-8 text-center">
-          <a href="/" style={{ textDecoration: 'none' }}>
+          <Link href="/" className="inline-block no-underline">
             <motion.div
               layoutId="logo"
               className="w-12 h-12 border border-border/60 bg-white rounded-xl flex items-center justify-center mx-auto mb-5 shadow-sm"
@@ -204,7 +239,7 @@ export default function AuthPage() {
                 className="w-8 h-8 object-contain"
               />
             </motion.div>
-          </a>
+          </Link>
           <h1 className="text-2xl font-bold tracking-tight">
             {mode === 'signin' ? 'Welcome back' : 'Create an account'}
           </h1>
@@ -253,9 +288,18 @@ export default function AuthPage() {
                   type="text"
                   placeholder="Full name"
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
+                  onChange={(e) => {
+                    setName(e.target.value);
+                    setFieldErrors((prev) => ({ ...prev, name: undefined }));
+                  }}
+                  maxLength={80}
                   required
                 />
+                {fieldErrors.name ? (
+                  <p className="mt-1 text-xs text-red-500">
+                    {fieldErrors.name}
+                  </p>
+                ) : null}
               </motion.div>
             )}
           </AnimatePresence>
@@ -265,18 +309,28 @@ export default function AuthPage() {
             type="email"
             placeholder="Email address"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              setFieldErrors((prev) => ({ ...prev, email: undefined }));
+            }}
             required
           />
-          <input
-            className="w-full px-4 py-3 bg-background/50 border border-border/60 rounded-xl text-[14px] outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all placeholder:text-muted-foreground/70"
-            type="password"
+          {fieldErrors.email ? (
+            <p className="-mt-2 text-xs text-red-500">{fieldErrors.email}</p>
+          ) : null}
+          <PasswordInput
             placeholder="Password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(e) => {
+              setPassword(e.target.value);
+              setFieldErrors((prev) => ({ ...prev, password: undefined }));
+            }}
             minLength={8}
             required
           />
+          {fieldErrors.password ? (
+            <p className="-mt-2 text-xs text-red-500">{fieldErrors.password}</p>
+          ) : null}
 
           <AnimatePresence>
             {error && (
@@ -317,6 +371,7 @@ export default function AuthPage() {
               onClick={() => {
                 setMode(mode === 'signin' ? 'signup' : 'signin');
                 setError('');
+                setFieldErrors({});
               }}
               className="text-foreground font-medium hover:underline"
             >
@@ -325,12 +380,12 @@ export default function AuthPage() {
           </p>
           {mode === 'signin' && (
             <p className="text-[13px]">
-              <a
+              <Link
                 href="/auth/forgot-password"
                 className="text-muted-foreground hover:text-foreground transition-colors font-medium"
               >
                 Forgot your password?
-              </a>
+              </Link>
             </p>
           )}
         </div>

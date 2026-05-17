@@ -9,7 +9,7 @@ import { auth } from '@repo/auth';
 async function getSessionOrRedirect() {
   const h = await headers();
   const session = await auth.api.getSession({ headers: h });
-  if (!session) redirect('/auth/sign-in');
+  if (!session) redirect('/auth');
   return session;
 }
 
@@ -131,18 +131,32 @@ export async function deleteAccountAction(formData: FormData) {
     return { error: 'Only admin roles can use this dangerous setting.' };
   }
 
+  const hasPassword =
+    ((formData.get('hasPassword') as string) ?? '') === 'true';
   const password = ((formData.get('password') as string) ?? '').trim();
 
-  if (!password) {
+  if (hasPassword && !password) {
     return { error: 'Password is required to confirm account deletion.' };
   }
 
+  const deleteBody: { password?: string } = {};
+  if (password) {
+    deleteBody.password = password;
+  }
+
+  console.log(
+    '[DeleteUser] Attempting delete for:',
+    session.user.email,
+    'with body:',
+    deleteBody,
+  );
+
   await auth.api.deleteUser({
-    body: { password, callbackURL: '/' },
+    body: deleteBody,
     headers: await headers(),
   });
 
-  await logAudit(session.user.id, 'account_deleted');
+  console.log('[DeleteUser] Deleted successfully, redirecting...');
 
   redirect('/');
 }

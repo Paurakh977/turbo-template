@@ -9,7 +9,7 @@ import { auth, hasAdminRole } from '@repo/auth';
 async function getSessionOrRedirect() {
   const h = await headers();
   const session = await auth.api.getSession({ headers: h });
-  if (!session) redirect('/auth/sign-in');
+  if (!session) redirect('/auth');
   return session;
 }
 

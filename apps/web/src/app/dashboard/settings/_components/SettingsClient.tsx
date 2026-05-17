@@ -13,6 +13,7 @@ import {
   type ToastItem,
   type ToastKind,
 } from '../../../_components/ToastRegion';
+import { PasswordInput } from '../../../_components/PasswordInput';
 
 type UserProps = {
   id: string;
@@ -35,10 +36,10 @@ type ToastApi = {
 };
 
 const ROLE_COLOR: Record<string, string> = {
-  superAdmin: 'bg-purple-500/10 text-purple-300 border-purple-500/30',
-  admin: 'bg-blue-500/10 text-blue-300 border-blue-500/30',
-  operator: 'bg-amber-500/10 text-amber-300 border-amber-500/30',
-  user: 'bg-muted/60 text-muted-foreground border-border/70',
+  superAdmin: 'bg-primary text-primary-foreground',
+  admin: 'bg-primary text-primary-foreground',
+  operator: 'bg-secondary text-secondary-foreground',
+  user: 'bg-secondary text-secondary-foreground',
 };
 
 function Section({
@@ -51,13 +52,13 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-2xl border border-border/70 bg-card/80 p-5 shadow-sm sm:p-6">
-      <div className="mb-4 border-b border-border/40 pb-3">
-        <h2 className="text-sm font-semibold tracking-tight text-foreground">
+    <section className="rounded-2xl border border-border/60 bg-card p-6 shadow-sm transition-all hover:shadow-md dark:bg-white/[0.01] dark:shadow-[0_4px_24px_rgba(0,0,0,0.2)] dark:hover:border-border/80 dark:hover:shadow-[0_8px_32px_rgba(0,0,0,0.4)]">
+      <div className="mb-5 border-b border-border/40 pb-4">
+        <h2 className="text-[15px] font-semibold tracking-tight text-foreground">
           {title}
         </h2>
         {description ? (
-          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+          <p className="mt-1 text-[13px] text-muted-foreground">
             {description}
           </p>
         ) : null}
@@ -79,10 +80,8 @@ function FieldRow({
   return (
     <div className="flex flex-col gap-3 py-2 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0 flex-1">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          {label}
-        </p>
-        <div className="mt-1 text-sm text-foreground/90">{value}</div>
+        <p className="text-[13px] font-medium text-foreground">{label}</p>
+        <div className="mt-1 text-[13px] text-muted-foreground">{value}</div>
       </div>
       {action ? <div className="shrink-0">{action}</div> : null}
     </div>
@@ -133,8 +132,8 @@ function ProfileSection({
       title="Profile"
       description="Public identity and basic account details."
     >
-      <div className="flex items-center gap-3">
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border/60 bg-secondary text-base font-semibold text-foreground/70">
+      <div className="flex items-center gap-4">
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-secondary text-base font-medium text-foreground">
           {user.image ? (
             <img
               src={user.image}
@@ -148,11 +147,11 @@ function ProfileSection({
           )}
         </div>
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-foreground">
+          <p className="truncate text-[15px] font-medium text-foreground">
             {user.name}
           </p>
           <span
-            className={`mt-1 inline-flex rounded-md border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${ROLE_COLOR[user.role] ?? ROLE_COLOR.user}`}
+            className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${ROLE_COLOR[user.role] ?? ROLE_COLOR.user}`}
           >
             {user.role}
           </span>
@@ -168,7 +167,7 @@ function ProfileSection({
                 ref={nameRef}
                 defaultValue={user.name}
                 maxLength={80}
-                className="w-full rounded-lg border border-border/70 bg-background px-3 py-2 text-sm outline-none transition-colors focus:border-primary/50"
+                className="w-full rounded-xl border border-border/60 bg-background px-4 py-2.5 text-[14px] outline-none transition-colors focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
               />
             ) : (
               user.name
@@ -201,7 +200,7 @@ function ProfileSection({
                 <button
                   type="button"
                   onClick={() => setEditing(true)}
-                  className="rounded-lg border border-border/70 bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted/40"
+                  className="rounded-lg border border-border/60 bg-background px-4 py-2 text-[13px] font-medium text-foreground transition-colors hover:bg-muted hover:text-foreground"
                 >
                   Edit
                 </button>
@@ -225,9 +224,11 @@ function ProfileSection({
 
 function DangerSection({
   canManageDanger,
+  hasPasswordAccount,
   toastApi,
 }: {
   canManageDanger: boolean;
+  hasPasswordAccount: boolean;
   toastApi: ToastApi;
 }) {
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -237,22 +238,28 @@ function DangerSection({
 
   const submitDelete = () => {
     if (!canManageDanger) return;
-    const trimmed = password.trim();
-    if (!trimmed) {
-      setInlineError('Password is required.');
-      return;
+
+    if (hasPasswordAccount) {
+      const trimmed = password.trim();
+      if (!trimmed) {
+        setInlineError('Password is required.');
+        return;
+      }
     }
 
     start(async () => {
       const fd = new FormData();
-      fd.append('password', trimmed);
+      fd.append('hasPassword', hasPasswordAccount ? 'true' : 'false');
+      if (hasPasswordAccount) {
+        fd.append('password', password.trim());
+      }
       const res = await deleteAccountAction(fd);
       if (res?.error) {
         setInlineError(res.error);
         toastApi.pushToast('error', res.error);
         return;
       }
-      toastApi.pushToast('success', 'Account deletion requested.');
+      toastApi.pushToast('success', 'Account deleted.');
     });
   };
 
@@ -272,7 +279,7 @@ function DangerSection({
               setDeleteOpen(true);
             }}
             disabled={!canManageDanger}
-            className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-300 transition-colors hover:bg-red-500/20 disabled:opacity-50"
+            className="rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-2 text-[13px] font-medium text-destructive transition-colors hover:bg-destructive/20 disabled:opacity-50"
           >
             Delete
           </button>
@@ -288,7 +295,11 @@ function DangerSection({
       <ActionDialog
         open={deleteOpen}
         title="Delete account"
-        description="This action cannot be undone. Enter your password to confirm permanently deleting this account."
+        description={
+          hasPasswordAccount
+            ? 'This action cannot be undone. Enter your password to confirm permanently deleting your account.'
+            : 'This action cannot be undone. Your account will be permanently deleted.'
+        }
         confirmLabel="Delete account"
         destructive
         pending={isPending}
@@ -300,19 +311,27 @@ function DangerSection({
         }}
         onConfirm={submitDelete}
       >
-        <input
-          type="password"
-          value={password}
-          onChange={(event) => {
-            setPassword(event.target.value);
-            setInlineError('');
-          }}
-          placeholder="Confirm password"
-          className="w-full rounded-lg border border-border/70 bg-background px-3 py-2 text-sm outline-none transition-colors focus:border-primary/50"
-        />
-        {inlineError ? (
-          <p className="mt-2 text-xs text-red-300">{inlineError}</p>
-        ) : null}
+        {hasPasswordAccount ? (
+          <>
+            <PasswordInput
+              value={password}
+              onChange={(event) => {
+                setPassword(event.target.value);
+                setInlineError('');
+              }}
+              placeholder="Confirm password"
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none transition-colors focus:border-primary/50"
+            />
+            {inlineError ? (
+              <p className="mt-2 text-xs text-red-300">{inlineError}</p>
+            ) : null}
+          </>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            You signed in via OAuth. Click delete to permanently remove your
+            account.
+          </p>
+        )}
       </ActionDialog>
     </Section>
   );
@@ -325,7 +344,23 @@ function ThemeSection({
   canManageTheme: boolean;
   toastApi: ToastApi;
 }) {
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [isPending, start] = useTransition();
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem('theme');
+    const prefersDark = window.matchMedia(
+      '(prefers-color-scheme: dark)',
+    ).matches;
+    const resolved =
+      stored === 'dark' || stored === 'light'
+        ? stored
+        : prefersDark
+          ? 'dark'
+          : 'light';
+    setTheme(resolved);
+    document.documentElement.classList.toggle('dark', resolved === 'dark');
+  }, []);
 
   const handleToggleTheme = () => {
     start(async () => {
@@ -334,10 +369,11 @@ function ThemeSection({
         toastApi.pushToast('error', res.error);
         return;
       }
-      toastApi.pushToast(
-        'success',
-        res?.message ?? 'Theme preference updated.',
-      );
+      const next = theme === 'dark' ? 'light' : 'dark';
+      setTheme(next);
+      window.localStorage.setItem('theme', next);
+      document.documentElement.classList.toggle('dark', next === 'dark');
+      toastApi.pushToast('success', `Theme switched to ${next}.`);
     });
   };
 
@@ -347,10 +383,10 @@ function ThemeSection({
       description="Theme controls for your workspace."
     >
       <FieldRow
-        label="Dark or Light Theme"
+        label="Theme"
         value={
           canManageTheme
-            ? 'Theme preferences are available for your account.'
+            ? `Current theme: ${theme}`
             : 'Theme control is restricted for your account.'
         }
         action={
@@ -358,9 +394,13 @@ function ThemeSection({
             type="button"
             onClick={handleToggleTheme}
             disabled={isPending || !canManageTheme}
-            className="rounded-lg border border-border/70 bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted/40 disabled:opacity-50"
+            className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-50"
           >
-            {isPending ? 'Updating...' : 'Toggle Theme'}
+            {isPending
+              ? 'Updating...'
+              : theme === 'dark'
+                ? 'Use light'
+                : 'Use dark'}
           </button>
         }
       />
@@ -405,7 +445,7 @@ function LabsSection({
             type="button"
             onClick={handleLabsAction}
             disabled={isPending || !canManageLabs}
-            className="rounded-lg bg-foreground px-3 py-1.5 text-xs font-semibold text-background transition-colors hover:bg-foreground/90 disabled:opacity-50"
+            className="rounded-lg bg-foreground px-3 py-1.5 text-xs font-medium text-background transition-colors hover:bg-foreground/90 disabled:opacity-50"
           >
             {isPending ? 'Running...' : 'Run'}
           </button>
@@ -418,9 +458,11 @@ function LabsSection({
 export function SettingsClient({
   user,
   perms,
+  hasPasswordAccount,
 }: {
   user: UserProps;
   perms: SettingsPerms;
+  hasPasswordAccount: boolean;
 }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
@@ -461,6 +503,7 @@ export function SettingsClient({
         />
         <DangerSection
           canManageDanger={perms.canManageDanger}
+          hasPasswordAccount={hasPasswordAccount}
           toastApi={{ pushToast }}
         />
       </div>

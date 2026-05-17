@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 export default async function NotesPage() {
   const h = await headers();
   const session = await auth.api.getSession({ headers: h });
-  if (!session) redirect('/auth/sign-in');
+  if (!session) redirect('/auth');
 
   // Resolve permissions server-side using Better Auth
   const [canCreate, canUpdate, canDelete, canListAll] = await Promise.all([

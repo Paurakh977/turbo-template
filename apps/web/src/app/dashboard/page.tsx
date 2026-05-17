@@ -15,6 +15,7 @@ import {
   type ToastItem,
   type ToastKind,
 } from '../_components/ToastRegion';
+import { PasswordInput } from '../_components/PasswordInput';
 
 type Account = { providerId: string };
 
@@ -175,12 +176,13 @@ export default function DashboardPage() {
   };
 
   const handleVerify2FA = async () => {
-    if (!/^\d{6}$/.test(totpCode.trim())) {
+    const code = totpCode.trim();
+    if (!/^\d{6}$/.test(code)) {
       setSetupError('Enter a valid 6-digit code.');
       return;
     }
 
-    const { error } = await authClient.twoFactor.verifyTotp({ code: totpCode });
+    const { error } = await authClient.twoFactor.verifyTotp({ code });
     if (error) {
       setSetupError('Invalid code, try again.');
     } else {
@@ -198,6 +200,8 @@ export default function DashboardPage() {
     setSetupStep('password');
     setSetupPassword('');
     setTotpCode('');
+    setTotpURI('');
+    setBackupCodes([]);
     setSetupError('');
   };
 
@@ -209,19 +213,21 @@ export default function DashboardPage() {
     }
 
     setDisablePending(true);
-    const { error } = await authClient.twoFactor.disable({ password });
-    if (error) {
-      setDisableError(error.message ?? 'Unable to disable 2FA.');
-      setDisablePending(false);
-      return;
-    }
+    try {
+      const { error } = await authClient.twoFactor.disable({ password });
+      if (error) {
+        setDisableError(error.message ?? 'Unable to disable 2FA.');
+        return;
+      }
 
-    setDisablePending(false);
-    setDisablePassword('');
-    setDisableError('');
-    setShowDisable2FA(false);
-    pushToast('success', '2FA disabled.');
-    router.refresh();
+      setDisablePassword('');
+      setDisableError('');
+      setShowDisable2FA(false);
+      pushToast('success', '2FA disabled.');
+      router.refresh();
+    } finally {
+      setDisablePending(false);
+    }
   };
 
   const handleSetPassword = async () => {
@@ -255,10 +261,11 @@ export default function DashboardPage() {
   };
 
   const ROLE_BADGE_STYLE: Record<string, string> = {
-    superAdmin: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
-    admin: 'bg-blue-500/10   text-blue-400   border-blue-500/20',
-    operator: 'bg-amber-500/10  text-amber-400  border-amber-500/20',
-    user: 'bg-muted text-muted-foreground border-border/50',
+    superAdmin: 'bg-primary text-primary-foreground',
+    admin: 'bg-primary text-primary-foreground',
+    operator:
+      'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20',
+    user: 'bg-muted text-muted-foreground border border-border/50',
   };
 
   return (
@@ -278,11 +285,11 @@ export default function DashboardPage() {
             </div>
             <span className="font-bold text-[17px] tracking-tight">Ozon</span>
           </Link>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-4">
             {isAdmin && (
               <Link
                 href="/admin"
-                className="text-xs px-3 py-1.5 bg-primary/10 text-primary border border-primary/20 rounded-lg font-semibold hover:bg-primary/20 transition-colors"
+                className="text-[13px] font-medium text-muted-foreground hover:text-foreground transition-colors"
               >
                 Admin Panel
               </Link>
@@ -290,14 +297,14 @@ export default function DashboardPage() {
             {isImpersonating && (
               <button
                 onClick={handleStopImpersonation}
-                className="text-xs px-3 py-1.5 bg-amber-500/10 text-amber-500 border border-amber-500/30 rounded-lg font-semibold hover:bg-amber-500/20 transition-colors"
+                className="text-[13px] font-medium text-amber-600 dark:text-amber-500 hover:text-amber-700 dark:hover:text-amber-400 transition-colors"
               >
                 Stop Impersonating
               </button>
             )}
             <button
               onClick={handleSignOut}
-              className="text-[13px] font-medium text-muted-foreground hover:text-foreground transition-colors py-1.5 px-3 hover:bg-secondary/60 rounded-md"
+              className="text-[13px] font-medium px-3 py-1.5 rounded-lg border border-border/50 bg-card hover:bg-muted text-foreground transition-colors shadow-sm"
             >
               Sign out
             </button>
@@ -324,9 +331,9 @@ export default function DashboardPage() {
           {/* Profile Quick Card */}
           <motion.div
             variants={itemVariants}
-            className="bg-card border border-border/50 rounded-xl p-6 flex items-center gap-6 shadow-sm relative overflow-hidden group"
+            className="group relative flex items-center gap-6 overflow-hidden rounded-2xl border border-border/60 bg-card p-6 transition-all hover:border-border"
           >
-            <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+            <div className="absolute right-0 top-0 p-4 opacity-5 transition-opacity group-hover:opacity-10 dark:opacity-[0.02] dark:group-hover:opacity-[0.05]">
               <svg
                 width="80"
                 height="80"
@@ -341,13 +348,13 @@ export default function DashboardPage() {
                 <circle cx="12" cy="7" r="4"></circle>
               </svg>
             </div>
-            <div className="w-16 h-16 rounded-full overflow-hidden border border-border/40 bg-secondary flex items-center justify-center text-xl font-bold text-foreground/50 shadow-inner shrink-0">
+            <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full border border-border bg-secondary text-xl font-medium text-muted-foreground shadow-inner">
               {session.user.image ? (
                 <img
                   src={session.user.image}
                   alt="avatar"
                   referrerPolicy="no-referrer"
-                  className="w-full h-full object-cover"
+                  className="w-full h-full object-cover rounded-full"
                 />
               ) : (
                 <span>
@@ -361,15 +368,27 @@ export default function DashboardPage() {
               <h2 className="text-xl font-semibold truncate mb-0.5">
                 {session.user.name}
               </h2>
-              <div className="flex items-center gap-2">
+              <div className="mt-1.5 flex items-center gap-2.5">
                 <span
-                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase tracking-wider ${ROLE_BADGE_STYLE[role] ?? ROLE_BADGE_STYLE.user}`}
+                  className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-full uppercase tracking-wider ${ROLE_BADGE_STYLE[role] ?? ROLE_BADGE_STYLE.user}`}
                 >
                   {role}
                 </span>
                 {session.user.emailVerified && (
-                  <span className="text-[10px] font-bold text-green-500/80 uppercase tracking-wider">
-                    Verified ✓
+                  <span className="flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M20 6 9 17l-5-5" />
+                    </svg>
+                    Verified
                   </span>
                 )}
               </div>
@@ -379,16 +398,16 @@ export default function DashboardPage() {
           {/* Quick Actions Grid */}
           <motion.div
             variants={itemVariants}
-            className="grid grid-cols-1 sm:grid-cols-2 gap-4"
+            className="grid grid-cols-1 gap-4 sm:grid-cols-2"
           >
             <Link
               href="/dashboard/notes"
-              className="bg-card border border-border/50 rounded-lg p-5 hover:border-primary/40 hover:bg-primary/[0.02] transition-all group flex flex-col"
+              className="group flex flex-col rounded-2xl border border-border/60 bg-card p-5 transition-all hover:-translate-y-0.5 hover:border-border"
             >
-              <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+              <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600 transition-transform group-hover:scale-105 dark:text-amber-400">
                 <svg
-                  width="20"
-                  height="20"
+                  width="18"
+                  height="18"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
@@ -403,7 +422,9 @@ export default function DashboardPage() {
                   <path d="M9 10h1" />
                 </svg>
               </div>
-              <h3 className="font-semibold text-[15px] mb-1">Notes</h3>
+              <h3 className="mb-1 text-[15px] font-medium text-foreground">
+                Notes
+              </h3>
               <p className="text-[13px] text-muted-foreground">
                 {isOperator
                   ? 'Create and manage your private or shared notes.'
@@ -413,12 +434,12 @@ export default function DashboardPage() {
 
             <Link
               href="/dashboard/settings"
-              className="bg-card border border-border/50 rounded-lg p-5 hover:border-primary/40 hover:bg-primary/[0.02] transition-all group flex flex-col"
+              className="group flex flex-col rounded-2xl border border-border/60 bg-card p-5 transition-all hover:-translate-y-0.5 hover:border-border"
             >
-              <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-500 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+              <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500/10 text-blue-600 transition-transform group-hover:scale-105 dark:text-blue-400">
                 <svg
-                  width="20"
-                  height="20"
+                  width="18"
+                  height="18"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
@@ -440,10 +461,10 @@ export default function DashboardPage() {
           {/* Security Overview & Actions */}
           <motion.div
             variants={itemVariants}
-            className="bg-card border border-border/50 rounded-xl p-6 shadow-sm"
+            className="rounded-2xl border border-border/60 bg-card p-6 transition-all hover:border-border"
           >
             <div className="flex items-center justify-between mb-6">
-              <h3 className="text-[15px] font-semibold flex items-center gap-2">
+              <h3 className="text-[15px] font-medium flex items-center gap-2">
                 <svg
                   width="16"
                   height="16"
@@ -469,7 +490,7 @@ export default function DashboardPage() {
               </h3>
               <Link
                 href="/dashboard/settings"
-                className="text-xs text-primary hover:underline font-medium"
+                className="text-xs text-muted-foreground hover:text-foreground font-medium transition-colors"
               >
                 Advanced Settings →
               </Link>
@@ -512,7 +533,7 @@ export default function DashboardPage() {
                         setShowDisable2FA(true);
                       }}
                       disabled={isOAuthOnly}
-                      className="text-xs px-4 py-2 border border-red-500/30 text-red-500 bg-red-500/5 hover:bg-red-500/10 rounded-lg font-medium transition-colors disabled:opacity-50"
+                      className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-[13px] font-medium text-red-600 transition-colors hover:bg-red-500/20 disabled:opacity-50 dark:text-red-400"
                     >
                       Disable 2FA
                     </button>
@@ -520,7 +541,7 @@ export default function DashboardPage() {
                     <button
                       onClick={() => setShow2FASetup(true)}
                       disabled={isOAuthOnly}
-                      className="text-xs px-4 py-2 bg-foreground text-background hover:bg-foreground/90 rounded-lg font-medium transition-colors shadow-sm disabled:opacity-50"
+                      className="rounded-lg border border-transparent bg-foreground px-4 py-2 text-[13px] font-medium text-background shadow-sm transition-colors hover:bg-foreground/90 disabled:opacity-50"
                     >
                       Enable 2FA
                     </button>
@@ -551,9 +572,9 @@ export default function DashboardPage() {
           {isAdmin && (
             <motion.div
               variants={itemVariants}
-              className="p-6 rounded-xl bg-primary/[0.03] border border-primary/20 relative overflow-hidden"
+              className="relative overflow-hidden rounded-2xl border border-primary/20 bg-primary/[0.02] p-6 transition-all"
             >
-              <div className="absolute top-0 right-0 p-4 opacity-5">
+              <div className="absolute right-0 top-0 p-4 opacity-5">
                 <svg
                   width="100"
                   height="100"
@@ -565,22 +586,22 @@ export default function DashboardPage() {
                   <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
                 </svg>
               </div>
-              <h2 className="text-lg font-bold mb-1">Admin Control Center</h2>
-              <p className="text-[13px] text-muted-foreground mb-4">
-                You have{' '}
-                <span className="text-primary font-semibold">{role}</span>{' '}
-                privileges.
+              <h2 className="mb-1 text-lg font-bold text-foreground">
+                Admin Control Center
+              </h2>
+              <p className="mb-5 text-[13px] text-muted-foreground">
+                You have administrative privileges to manage the platform.
               </p>
-              <div className="flex gap-3 flex-wrap relative z-10">
+              <div className="relative z-10 flex flex-wrap gap-3">
                 <Link
                   href="/admin"
-                  className="text-xs px-4 py-2 bg-primary text-primary-foreground rounded-xl hover:bg-primary/90 transition-all font-semibold shadow-sm"
+                  className="rounded-lg bg-primary px-4 py-2 text-[13px] font-semibold text-primary-foreground shadow-sm transition-all hover:bg-primary/90"
                 >
                   Manage Users
                 </Link>
                 <Link
                   href="/admin/audit"
-                  className="text-xs px-4 py-2 bg-secondary border border-border/50 text-foreground rounded-xl hover:bg-secondary/80 transition-all font-semibold"
+                  className="rounded-lg border border-border/60 bg-card px-4 py-2 text-[13px] font-medium text-foreground transition-all hover:bg-muted"
                 >
                   Audit Logs
                 </Link>
@@ -633,8 +654,7 @@ export default function DashboardPage() {
                   <p className="text-[13px] text-muted-foreground">
                     Enter your password to verify your identity.
                   </p>
-                  <input
-                    type="password"
+                  <PasswordInput
                     placeholder="Your password"
                     value={setupPassword}
                     onChange={(e) => {
@@ -678,9 +698,13 @@ export default function DashboardPage() {
                     placeholder="000000"
                     value={totpCode}
                     onChange={(e) => {
-                      setTotpCode(e.target.value);
+                      setTotpCode(
+                        e.target.value.replace(/\D/g, '').slice(0, 6),
+                      );
                       if (setupError) setSetupError('');
                     }}
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     maxLength={6}
                     className="w-full px-4 py-3 bg-background border border-border/60 rounded-xl text-[18px] outline-none text-center tracking-[0.25em] font-mono"
                   />
@@ -693,10 +717,14 @@ export default function DashboardPage() {
                   {backupCodes.length > 0 && (
                     <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-3 text-left">
                       <p className="text-[11px] font-bold text-yellow-600 mb-1.5 uppercase">
-                        Backup Codes (Save these!)
+                        Backup Codes (Save all of these)
+                      </p>
+                      <p className="mb-2 text-[11px] text-yellow-700 dark:text-yellow-300">
+                        Store these in a password manager. Each code can only be
+                        used once.
                       </p>
                       <div className="grid grid-cols-2 gap-1.5">
-                        {backupCodes.slice(0, 4).map((c: string, i: number) => (
+                        {backupCodes.map((c: string, i: number) => (
                           <code
                             key={i}
                             className="text-[10px] bg-background/50 border border-border/30 rounded px-1.5 py-0.5 text-center"
@@ -708,12 +736,26 @@ export default function DashboardPage() {
                     </div>
                   )}
 
-                  <button
-                    onClick={handleVerify2FA}
-                    className="w-full py-3 bg-primary text-primary-foreground rounded-xl text-[14px] font-semibold"
-                  >
-                    Verify & Enable
-                  </button>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSetupStep('password');
+                        setTotpCode('');
+                        setSetupError('');
+                      }}
+                      className="w-full py-3 bg-secondary text-secondary-foreground rounded-xl text-[14px] font-medium border border-border/40"
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleVerify2FA}
+                      className="w-full py-3 bg-primary text-primary-foreground rounded-xl text-[14px] font-semibold"
+                    >
+                      Verify & Enable
+                    </button>
+                  </div>
                 </div>
               )}
             </motion.div>
@@ -736,8 +778,7 @@ export default function DashboardPage() {
         }}
         onConfirm={handleDisable2FA}
       >
-        <input
-          type="password"
+        <PasswordInput
           value={disablePassword}
           onChange={(event) => {
             setDisablePassword(event.target.value);
