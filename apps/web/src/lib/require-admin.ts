@@ -1,6 +1,6 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { auth, hasSuperAdminRole, hasAdminRole } from '@repo/auth';
+import { auth, hasAdminRole, hasSuperAdminRole } from '@repo/auth';
 
 export type Session = typeof auth.$Infer.Session;
 export type SessionWithRole = Session & {
@@ -12,15 +12,16 @@ export type SessionWithRole = Session & {
 /**
  * Server-side admin guard.
  *
- * Uses role token check (via hasAdminRole utility from roles.ts) — the most
- * reliable check since it parses the comma-separated role string and checks
- * for 'admin' or 'superAdmin' tokens. This is Better Auth's documented pattern
- * for role-based guards.
+ * Uses canonical role-token checks (hasAdminRole / hasSuperAdminRole) instead
+ * of permission-proxy checks (for example `user: ['ban']`). This keeps the
+ * guard aligned with role semantics and avoids accidental access changes if
+ * individual permissions are reassigned in the future.
  *
- * Impersonation handling: When an admin impersonates another user, the session's
- * user.role reflects the IMPERSONATED user's role (correctly). We allow
- * impersonated admins to access admin features so they can do what that user
- * can do (true meaning of impersonation).
+ * Impersonation handling:
+ * - Better Auth impersonation sessions expose `session.impersonatedBy`.
+ * - Admin routes are intentionally blocked while impersonating.
+ * - This prevents elevated-control screens (admin panel, audit) from being
+ *   reachable in impersonation mode.
  *
  * Returns the session enriched with:
  * - isSuperAdmin: whether user has superAdmin role
@@ -37,15 +38,19 @@ export async function requireAdmin(): Promise<SessionWithRole> {
     (session as { session?: { impersonatedBy?: string | null } }).session
       ?.impersonatedBy ?? null;
 
-  const roleRaw = (session.user as { role?: string }).role ?? 'user';
+  if (impersonatedBy) {
+    redirect('/dashboard');
+  }
 
-  if (!hasAdminRole(roleRaw)) {
+  const sessionRoleRaw = (session.user as { role?: string }).role ?? 'user';
+
+  if (!hasAdminRole(sessionRoleRaw)) {
     redirect('/dashboard');
   }
 
   return {
     ...session,
-    isSuperAdmin: hasSuperAdminRole(roleRaw),
+    isSuperAdmin: hasSuperAdminRole(sessionRoleRaw),
     isImpersonating: impersonatedBy !== null,
     impersonatedBy,
   };
