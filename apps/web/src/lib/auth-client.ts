@@ -3,15 +3,7 @@
 import { createAuthClient } from 'better-auth/react';
 import { twoFactorClient } from 'better-auth/client/plugins';
 import { adminClient } from 'better-auth/client/plugins';
-import {
-  ac,
-  adminRole,
-  operatorRole,
-  settingsLabsGrantRole,
-  settingsThemeGrantRole,
-  userRole,
-  superAdminRole,
-} from '@repo/auth/permissions';
+import { AUTH_BASE_PATH, ADMIN_PLUGIN_ROLES, ac } from '@repo/auth/permissions';
 
 type AuthClientError = { error?: { status?: number } };
 
@@ -30,7 +22,10 @@ const baseURL =
 
 const client = createAuthClient({
   baseURL,
-  basePath: '/api/auth',
+  basePath: AUTH_BASE_PATH,
+  sessionOptions: {
+    refetchOnWindowFocus: true,
+  },
   plugins: [
     twoFactorClient({
       onTwoFactorRedirect() {
@@ -39,14 +34,7 @@ const client = createAuthClient({
     }),
     adminClient({
       ac,
-      roles: {
-        user: userRole,
-        operator: operatorRole,
-        admin: adminRole,
-        superAdmin: superAdminRole,
-        settingsThemeGrant: settingsThemeGrantRole,
-        settingsLabsGrant: settingsLabsGrantRole,
-      },
+      roles: ADMIN_PLUGIN_ROLES,
     }),
   ],
   fetchOptions: {

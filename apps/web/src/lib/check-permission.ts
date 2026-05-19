@@ -1,6 +1,12 @@
-import { auth } from '@repo/auth';
+import { auth, statement } from '@repo/auth';
 
 type Session = typeof auth.$Infer.Session;
+type PermissionResource = keyof typeof statement;
+type PermissionAction<R extends PermissionResource> =
+  (typeof statement)[R][number];
+type PermissionMap = {
+  [R in PermissionResource]?: PermissionAction<R>[];
+};
 
 /**
  * Server-side permission check utility.
@@ -16,16 +22,20 @@ type Session = typeof auth.$Infer.Session;
  *   const canDelete = await checkPermission(session, 'notes', ['delete']);
  *   if (!canDelete) return <p>Not allowed</p>;
  */
-export async function checkPermission(
+export async function checkPermission<R extends PermissionResource>(
   session: Session,
-  resource: string,
-  actions: string[],
+  resource: R,
+  actions: PermissionAction<R>[],
 ): Promise<boolean> {
   try {
+    const permissions: PermissionMap = {
+      [resource]: actions,
+    };
+
     const result = await auth.api.userHasPermission({
       body: {
         userId: session.user.id,
-        permissions: { [resource]: actions },
+        permissions,
       },
     });
     return result?.success === true;
@@ -48,13 +58,20 @@ export async function checkPermission(
  */
 export async function checkPermissions(
   session: Session,
-  map: Record<string, string[]>,
-): Promise<Record<string, boolean>> {
+  map: PermissionMap,
+): Promise<Partial<Record<PermissionResource, boolean>>> {
   const entries = await Promise.all(
-    Object.entries(map).map(async ([resource, actions]) => [
-      resource,
-      await checkPermission(session, resource, actions),
-    ]),
+    Object.entries(map).map(async ([resource, actions]) => {
+      const typedResource = resource as PermissionResource;
+      return [
+        typedResource,
+        await checkPermission(
+          session,
+          typedResource,
+          (actions ?? []) as PermissionAction<typeof typedResource>[],
+        ),
+      ] as const;
+    }),
   );
   return Object.fromEntries(entries);
 }
