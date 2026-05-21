@@ -3,6 +3,7 @@ import { requireAdmin } from '../../../lib/require-admin';
 import { formatDistanceToNow } from 'date-fns';
 import { THEME_GRANT_NAME, LABS_GRANT_NAME } from '@repo/auth/permissions';
 import { parseRoles } from '@repo/auth/roles';
+import { AuditFilters } from './_components/AuditFilters';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,6 +21,11 @@ const ACTION_CONFIG: Record<
   session_revoked: {
     emoji: '🔒',
     label: 'Session revoked',
+    color: 'text-red-400',
+  },
+  sessions_revoked: {
+    emoji: '🔒',
+    label: 'Sessions revoked',
     color: 'text-red-400',
   },
   role_changed: {
@@ -154,7 +160,8 @@ export default async function AuditLogPage(props: Props) {
   const searchParams = await props.searchParams;
   const page = Math.max(1, Number(searchParams.page) || 1);
   const q = typeof searchParams.q === 'string' ? searchParams.q.trim() : '';
-  const filterAction = typeof searchParams.action === 'string' ? searchParams.action : 'all';
+  const filterAction =
+    typeof searchParams.action === 'string' ? searchParams.action : 'all';
 
   const take = 50;
   const skip = (page - 1) * take;
@@ -176,7 +183,10 @@ export default async function AuditLogPage(props: Props) {
     });
     const matchedIds = matchingUsers.map((u) => u.id);
     if (matchedIds.length > 0) {
-      where.OR = [{ userId: { in: matchedIds } }, { actor: { in: matchedIds } }];
+      where.OR = [
+        { userId: { in: matchedIds } },
+        { actor: { in: matchedIds } },
+      ];
     } else {
       where.id = 'none'; // force 0 results
     }
@@ -195,15 +205,17 @@ export default async function AuditLogPage(props: Props) {
   const totalPages = Math.ceil(total / take);
 
   const userIds = [
-    ...new Set(logs.flatMap((l) => [l.userId, l.actor].filter(Boolean) as string[])),
+    ...new Set(
+      logs.flatMap((l) => [l.userId, l.actor].filter(Boolean) as string[]),
+    ),
   ];
 
   const users =
     userIds.length > 0
       ? await db.user.findMany({
-        where: { id: { in: userIds } },
-        select: { id: true, name: true, email: true },
-      })
+          where: { id: { in: userIds } },
+          select: { id: true, name: true, email: true },
+        })
       : [];
 
   const userMap = new Map(users.map((u) => [u.id, u]));
@@ -230,48 +242,11 @@ export default async function AuditLogPage(props: Props) {
         </div>
       </div>
 
-      <form
-        method="GET"
-        className="rounded-2xl border border-border/60 bg-card p-4 flex flex-col sm:flex-row items-center gap-3 shadow-sm dark:bg-white/[0.01] dark:shadow-[0_4px_24px_rgba(0,0,0,0.2)]"
-      >
-        <div className="relative flex-1 w-full">
-          <svg
-            className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-          <input
-            type="text"
-            name="q"
-            defaultValue={q}
-            placeholder="Search by user email, name, or ID..."
-            className="w-full pl-9 pr-4 py-2.5 bg-background border border-border/60 rounded-xl text-[14px] outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all placeholder:text-muted-foreground/50"
-          />
-        </div>
-        <div className="w-full sm:w-auto flex items-center gap-3">
-          <select
-            name="action"
-            defaultValue={filterAction}
-            className="w-full sm:w-auto px-4 py-2.5 bg-background border border-border/60 rounded-xl text-[14px] outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all appearance-none cursor-pointer"
-          >
-            <option value="all">All Events</option>
-            {allActions.map((act) => (
-              <option key={act.key} value={act.key}>
-                {act.emoji} {act.label}
-              </option>
-            ))}
-          </select>
-          <button
-            type="submit"
-            className="w-full sm:w-auto px-6 py-2.5 bg-primary text-primary-foreground rounded-xl text-[14px] font-semibold hover:bg-primary/90 transition-all shadow-sm"
-          >
-            Filter
-          </button>
-        </div>
-      </form>
+      <AuditFilters
+        initialQuery={q}
+        initialAction={filterAction}
+        actions={allActions}
+      />
 
       <div className="rounded-2xl border border-border/60 bg-card shadow-sm overflow-hidden dark:bg-white/[0.01] dark:shadow-[0_4px_24px_rgba(0,0,0,0.2)]">
         <div className="overflow-x-auto">
@@ -301,7 +276,10 @@ export default async function AuditLogPage(props: Props) {
             <tbody>
               {logs.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-5 py-12 text-center text-muted-foreground text-[14px]">
+                  <td
+                    colSpan={6}
+                    className="px-5 py-12 text-center text-muted-foreground text-[14px]"
+                  >
                     No audit logs found matching your criteria.
                   </td>
                 </tr>
@@ -310,7 +288,8 @@ export default async function AuditLogPage(props: Props) {
                   const action = formatAction(log.action);
                   const userDisplay = getUserDisplay(log.userId);
                   const actorDisplay = getUserDisplay(log.actor);
-                  const isUserAction = !log.actor && USER_ACTIONS_WITHOUT_ACTOR.has(log.action);
+                  const isUserAction =
+                    !log.actor && USER_ACTIONS_WITHOUT_ACTOR.has(log.action);
 
                   return (
                     <tr
@@ -318,7 +297,9 @@ export default async function AuditLogPage(props: Props) {
                       className="border-b border-border/30 last:border-0 hover:bg-muted/30 transition-colors"
                     >
                       <td className="px-5 py-3.5">
-                        <div className={`inline-flex items-center gap-1.5 font-medium px-2 py-1 rounded-md bg-secondary text-foreground`}>
+                        <div
+                          className={`inline-flex items-center gap-1.5 font-medium px-2 py-1 rounded-md bg-secondary text-foreground`}
+                        >
                           <span>{action.emoji}</span>
                           <span className="text-[12px]">{action.label}</span>
                         </div>
@@ -326,13 +307,18 @@ export default async function AuditLogPage(props: Props) {
                       <td className="px-5 py-3.5">
                         <div className="flex flex-col">
                           <span
-                            className={`text-[13px] font-medium ${userDisplay?.isPartial ? 'text-amber-500' : 'text-foreground'
-                              }`}
+                            className={`text-[13px] font-medium ${
+                              userDisplay?.isPartial
+                                ? 'text-amber-500'
+                                : 'text-foreground'
+                            }`}
                           >
                             {userDisplay?.name ?? '—'}
                           </span>
                           {userDisplay?.email && (
-                            <span className="text-[12px] text-muted-foreground">{userDisplay.email}</span>
+                            <span className="text-[12px] text-muted-foreground">
+                              {userDisplay.email}
+                            </span>
                           )}
                         </div>
                       </td>
@@ -353,7 +339,9 @@ export default async function AuditLogPage(props: Props) {
                             Self
                           </span>
                         ) : (
-                          <span className="text-[13px] text-muted-foreground">—</span>
+                          <span className="text-[13px] text-muted-foreground">
+                            —
+                          </span>
                         )}
                       </td>
                       <td className="px-5 py-3.5">
@@ -362,7 +350,9 @@ export default async function AuditLogPage(props: Props) {
                             {formatMetadata(log.metadata)}
                           </span>
                         ) : (
-                          <span className="text-[13px] text-muted-foreground">—</span>
+                          <span className="text-[13px] text-muted-foreground">
+                            —
+                          </span>
                         )}
                       </td>
                       <td className="px-5 py-3.5 text-[12px] text-muted-foreground font-mono">
@@ -383,18 +373,26 @@ export default async function AuditLogPage(props: Props) {
 
         <div className="border-t border-border/50 bg-muted/10 px-5 py-3 flex flex-col sm:flex-row items-center justify-between gap-3">
           <span className="text-[13px] text-muted-foreground">
-            Showing <span className="font-medium text-foreground">{total === 0 ? 0 : skip + 1}</span> to{' '}
-            <span className="font-medium text-foreground">{Math.min(skip + take, total)}</span> of{' '}
-            <span className="font-medium text-foreground">{total}</span> entries
+            Showing{' '}
+            <span className="font-medium text-foreground">
+              {total === 0 ? 0 : skip + 1}
+            </span>{' '}
+            to{' '}
+            <span className="font-medium text-foreground">
+              {Math.min(skip + take, total)}
+            </span>{' '}
+            of <span className="font-medium text-foreground">{total}</span>{' '}
+            entries
           </span>
           {totalPages > 1 && (
             <div className="flex items-center gap-2">
               <a
                 href={`?q=${encodeURIComponent(q)}&action=${encodeURIComponent(filterAction)}&page=${Math.max(1, page - 1)}`}
-                className={`px-3 py-1.5 text-[13px] font-medium rounded-lg border ${page <= 1
+                className={`px-3 py-1.5 text-[13px] font-medium rounded-lg border ${
+                  page <= 1
                     ? 'border-border/30 text-muted-foreground/50 pointer-events-none'
                     : 'border-border/60 text-foreground hover:bg-background transition-colors'
-                  }`}
+                }`}
               >
                 Previous
               </a>
@@ -403,10 +401,11 @@ export default async function AuditLogPage(props: Props) {
               </span>
               <a
                 href={`?q=${encodeURIComponent(q)}&action=${encodeURIComponent(filterAction)}&page=${Math.min(totalPages, page + 1)}`}
-                className={`px-3 py-1.5 text-[13px] font-medium rounded-lg border ${page >= totalPages
+                className={`px-3 py-1.5 text-[13px] font-medium rounded-lg border ${
+                  page >= totalPages
                     ? 'border-border/30 text-muted-foreground/50 pointer-events-none'
                     : 'border-border/60 text-foreground hover:bg-background transition-colors'
-                  }`}
+                }`}
               >
                 Next
               </a>
