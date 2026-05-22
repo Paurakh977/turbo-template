@@ -182,15 +182,21 @@ export default function TwoFactorPage() {
             pattern={method === 'backup' ? undefined : '[0-9]*'}
           />
 
-          <label className="flex items-center gap-2.5 text-[13px] text-muted-foreground cursor-pointer justify-center mt-4">
+          <div className="flex items-center gap-2 px-1 select-none">
             <input
+              id="trustDevice"
               type="checkbox"
               checked={trustDevice}
               onChange={(e) => setTrustDevice(e.target.checked)}
-              className="rounded border-border bg-background text-primary focus:ring-primary/20 w-4 h-4"
+              className="h-4 w-4 rounded border-border/70 bg-background/50 text-primary focus:ring-0 cursor-pointer"
             />
-            <span>Trust this device for 30 days</span>
-          </label>
+            <label
+              htmlFor="trustDevice"
+              className="text-xs text-muted-foreground cursor-pointer"
+            >
+              Trust this device for 30 days
+            </label>
+          </div>
 
           <AnimatePresence>
             {error && (

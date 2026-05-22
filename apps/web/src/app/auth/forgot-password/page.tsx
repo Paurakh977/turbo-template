@@ -4,10 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { authClient } from '../../../lib/auth-client';
 import { motion } from 'framer-motion';
-
-function isEmailValid(value: string) {
-  return /^\S+@\S+\.\S+$/.test(value);
-}
+import { isValidEmail } from '../../../lib/validation';
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
@@ -22,7 +19,7 @@ export default function ForgotPasswordPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const normalizedEmail = email.trim();
-    if (!isEmailValid(normalizedEmail)) {
+    if (!isValidEmail(normalizedEmail)) {
       setFieldError('Enter a valid email address.');
       return;
     }
@@ -34,8 +31,13 @@ export default function ForgotPasswordPage() {
       email: normalizedEmail,
       redirectTo: `${appUrl}/auth/reset-password`,
     });
-    if (error) setError(error.message ?? 'Something went wrong');
-    else setSent(true);
+    if (error) {
+      setError(
+        error.status === 429
+          ? 'Too many requests. Please wait a moment and try again.'
+          : (error.message ?? 'Something went wrong'),
+      );
+    } else setSent(true);
     setLoading(false);
   };
 

@@ -48,12 +48,17 @@ export function ToastRegion({
   onDismiss: (id: number) => void;
 }) {
   return (
-    <div className="pointer-events-none fixed top-6 left-1/2 -translate-x-1/2 z-[100] flex w-max max-w-[90vw] flex-col items-center gap-2">
+    <div
+      role="region"
+      aria-label="Notifications"
+      className="pointer-events-none fixed top-6 left-1/2 -translate-x-1/2 z-[100] flex w-max max-w-[90vw] flex-col items-center gap-2"
+    >
       <AnimatePresence mode="popLayout">
         {toasts.map((toast) => (
           <motion.div
             key={toast.id}
             layout
+            role={toast.kind === 'error' ? 'alert' : 'status'}
             initial={{ opacity: 0, y: -20, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.15 } }}

@@ -6,6 +6,10 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { authClient } from '../../../lib/auth-client';
 import { PasswordInput } from '../../_components/PasswordInput';
+import {
+  getPasswordStrength,
+  validatePasswordPolicy,
+} from '../../../lib/validation';
 
 function ResetPasswordForm() {
   const router = useRouter();
@@ -18,16 +22,6 @@ function ResetPasswordForm() {
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const getPasswordStrength = (value: string): 'weak' | 'medium' | 'strong' => {
-    let score = 0;
-    if (value.length >= 8) score += 1;
-    if (/[A-Z]/.test(value) && /[a-z]/.test(value)) score += 1;
-    if (/\d/.test(value) && /[^A-Za-z0-9]/.test(value)) score += 1;
-    if (score <= 1) return 'weak';
-    if (score === 2) return 'medium';
-    return 'strong';
-  };
-
   const strength = getPasswordStrength(password);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -36,8 +30,9 @@ function ResetPasswordForm() {
       setError('Passwords do not match.');
       return;
     }
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters.');
+    const passwordError = validatePasswordPolicy(password);
+    if (passwordError) {
+      setError(passwordError);
       return;
     }
     if (!token) {
@@ -79,11 +74,10 @@ function ResetPasswordForm() {
             </div>
           </Link>
           <h2 className="text-2xl font-bold tracking-tight mb-2">
-            Set Your Password
+            Reset Your Password
           </h2>
           <p className="text-[13px] text-muted-foreground">
-            Create a password to enable two-factor authentication on your
-            account.
+            Choose a new secure password for your account.
           </p>
         </div>
 

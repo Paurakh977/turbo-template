@@ -6,6 +6,11 @@ import Link from 'next/link';
 import { authClient } from '../../lib/auth-client';
 import { motion, AnimatePresence } from 'framer-motion';
 import { PasswordInput } from '../_components/PasswordInput';
+import {
+  getPasswordStrength,
+  isValidEmail,
+  validatePasswordPolicy,
+} from '../../lib/validation';
 
 export default function AuthPage() {
   const router = useRouter();
@@ -25,6 +30,9 @@ export default function AuthPage() {
   const [name, setName] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [oauthLoadingProvider, setOauthLoadingProvider] = useState<
+    'google' | 'github' | null
+  >(null);
   const [resendLoading, setResendLoading] = useState(false);
   const [resendSent, setResendSent] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<{
@@ -36,20 +44,23 @@ export default function AuthPage() {
   const appUrl =
     APP_URL || (typeof window !== 'undefined' ? window.location.origin : '');
 
-  const isEmailValid = (value: string) => /^\S+@\S+\.\S+$/.test(value);
-
   const validate = () => {
     const nextErrors: { name?: string; email?: string; password?: string } = {};
     const emailValue = email.trim();
     const passwordValue = password.trim();
     const nameValue = name.trim();
 
-    if (!isEmailValid(emailValue)) {
+    if (!isValidEmail(emailValue)) {
       nextErrors.email = 'Enter a valid email address.';
     }
 
-    if (passwordValue.length < 8) {
-      nextErrors.password = 'Password must be at least 8 characters.';
+    if (mode === 'signup') {
+      const passwordError = validatePasswordPolicy(passwordValue);
+      if (passwordError) {
+        nextErrors.password = passwordError;
+      }
+    } else if (!passwordValue) {
+      nextErrors.password = 'Password is required.';
     }
 
     if (mode === 'signup') {
@@ -70,8 +81,13 @@ export default function AuthPage() {
       email: email.trim(),
       callbackURL: `${appUrl}/dashboard`,
     });
-    if (error) setError(error.message ?? 'Failed to resend.');
-    else setResendSent(true);
+    if (error) {
+      setError(
+        error.status === 429
+          ? 'Too many requests. Please wait a moment and try again.'
+          : (error.message ?? 'Failed to resend.'),
+      );
+    } else setResendSent(true);
     setResendLoading(false);
   };
 
@@ -89,7 +105,11 @@ export default function AuthPage() {
         callbackURL: `${appUrl}/dashboard`,
       });
       if (error) {
-        setError(error.message ?? 'Sign up failed');
+        setError(
+          error.status === 429
+            ? 'Too many sign-up attempts. Please wait a moment and try again.'
+            : (error.message ?? 'Sign up failed'),
+        );
       } else {
         setMode('verify-email');
         setLoading(false);
@@ -112,24 +132,59 @@ export default function AuthPage() {
           setLoading(false);
           return;
         }
-        setError(error.message ?? 'Sign in failed');
+        setError(
+          error.status === 429
+            ? 'Too many sign-in attempts. Please wait a moment and try again.'
+            : (error.message ?? 'Sign in failed'),
+        );
       }
     }
     setLoading(false);
   };
 
+  const handleSocialSignIn = async (provider: 'google' | 'github') => {
+    if (oauthLoadingProvider) return;
+
+    setError('');
+    setOauthLoadingProvider(provider);
+
+    try {
+      const { data, error } = await authClient.signIn.social({
+        provider,
+        callbackURL: `${appUrl}/dashboard`,
+        errorCallbackURL: `${appUrl}/auth`,
+        disableRedirect: true,
+      });
+
+      if (error) {
+        setError(
+          error.status === 429
+            ? 'Too many attempts. Please wait and try again.'
+            : (error.message ?? 'Could not start social sign in.'),
+        );
+        return;
+      }
+
+      const redirectUrl = (data as { url?: string } | null | undefined)?.url;
+      if (!redirectUrl) {
+        setError('Could not start social sign in. Please try again.');
+        return;
+      }
+
+      window.location.href = redirectUrl;
+    } catch {
+      setError('Could not start social sign in. Please try again.');
+    } finally {
+      setOauthLoadingProvider(null);
+    }
+  };
+
   const handleGoogleSignIn = async () => {
-    await authClient.signIn.social({
-      provider: 'google',
-      callbackURL: `${appUrl}/dashboard`,
-    });
+    await handleSocialSignIn('google');
   };
 
   const handleGithubSignIn = async () => {
-    await authClient.signIn.social({
-      provider: 'github',
-      callbackURL: `${appUrl}/dashboard`,
-    });
+    await handleSocialSignIn('github');
   };
 
   const formVariants = {
@@ -253,15 +308,31 @@ export default function AuthPage() {
         <div className="space-y-3 mb-6">
           <button
             onClick={handleGoogleSignIn}
-            className="w-full flex items-center justify-center gap-3 py-2.5 px-4 bg-background border border-border/60 rounded-xl text-[13px] font-medium hover:bg-muted/50 transition-colors shadow-sm"
+            disabled={loading || oauthLoadingProvider !== null}
+            className="w-full flex items-center justify-center gap-3 py-2.5 px-4 bg-background border border-border/60 rounded-xl text-[13px] font-medium hover:bg-muted/50 transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            <GoogleIcon /> Continue with Google
+            {oauthLoadingProvider === 'google' ? (
+              <span className="w-4 h-4 border-2 border-foreground/20 border-t-foreground rounded-full animate-spin" />
+            ) : (
+              <GoogleIcon />
+            )}{' '}
+            {oauthLoadingProvider === 'google'
+              ? 'Connecting...'
+              : 'Continue with Google'}
           </button>
           <button
             onClick={handleGithubSignIn}
-            className="w-full flex items-center justify-center gap-3 py-2.5 px-4 bg-foreground text-background rounded-xl text-[13px] font-medium hover:opacity-90 transition-opacity shadow-sm"
+            disabled={loading || oauthLoadingProvider !== null}
+            className="w-full flex items-center justify-center gap-3 py-2.5 px-4 bg-foreground text-background rounded-xl text-[13px] font-medium hover:opacity-90 transition-opacity shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            <GithubIcon /> Continue with GitHub
+            {oauthLoadingProvider === 'github' ? (
+              <span className="w-4 h-4 border-2 border-background/30 border-t-background rounded-full animate-spin" />
+            ) : (
+              <GithubIcon />
+            )}{' '}
+            {oauthLoadingProvider === 'github'
+              ? 'Connecting...'
+              : 'Continue with GitHub'}
           </button>
         </div>
 
@@ -328,6 +399,14 @@ export default function AuthPage() {
             minLength={8}
             required
           />
+          {mode === 'signup' && password.trim() ? (
+            <p className="-mt-2 text-xs text-muted-foreground">
+              Strength:{' '}
+              <span className="font-medium text-foreground">
+                {getPasswordStrength(password.trim())}
+              </span>
+            </p>
+          ) : null}
           {fieldErrors.password ? (
             <p className="-mt-2 text-xs text-red-500">{fieldErrors.password}</p>
           ) : null}
