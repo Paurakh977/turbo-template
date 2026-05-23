@@ -5,6 +5,9 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { db } from '@repo/database';
 import { auth } from '@repo/auth';
+import { isAPIError } from 'better-auth/api';
+
+type AuthSession = NonNullable<Awaited<ReturnType<typeof auth.api.getSession>>>;
 
 async function getSessionOrRedirect() {
   const h = await headers();
@@ -37,12 +40,55 @@ async function logAudit(
 
 async function hasSettingsPermission(
   userId: string,
-  action: 'profile' | 'security' | 'theme' | 'labs' | 'danger',
+  action: 'profile' | 'security' | 'theme' | 'labs',
 ): Promise<boolean> {
   const result = await auth.api.userHasPermission({
     body: { userId, permissions: { settings: [action] } },
   });
   return result?.success === true;
+}
+
+function getEffectivePermissionUserId(session: AuthSession): string {
+  const impersonatedBy =
+    (session as { session?: { impersonatedBy?: string | null } }).session
+      ?.impersonatedBy ?? null;
+  return impersonatedBy ?? session.user.id;
+}
+
+function getActionErrorMessage(
+  error: unknown,
+  fallback: string,
+  options?: {
+    badRequest?: string;
+    unauthorized?: string;
+    forbidden?: string;
+    rateLimited?: string;
+  },
+) {
+  if (isAPIError(error)) {
+    if (error.status === 400) {
+      return options?.badRequest || error.message || fallback;
+    }
+    if (error.status === 401) {
+      return (
+        options?.unauthorized || 'Your session expired. Please sign in again.'
+      );
+    }
+    if (error.status === 403) {
+      return (
+        options?.forbidden || 'You are not allowed to perform this action.'
+      );
+    }
+    if (error.status === 429) {
+      return (
+        options?.rateLimited || 'Too many requests. Please wait and try again.'
+      );
+    }
+    return error.message || fallback;
+  }
+
+  if (error instanceof Error && error.message) return error.message;
+  return fallback;
 }
 
 export async function updateDisplayNameAction(formData: FormData) {
@@ -57,10 +103,19 @@ export async function updateDisplayNameAction(formData: FormData) {
     return { error: 'Name is required (max 80 characters).' };
   }
 
-  await auth.api.updateUser({
-    body: { name },
-    headers: await headers(),
-  });
+  try {
+    await auth.api.updateUser({
+      body: { name },
+      headers: await headers(),
+    });
+  } catch (error) {
+    return {
+      error: getActionErrorMessage(
+        error,
+        'Could not update your display name.',
+      ),
+    };
+  }
 
   await logAudit(session.user.id, 'profile_updated', { field: 'name' });
 
@@ -75,13 +130,22 @@ export async function requestPasswordResetAction() {
     return { error: 'Your role cannot manage security settings.' };
   }
 
-  await auth.api.requestPasswordReset({
-    body: {
-      email: session.user.email,
-      redirectTo: '/auth/reset-password',
-    },
-    headers: await headers(),
-  });
+  try {
+    await auth.api.requestPasswordReset({
+      body: {
+        email: session.user.email,
+        redirectTo: '/auth/reset-password',
+      },
+      headers: await headers(),
+    });
+  } catch (error) {
+    return {
+      error: getActionErrorMessage(
+        error,
+        'Could not send password reset email right now.',
+      ),
+    };
+  }
 
   await logAudit(session.user.id, 'password_reset_requested');
 
@@ -90,7 +154,11 @@ export async function requestPasswordResetAction() {
 
 export async function toggleThemePreferenceAction() {
   const session = await getSessionOrRedirect();
-  const allowed = await hasSettingsPermission(session.user.id, 'theme');
+  const effectivePermissionUserId = getEffectivePermissionUserId(session);
+  const allowed = await hasSettingsPermission(
+    effectivePermissionUserId,
+    'theme',
+  );
   if (!allowed) {
     return {
       error:
@@ -108,7 +176,11 @@ export async function toggleThemePreferenceAction() {
 
 export async function runLabsSettingAction() {
   const session = await getSessionOrRedirect();
-  const allowed = await hasSettingsPermission(session.user.id, 'labs');
+  const effectivePermissionUserId = getEffectivePermissionUserId(session);
+  const allowed = await hasSettingsPermission(
+    effectivePermissionUserId,
+    'labs',
+  );
   if (!allowed) {
     return {
       error:
@@ -126,16 +198,27 @@ export async function runLabsSettingAction() {
 
 export async function deleteAccountAction(formData: FormData) {
   const session = await getSessionOrRedirect();
-  const allowed = await hasSettingsPermission(session.user.id, 'danger');
-  if (!allowed) {
-    return { error: 'Only admin roles can use this dangerous setting.' };
-  }
 
-  const hasPassword =
-    ((formData.get('hasPassword') as string) ?? '') === 'true';
+  const accounts = await db.account.findMany({
+    where: { userId: session.user.id },
+    select: { providerId: true },
+  });
+
+  const hasOAuthAccount = accounts.some(
+    (acc) => acc.providerId !== 'credential',
+  );
+  const hasCredentialAccount = accounts.some(
+    (acc) => acc.providerId === 'credential',
+  );
+
+  // Policy: OAuth-origin accounts may delete without password (Better Auth
+  // fresh-session requirement still applies). Credential-containing accounts
+  // must provide password confirmation.
+  const requiresPassword = hasCredentialAccount;
+
   const password = ((formData.get('password') as string) ?? '').trim();
 
-  if (hasPassword && !password) {
+  if (requiresPassword && !password) {
     return { error: 'Password is required to confirm account deletion.' };
   }
 
@@ -144,19 +227,25 @@ export async function deleteAccountAction(formData: FormData) {
     deleteBody.password = password;
   }
 
-  console.log(
-    '[DeleteUser] Attempting delete for:',
-    session.user.email,
-    'with body:',
-    deleteBody,
-  );
+  try {
+    await auth.api.deleteUser({
+      body: deleteBody,
+      headers: await headers(),
+    });
+  } catch (error) {
+    return {
+      error: getActionErrorMessage(error, 'Could not delete your account.', {
+        badRequest: requiresPassword
+          ? 'Incorrect password. Please try again.'
+          : 'Could not delete your account. Please try again.',
+      }),
+    };
+  }
 
-  await auth.api.deleteUser({
-    body: deleteBody,
-    headers: await headers(),
-  });
-
-  console.log('[DeleteUser] Deleted successfully, redirecting...');
-
-  redirect('/');
+  // Note: do NOT call `redirect()` here. Server-action redirects throw a
+  // NEXT_REDIRECT error which can be silently swallowed by client-side
+  // try/catch around the action call, leaving the user with a misleading
+  // error toast even though the deletion succeeded. Instead we return a
+  // success flag and let the client navigate via the router.
+  return { success: true as const };
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   updateDisplayNameAction,
   runLabsSettingAction,
@@ -8,12 +9,11 @@ import {
   deleteAccountAction,
 } from '../actions';
 import { ActionDialog } from '../../../_components/ActionDialog';
-import {
-  ToastRegion,
-  type ToastItem,
-  type ToastKind,
-} from '../../../_components/ToastRegion';
+import { type ToastKind } from '../../../_components/ToastRegion';
 import { PasswordInput } from '../../../_components/PasswordInput';
+import { getRoleBadgeStyle } from '../../../../lib/role-badge';
+import { useToast } from '../../../../lib/toast-context';
+import { applyTheme, resolveThemeFromBrowser } from '../../../../lib/theme';
 
 type UserProps = {
   id: string;
@@ -28,18 +28,10 @@ type SettingsPerms = {
   canManageProfile: boolean;
   canManageTheme: boolean;
   canManageLabs: boolean;
-  canManageDanger: boolean;
 };
 
 type ToastApi = {
   pushToast: (kind: ToastKind, message: string) => void;
-};
-
-const ROLE_COLOR: Record<string, string> = {
-  superAdmin: 'bg-primary text-primary-foreground',
-  admin: 'bg-primary text-primary-foreground',
-  operator: 'bg-secondary text-secondary-foreground',
-  user: 'bg-secondary text-secondary-foreground',
 };
 
 function Section({
@@ -116,14 +108,20 @@ function ProfileSection({
     fd.append('name', nextName);
 
     start(async () => {
-      const res = await updateDisplayNameAction(fd);
-      if (res?.error) {
-        setInlineError(res.error);
-        toastApi.pushToast('error', res.error);
-        return;
+      try {
+        const res = await updateDisplayNameAction(fd);
+        if (res?.error) {
+          setInlineError(res.error);
+          toastApi.pushToast('error', res.error);
+          return;
+        }
+        setEditing(false);
+        toastApi.pushToast('success', 'Display name updated.');
+      } catch {
+        const message = 'Could not update your display name. Please try again.';
+        setInlineError(message);
+        toastApi.pushToast('error', message);
       }
-      setEditing(false);
-      toastApi.pushToast('success', 'Display name updated.');
     });
   };
 
@@ -151,7 +149,7 @@ function ProfileSection({
             {user.name}
           </p>
           <span
-            className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${ROLE_COLOR[user.role] ?? ROLE_COLOR.user}`}
+            className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${getRoleBadgeStyle(user.role)}`}
           >
             {user.role}
           </span>
@@ -223,23 +221,20 @@ function ProfileSection({
 }
 
 function DangerSection({
-  canManageDanger,
-  hasPasswordAccount,
+  requiresDeletePassword,
   toastApi,
 }: {
-  canManageDanger: boolean;
-  hasPasswordAccount: boolean;
+  requiresDeletePassword: boolean;
   toastApi: ToastApi;
 }) {
+  const router = useRouter();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [password, setPassword] = useState('');
   const [inlineError, setInlineError] = useState('');
   const [isPending, start] = useTransition();
 
   const submitDelete = () => {
-    if (!canManageDanger) return;
-
-    if (hasPasswordAccount) {
+    if (requiresDeletePassword) {
       const trimmed = password.trim();
       if (!trimmed) {
         setInlineError('Password is required.');
@@ -249,17 +244,27 @@ function DangerSection({
 
     start(async () => {
       const fd = new FormData();
-      fd.append('hasPassword', hasPasswordAccount ? 'true' : 'false');
-      if (hasPasswordAccount) {
+      if (requiresDeletePassword) {
         fd.append('password', password.trim());
       }
-      const res = await deleteAccountAction(fd);
-      if (res?.error) {
-        setInlineError(res.error);
-        toastApi.pushToast('error', res.error);
-        return;
+      try {
+        const res = await deleteAccountAction(fd);
+        if (res?.error) {
+          setInlineError(res.error);
+          toastApi.pushToast('error', res.error);
+          return;
+        }
+        // Success: action no longer redirects server-side (which previously
+        // got swallowed by this try/catch and surfaced a misleading error).
+        // Drive navigation from the client instead.
+        toastApi.pushToast('success', 'Account deleted.');
+        setDeleteOpen(false);
+        router.replace('/');
+      } catch {
+        const message = 'Could not delete your account. Please try again.';
+        setInlineError(message);
+        toastApi.pushToast('error', message);
       }
-      toastApi.pushToast('success', 'Account deleted.');
     });
   };
 
@@ -278,7 +283,6 @@ function DangerSection({
               setInlineError('');
               setDeleteOpen(true);
             }}
-            disabled={!canManageDanger}
             className="rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-2 text-[13px] font-medium text-destructive transition-colors hover:bg-destructive/20 disabled:opacity-50"
           >
             Delete
@@ -286,17 +290,11 @@ function DangerSection({
         }
       />
 
-      {!canManageDanger ? (
-        <p className="text-xs text-muted-foreground">
-          Only admin roles can perform dangerous account actions.
-        </p>
-      ) : null}
-
       <ActionDialog
         open={deleteOpen}
         title="Delete account"
         description={
-          hasPasswordAccount
+          requiresDeletePassword
             ? 'This action cannot be undone. Enter your password to confirm permanently deleting your account.'
             : 'This action cannot be undone. Your account will be permanently deleted.'
         }
@@ -311,7 +309,7 @@ function DangerSection({
         }}
         onConfirm={submitDelete}
       >
-        {hasPasswordAccount ? (
+        {requiresDeletePassword ? (
           <>
             <PasswordInput
               value={password}
@@ -348,32 +346,26 @@ function ThemeSection({
   const [isPending, start] = useTransition();
 
   useEffect(() => {
-    const stored = window.localStorage.getItem('theme');
-    const prefersDark = window.matchMedia(
-      '(prefers-color-scheme: dark)',
-    ).matches;
-    const resolved =
-      stored === 'dark' || stored === 'light'
-        ? stored
-        : prefersDark
-          ? 'dark'
-          : 'light';
+    const resolved = resolveThemeFromBrowser();
     setTheme(resolved);
-    document.documentElement.classList.toggle('dark', resolved === 'dark');
+    applyTheme(resolved);
   }, []);
 
   const handleToggleTheme = () => {
     start(async () => {
-      const res = await toggleThemePreferenceAction();
-      if (res?.error) {
-        toastApi.pushToast('error', res.error);
-        return;
+      try {
+        const res = await toggleThemePreferenceAction();
+        if (res?.error) {
+          toastApi.pushToast('error', res.error);
+          return;
+        }
+        const next = theme === 'dark' ? 'light' : 'dark';
+        setTheme(next);
+        applyTheme(next);
+        toastApi.pushToast('success', `Theme switched to ${next}.`);
+      } catch {
+        toastApi.pushToast('error', 'Could not update theme right now.');
       }
-      const next = theme === 'dark' ? 'light' : 'dark';
-      setTheme(next);
-      window.localStorage.setItem('theme', next);
-      document.documentElement.classList.toggle('dark', next === 'dark');
-      toastApi.pushToast('success', `Theme switched to ${next}.`);
     });
   };
 
@@ -419,12 +411,19 @@ function LabsSection({
 
   const handleLabsAction = () => {
     start(async () => {
-      const res = await runLabsSettingAction();
-      if (res?.error) {
-        toastApi.pushToast('error', res.error);
-        return;
+      try {
+        const res = await runLabsSettingAction();
+        if (res?.error) {
+          toastApi.pushToast('error', res.error);
+          return;
+        }
+        toastApi.pushToast('success', res?.message ?? 'Labs action executed.');
+      } catch {
+        toastApi.pushToast(
+          'error',
+          'Could not run labs action. Please try again.',
+        );
       }
-      toastApi.pushToast('success', res?.message ?? 'Labs action executed.');
     });
   };
 
@@ -458,56 +457,33 @@ function LabsSection({
 export function SettingsClient({
   user,
   perms,
-  hasPasswordAccount,
+  requiresDeletePassword,
 }: {
   user: UserProps;
   perms: SettingsPerms;
-  hasPasswordAccount: boolean;
+  requiresDeletePassword: boolean;
 }) {
-  const [toasts, setToasts] = useState<ToastItem[]>([]);
-
-  const pushToast = (kind: ToastKind, message: string) => {
-    const id = Date.now() + Math.floor(Math.random() * 1000);
-    setToasts((prev) => [...prev, { id, kind, message }]);
-  };
-
-  const dismissToast = (id: number) => {
-    setToasts((prev) => prev.filter((toast) => toast.id !== id));
-  };
-
-  useEffect(() => {
-    if (toasts.length === 0) return;
-    const timers = toasts.map((toast) =>
-      window.setTimeout(() => dismissToast(toast.id), 3500),
-    );
-    return () => {
-      for (const timer of timers) window.clearTimeout(timer);
-    };
-  }, [toasts]);
+  const { pushToast } = useToast();
 
   return (
-    <>
-      <div className="space-y-5">
-        <ProfileSection
-          user={user}
-          canManageProfile={perms.canManageProfile}
-          toastApi={{ pushToast }}
-        />
-        <ThemeSection
-          canManageTheme={perms.canManageTheme}
-          toastApi={{ pushToast }}
-        />
-        <LabsSection
-          canManageLabs={perms.canManageLabs}
-          toastApi={{ pushToast }}
-        />
-        <DangerSection
-          canManageDanger={perms.canManageDanger}
-          hasPasswordAccount={hasPasswordAccount}
-          toastApi={{ pushToast }}
-        />
-      </div>
-      <ToastRegion toasts={toasts} onDismiss={dismissToast} />
-    </>
+    <div className="space-y-5">
+      <ProfileSection
+        user={user}
+        canManageProfile={perms.canManageProfile}
+        toastApi={{ pushToast }}
+      />
+      <ThemeSection
+        canManageTheme={perms.canManageTheme}
+        toastApi={{ pushToast }}
+      />
+      <LabsSection
+        canManageLabs={perms.canManageLabs}
+        toastApi={{ pushToast }}
+      />
+      <DangerSection
+        requiresDeletePassword={requiresDeletePassword}
+        toastApi={{ pushToast }}
+      />
+    </div>
   );
 }

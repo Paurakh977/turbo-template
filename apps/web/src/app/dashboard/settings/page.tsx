@@ -13,49 +13,47 @@ export default async function SettingsPage() {
   const session = await auth.api.getSession({ headers: h });
   if (!session) redirect('/auth');
 
+  const impersonatedBy =
+    (session as { session?: { impersonatedBy?: string | null } }).session
+      ?.impersonatedBy ?? null;
+  const effectiveSettingsPermissionUserId = impersonatedBy ?? session.user.id;
+
   const roleRaw = (session.user as { role?: string }).role ?? 'user';
   const role = getPrimaryRole(roleRaw);
 
-  const [
-    canManageProfile,
-    canManageTheme,
-    canManageLabs,
-    canManageDanger,
-    accounts,
-  ] = await Promise.all([
-    auth.api.userHasPermission({
-      body: {
-        userId: session.user.id,
-        permissions: { settings: ['profile'] },
-      },
-    }),
-    auth.api.userHasPermission({
-      body: {
-        userId: session.user.id,
-        permissions: { settings: ['theme'] },
-      },
-    }),
-    auth.api.userHasPermission({
-      body: {
-        userId: session.user.id,
-        permissions: { settings: ['labs'] },
-      },
-    }),
-    auth.api.userHasPermission({
-      body: {
-        userId: session.user.id,
-        permissions: { settings: ['danger'] },
-      },
-    }),
-    db.account.findMany({
-      where: { userId: session.user.id },
-      select: { providerId: true },
-    }),
-  ]);
+  const [canManageProfile, canManageTheme, canManageLabs, accounts] =
+    await Promise.all([
+      auth.api.userHasPermission({
+        body: {
+          userId: session.user.id,
+          permissions: { settings: ['profile'] },
+        },
+      }),
+      auth.api.userHasPermission({
+        body: {
+          userId: effectiveSettingsPermissionUserId,
+          permissions: { settings: ['theme'] },
+        },
+      }),
+      auth.api.userHasPermission({
+        body: {
+          userId: effectiveSettingsPermissionUserId,
+          permissions: { settings: ['labs'] },
+        },
+      }),
+      db.account.findMany({
+        where: { userId: session.user.id },
+        select: { providerId: true },
+      }),
+    ]);
 
-  const hasPasswordAccount = accounts.some(
+  const hasOAuthAccount = accounts.some(
+    (acc) => acc.providerId !== 'credential',
+  );
+  const hasCredentialAccount = accounts.some(
     (acc) => acc.providerId === 'credential',
   );
+  const requiresDeletePassword = hasCredentialAccount;
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -95,9 +93,8 @@ export default async function SettingsPage() {
             canManageProfile: canManageProfile?.success === true,
             canManageTheme: canManageTheme?.success === true,
             canManageLabs: canManageLabs?.success === true,
-            canManageDanger: canManageDanger?.success === true,
           }}
-          hasPasswordAccount={hasPasswordAccount}
+          requiresDeletePassword={requiresDeletePassword}
         />
       </div>
     </div>
