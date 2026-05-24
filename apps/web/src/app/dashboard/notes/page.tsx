@@ -12,19 +12,36 @@ export default async function NotesPage() {
   const session = await auth.api.getSession({ headers: h });
   if (!session) redirect('/auth');
 
+  const impersonatedBy =
+    (session as { session?: { impersonatedBy?: string | null } }).session
+      ?.impersonatedBy ?? null;
+  const effectivePermissionUserId = impersonatedBy ?? session.user.id;
+
   // Resolve permissions server-side using Better Auth
   const [canCreate, canUpdate, canDelete, canListAll] = await Promise.all([
     auth.api.userHasPermission({
-      body: { userId: session.user.id, permissions: { notes: ['create'] } },
+      body: {
+        userId: effectivePermissionUserId,
+        permissions: { notes: ['create'] },
+      },
     }),
     auth.api.userHasPermission({
-      body: { userId: session.user.id, permissions: { notes: ['update'] } },
+      body: {
+        userId: effectivePermissionUserId,
+        permissions: { notes: ['update'] },
+      },
     }),
     auth.api.userHasPermission({
-      body: { userId: session.user.id, permissions: { notes: ['delete'] } },
+      body: {
+        userId: effectivePermissionUserId,
+        permissions: { notes: ['delete'] },
+      },
     }),
     auth.api.userHasPermission({
-      body: { userId: session.user.id, permissions: { notes: ['list'] } },
+      body: {
+        userId: effectivePermissionUserId,
+        permissions: { notes: ['list'] },
+      },
     }),
   ]);
 
@@ -35,7 +52,16 @@ export default async function NotesPage() {
     canListAll: canListAll?.success === true,
   };
 
-  const roleRaw = (session.user as { role?: string }).role ?? 'user';
+  const effectiveRoleSource = impersonatedBy
+    ? await db.user.findUnique({
+        where: { id: impersonatedBy },
+        select: { role: true },
+      })
+    : session.user;
+
+  const roleRaw =
+    (effectiveRoleSource as { role?: string | null | undefined }).role ??
+    'user';
   const isAdmin = hasAdminRole(roleRaw);
 
   const notes = await db.note.findMany({

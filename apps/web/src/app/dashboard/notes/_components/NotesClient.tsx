@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useTransition } from 'react';
+import { useRef, useState, useTransition } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   createNoteAction,
@@ -8,11 +8,8 @@ import {
   deleteNoteAction,
 } from '../actions';
 import { ActionDialog } from '../../../_components/ActionDialog';
-import {
-  ToastRegion,
-  type ToastItem,
-  type ToastKind,
-} from '../../../_components/ToastRegion';
+import { type ToastKind } from '../../../_components/ToastRegion';
+import { useToast } from '../../../../lib/toast-context';
 
 type Author = { id: string; name: string };
 type Note = {
@@ -108,14 +105,16 @@ function NoteCard({
   };
 
   const handleDelete = () => {
-    setDeleting(true);
+    // Don't fade the card until the server confirms deletion. Previously we
+    // optimistically set `deleting=true` which made the UI lie when the
+    // request failed (the user briefly saw the note disappear).
     startTransition(async () => {
       const res = await deleteNoteAction(note.id);
       if (res?.error) {
         toastApi.pushToast('error', res.error);
-        setDeleting(false);
         return;
       }
+      setDeleting(true);
       onDeleted(note.id);
       toastApi.pushToast('success', 'Note deleted.');
     });
@@ -387,26 +386,7 @@ export function NotesClient({
   isAdmin: boolean;
 }) {
   const [notes, setNotes] = useState(initialNotes);
-  const [toasts, setToasts] = useState<ToastItem[]>([]);
-
-  const pushToast = (kind: ToastKind, message: string) => {
-    const id = Date.now() + Math.floor(Math.random() * 1000);
-    setToasts((prev) => [...prev, { id, kind, message }]);
-  };
-
-  const dismissToast = (id: number) => {
-    setToasts((prev) => prev.filter((toast) => toast.id !== id));
-  };
-
-  useEffect(() => {
-    if (toasts.length === 0) return;
-    const timers = toasts.map((toast) =>
-      window.setTimeout(() => dismissToast(toast.id), 3500),
-    );
-    return () => {
-      for (const timer of timers) window.clearTimeout(timer);
-    };
-  }, [toasts]);
+  const { pushToast } = useToast();
 
   const handleDeleted = (id: string) =>
     setNotes((prev) => prev.filter((note) => note.id !== id));
@@ -471,7 +451,6 @@ export function NotesClient({
           )}
         </AnimatePresence>
       </div>
-      <ToastRegion toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }
