@@ -44,6 +44,17 @@ export default function AuthPage() {
   const appUrl =
     APP_URL || (typeof window !== 'undefined' ? window.location.origin : '');
 
+  // Catch error params from Better Auth redirects (e.g. banned user)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const err = params.get('error');
+    const desc = params.get('error_description');
+    if (err && desc) {
+      setError(decodeURIComponent(desc));
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+  }, []);
+
   const validate = () => {
     const nextErrors: { name?: string; email?: string; password?: string } = {};
     const emailValue = email.trim();

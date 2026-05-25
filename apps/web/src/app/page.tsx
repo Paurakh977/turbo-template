@@ -1,14 +1,13 @@
-"use client";
+'use client';
 
 import { useEffect, useState } from 'react';
 import type { Link as LinkType } from '@repo/api';
 import { Button } from '@repo/ui/button';
 import Image, { type ImageProps } from 'next/image';
 import Link from 'next/link';
+import { useToast } from '../lib/toast-context';
 
 import styles from '../styles/page.module.css';
-
-
 
 type Props = Omit<ImageProps, 'src'> & {
   srcLight: string;
@@ -29,6 +28,17 @@ const ThemeImage = (props: Props) => {
 export default function Home() {
   const [links, setLinks] = useState<LinkType[]>([]);
   const [loading, setLoading] = useState(true);
+  const { pushToast } = useToast();
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const err = params.get('error');
+    const desc = params.get('error_description');
+    if (err && desc) {
+      pushToast('error', decodeURIComponent(desc));
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+  }, [pushToast]);
 
   useEffect(() => {
     async function fetchLinks() {
@@ -98,8 +108,8 @@ export default function Home() {
           </div>
         ) : (
           <div style={{ color: '#666' }}>
-            No links available. Make sure the proxy, web, and API containers
-            are running.
+            No links available. Make sure the proxy, web, and API containers are
+            running.
           </div>
         )}
       </main>
