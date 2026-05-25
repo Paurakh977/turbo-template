@@ -111,6 +111,14 @@ export function hasSuperAdminRole(role: unknown): boolean {
   return parseRoles(role).includes('superAdmin');
 }
 
+/**
+ * Returns whether a role has operator-level access.
+ *
+ * This is intentionally hierarchical and returns true for:
+ * - operator
+ * - admin
+ * - superAdmin
+ */
 export function hasOperatorRole(role: unknown): boolean {
   const tokens = parseRoles(role);
   return (

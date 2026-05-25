@@ -5,17 +5,14 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { authClient } from '../../lib/auth-client';
-import { getPrimaryRole } from '@repo/auth/roles';
+import { getPrimaryRole, hasOperatorRole } from '@repo/auth/roles';
 import QRCode from 'react-qr-code';
 import React from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { ActionDialog } from '../_components/ActionDialog';
-import {
-  ToastRegion,
-  type ToastItem,
-  type ToastKind,
-} from '../_components/ToastRegion';
 import { PasswordInput } from '../_components/PasswordInput';
+import { useToast } from '../../lib/toast-context';
+import { getRoleBadgeStyle } from '../../lib/role-badge';
 
 type Account = { providerId: string };
 
@@ -41,33 +38,17 @@ export default function DashboardPage() {
   const [disableError, setDisableError] = useState('');
   const [disablePending, setDisablePending] = useState(false);
 
-  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const { pushToast } = useToast();
 
   // Account listing (used to detect whether a user has a local password/credential)
   const [userAccounts, setUserAccounts] = useState<Account[]>([]);
   const [hasFetchedAccounts, setHasFetchedAccounts] = useState(false);
 
-  const pushToast = (kind: ToastKind, message: string) => {
-    const id = Date.now() + Math.floor(Math.random() * 1000);
-    setToasts((prev) => [...prev, { id, kind, message }]);
-  };
-
-  const dismissToast = (id: number) => {
-    setToasts((prev) => prev.filter((toast) => toast.id !== id));
-  };
-
-  useEffect(() => {
-    if (toasts.length === 0) return;
-    const timers = toasts.map((toast) =>
-      window.setTimeout(() => dismissToast(toast.id), 3500),
-    );
-    return () => {
-      for (const timer of timers) window.clearTimeout(timer);
-    };
-  }, [toasts]);
-
   useEffect(() => {
     if (session?.user?.id && !isPending && !hasFetchedAccounts) {
+      // Mark as fetched up-front so this effect runs at most once per mount
+      // for a given session. Resetting on error caused an infinite retry
+      // loop (especially under 429 from the auth rate limiter).
       setHasFetchedAccounts(true);
       authClient
         .listAccounts()
@@ -86,8 +67,10 @@ export default function DashboardPage() {
             : [];
           setUserAccounts(normalized);
         })
-        .catch(() => {
-          setHasFetchedAccounts(false);
+        .catch((err) => {
+          // Keep the guard set; do not retry. We intentionally degrade
+          // gracefully (the user just won't see the OAuth-only hint).
+          console.warn('[Dashboard] listAccounts failed:', err);
         });
     }
   }, [session?.user?.id, isPending, hasFetchedAccounts]);
@@ -122,7 +105,7 @@ export default function DashboardPage() {
   if (!session) return null;
 
   // Role extraction for display from canonical role tokens.
-  const roleRaw = (session.user as any).role ?? 'user';
+  const roleRaw = (session.user as { role?: string }).role ?? 'user';
   const role = getPrimaryRole(roleRaw);
 
   // Admin check for UI - using Better Auth's checkRolePermission for proper AC system
@@ -131,11 +114,7 @@ export default function DashboardPage() {
       permissions: { user: ['ban'] },
       role: role as never,
     }) ?? false;
-  const isOperator =
-    authClient.admin.checkRolePermission({
-      permissions: { notes: ['create'] },
-      role: role as never,
-    }) ?? false;
+  const isOperator = hasOperatorRole(roleRaw);
 
   const handleSignOut = async () => {
     await authClient.signOut();
@@ -151,7 +130,9 @@ export default function DashboardPage() {
     window.location.href = '/dashboard';
   };
 
-  const isImpersonating = (session as any).session?.impersonatedBy != null;
+  const isImpersonating =
+    (session as { session?: { impersonatedBy?: string | null } }).session
+      ?.impersonatedBy != null;
 
   const handleEnable2FA = async () => {
     const password = setupPassword.trim();
@@ -184,7 +165,19 @@ export default function DashboardPage() {
 
     const { error } = await authClient.twoFactor.verifyTotp({ code });
     if (error) {
-      setSetupError('Invalid code, try again.');
+      if (error.status === 429) {
+        setSetupError('Too many attempts. Please wait and try again.');
+        return;
+      }
+
+      if (error.status === 400) {
+        setSetupError(error.message ?? 'Invalid code, try again.');
+        return;
+      }
+
+      setSetupError(
+        error.message ?? 'Could not verify code. Please try again.',
+      );
     } else {
       setShow2FASetup(false);
       setSetupStep('password');
@@ -260,14 +253,6 @@ export default function DashboardPage() {
     },
   };
 
-  const ROLE_BADGE_STYLE: Record<string, string> = {
-    superAdmin: 'bg-primary text-primary-foreground',
-    admin: 'bg-primary text-primary-foreground',
-    operator:
-      'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20',
-    user: 'bg-muted text-muted-foreground border border-border/50',
-  };
-
   return (
     <div className="min-h-screen bg-background text-foreground font-sans flex flex-col">
       <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-xl border-b border-border/40">
@@ -324,7 +309,8 @@ export default function DashboardPage() {
               Dashboard
             </h1>
             <p className="text-muted-foreground text-[14px]">
-              Welcome back, {session.user.name}. Here's what's happening.
+              Welcome back, {session.user.name || session.user.email || 'there'}
+              . Here's what's happening.
             </p>
           </motion.div>
 
@@ -366,11 +352,11 @@ export default function DashboardPage() {
             </div>
             <div className="flex-1 min-w-0">
               <h2 className="text-xl font-semibold truncate mb-0.5">
-                {session.user.name}
+                {session.user.name || session.user.email || 'Unnamed user'}
               </h2>
               <div className="mt-1.5 flex items-center gap-2.5">
                 <span
-                  className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-full uppercase tracking-wider ${ROLE_BADGE_STYLE[role] ?? ROLE_BADGE_STYLE.user}`}
+                  className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-full uppercase tracking-wider ${getRoleBadgeStyle(role)}`}
                 >
                   {role}
                 </span>
@@ -520,12 +506,12 @@ export default function DashboardPage() {
                       Two-Factor Authentication
                     </p>
                     <p className="text-[12px] text-muted-foreground">
-                      {(session.user as any).twoFactorEnabled
+                      {session.user.twoFactorEnabled
                         ? 'Your account is protected by TOTP.'
                         : 'Add an extra layer of security.'}
                     </p>
                   </div>
-                  {(session.user as any).twoFactorEnabled ? (
+                  {session.user.twoFactorEnabled ? (
                     <button
                       onClick={() => {
                         setDisablePassword('');
@@ -611,157 +597,101 @@ export default function DashboardPage() {
         </motion.div>
       </main>
 
-      {/* 2FA Setup Modal */}
-      <AnimatePresence>
-        {show2FASetup && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-4"
-          >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 20 }}
-              className="bg-card border border-border/50 rounded-xl p-6 sm:p-8 w-full max-w-[440px] shadow-2xl relative"
+      {/* 2FA Setup Modal — uses ActionDialog for focus trap, escape, and ARIA. */}
+      <ActionDialog
+        open={show2FASetup && setupStep === 'password'}
+        title="Set up Two-Factor Auth"
+        description="Enter your password to verify your identity."
+        confirmLabel="Continue"
+        onConfirm={handleEnable2FA}
+        onClose={close2FASetup}
+      >
+        <PasswordInput
+          placeholder="Your password"
+          value={setupPassword}
+          onChange={(e) => {
+            setSetupPassword(e.target.value);
+            if (setupError) setSetupError('');
+          }}
+          className="w-full px-4 py-2.5 bg-background border border-border/60 rounded-xl text-[14px] outline-none focus:border-primary/50"
+        />
+        {setupError ? (
+          <p className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+            {setupError}
+          </p>
+        ) : null}
+      </ActionDialog>
+
+      <ActionDialog
+        open={show2FASetup && setupStep === 'qr'}
+        title="Scan this QR code"
+        description="Open your authenticator app, scan the code, then enter the 6-digit code below."
+        confirmLabel="Verify & Enable"
+        cancelLabel="Cancel"
+        onConfirm={handleVerify2FA}
+        onClose={close2FASetup}
+      >
+        <div className="space-y-4">
+          <div className="bg-white p-4 rounded-lg flex justify-center w-fit mx-auto shadow-sm border border-border/20">
+            <QRCode value={totpURI} size={160} />
+          </div>
+          <input
+            type="text"
+            aria-label="6-digit verification code"
+            placeholder="000000"
+            value={totpCode}
+            onChange={(e) => {
+              setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6));
+              if (setupError) setSetupError('');
+            }}
+            inputMode="numeric"
+            pattern="[0-9]*"
+            maxLength={6}
+            className="w-full px-4 py-3 bg-background border border-border/60 rounded-xl text-[18px] outline-none text-center tracking-[0.25em] font-mono"
+          />
+          {setupError ? (
+            <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-left text-xs text-red-300">
+              {setupError}
+            </p>
+          ) : null}
+
+          {backupCodes.length > 0 && (
+            <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-3 text-left">
+              <p className="text-[11px] font-bold text-yellow-600 mb-1.5 uppercase">
+                Backup Codes (Save all of these)
+              </p>
+              <p className="mb-2 text-[11px] text-yellow-700 dark:text-yellow-300">
+                Store these in a password manager. Each code can only be used
+                once.
+              </p>
+              <div className="grid grid-cols-2 gap-1.5">
+                {backupCodes.map((c: string, i: number) => (
+                  <code
+                    key={i}
+                    className="text-[10px] bg-background/50 border border-border/30 rounded px-1.5 py-0.5 text-center"
+                  >
+                    {c}
+                  </code>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-start pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                setSetupStep('password');
+                setTotpCode('');
+                setSetupError('');
+              }}
+              className="text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors"
             >
-              <button
-                onClick={close2FASetup}
-                className="absolute top-5 right-5 text-muted-foreground hover:text-foreground"
-              >
-                <svg
-                  width="20"
-                  height="20"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <line x1="18" y1="6" x2="6" y2="18"></line>
-                  <line x1="6" y1="6" x2="18" y2="18"></line>
-                </svg>
-              </button>
-
-              <h3 className="text-xl font-bold mb-6 pr-8">
-                Set up Two-Factor Auth
-              </h3>
-
-              {setupStep === 'password' && (
-                <div className="space-y-4">
-                  <p className="text-[13px] text-muted-foreground">
-                    Enter your password to verify your identity.
-                  </p>
-                  <PasswordInput
-                    placeholder="Your password"
-                    value={setupPassword}
-                    onChange={(e) => {
-                      setSetupPassword(e.target.value);
-                      if (setupError) setSetupError('');
-                    }}
-                    className="w-full px-4 py-2.5 bg-background border border-border/60 rounded-xl text-[14px] outline-none focus:border-primary/50"
-                  />
-                  {setupError ? (
-                    <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
-                      {setupError}
-                    </p>
-                  ) : null}
-                  <div className="flex gap-3 pt-2">
-                    <button
-                      onClick={handleEnable2FA}
-                      className="flex-1 py-2.5 bg-primary text-primary-foreground rounded-xl text-[13px] font-semibold"
-                    >
-                      Continue
-                    </button>
-                    <button
-                      onClick={close2FASetup}
-                      className="flex-1 py-2.5 bg-secondary text-secondary-foreground rounded-xl text-[13px] font-medium border border-border/40"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {setupStep === 'qr' && (
-                <div className="space-y-5 text-center">
-                  <p className="text-[13px] text-muted-foreground text-left">
-                    Scan this QR code in your authenticator app.
-                  </p>
-                  <div className="bg-white p-4 rounded-lg flex justify-center w-fit mx-auto shadow-sm border border-border/20">
-                    <QRCode value={totpURI} size={160} />
-                  </div>
-                  <input
-                    type="text"
-                    placeholder="000000"
-                    value={totpCode}
-                    onChange={(e) => {
-                      setTotpCode(
-                        e.target.value.replace(/\D/g, '').slice(0, 6),
-                      );
-                      if (setupError) setSetupError('');
-                    }}
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    maxLength={6}
-                    className="w-full px-4 py-3 bg-background border border-border/60 rounded-xl text-[18px] outline-none text-center tracking-[0.25em] font-mono"
-                  />
-                  {setupError ? (
-                    <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-left text-xs text-red-300">
-                      {setupError}
-                    </p>
-                  ) : null}
-
-                  {backupCodes.length > 0 && (
-                    <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-3 text-left">
-                      <p className="text-[11px] font-bold text-yellow-600 mb-1.5 uppercase">
-                        Backup Codes (Save all of these)
-                      </p>
-                      <p className="mb-2 text-[11px] text-yellow-700 dark:text-yellow-300">
-                        Store these in a password manager. Each code can only be
-                        used once.
-                      </p>
-                      <div className="grid grid-cols-2 gap-1.5">
-                        {backupCodes.map((c: string, i: number) => (
-                          <code
-                            key={i}
-                            className="text-[10px] bg-background/50 border border-border/30 rounded px-1.5 py-0.5 text-center"
-                          >
-                            {c}
-                          </code>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSetupStep('password');
-                        setTotpCode('');
-                        setSetupError('');
-                      }}
-                      className="w-full py-3 bg-secondary text-secondary-foreground rounded-xl text-[14px] font-medium border border-border/40"
-                    >
-                      Back
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleVerify2FA}
-                      className="w-full py-3 bg-primary text-primary-foreground rounded-xl text-[14px] font-semibold"
-                    >
-                      Verify & Enable
-                    </button>
-                  </div>
-                </div>
-              )}
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+              ← Back to password
+            </button>
+          </div>
+        </div>
+      </ActionDialog>
 
       <ActionDialog
         open={showDisable2FA}
@@ -792,7 +722,6 @@ export default function DashboardPage() {
         ) : null}
       </ActionDialog>
 
-      <ToastRegion toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }
