@@ -253,10 +253,15 @@ export function AdminUserTable({
             Manage roles, grants, status, and account security actions. Showing{' '}
             {filtered.length} of {total} users.
           </p>
+          <label htmlFor="admin-user-search" className="sr-only">
+            Search users
+          </label>
           <input
+            id="admin-user-search"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Search users"
+            aria-label="Search users"
             className="w-full rounded-lg border border-border/70 bg-card px-3 py-2 text-xs text-foreground outline-none transition-colors focus:border-primary/50 sm:w-56"
           />
         </div>
@@ -561,7 +566,11 @@ export function AdminUserTable({
         }}
         onConfirm={ban}
       >
+        <label htmlFor="admin-ban-reason" className="sr-only">
+          Ban reason
+        </label>
         <textarea
+          id="admin-ban-reason"
           value={banDialog.reason}
           onChange={(event) =>
             setBanDialog((prev) => ({ ...prev, reason: event.target.value }))

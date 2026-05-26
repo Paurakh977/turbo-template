@@ -32,6 +32,11 @@ type ToastApi = {
   pushToast: (kind: ToastKind, message: string) => void;
 };
 
+const EDIT_TITLE_INPUT_ID = 'note-edit-title';
+const EDIT_CONTENT_INPUT_ID = 'note-edit-content';
+const CREATE_TITLE_INPUT_ID = 'note-create-title';
+const CREATE_CONTENT_INPUT_ID = 'note-create-content';
+
 function timeAgo(date: Date | string) {
   const diff = Date.now() - new Date(date).getTime();
   const m = Math.floor(diff / 60000);
@@ -130,14 +135,28 @@ function NoteCard({
     >
       {editing ? (
         <div className="space-y-3">
+          <label
+            htmlFor={`${EDIT_TITLE_INPUT_ID}-${note.id}`}
+            className="block text-xs font-medium text-muted-foreground"
+          >
+            Title
+          </label>
           <input
+            id={`${EDIT_TITLE_INPUT_ID}-${note.id}`}
             ref={titleRef}
             defaultValue={note.title}
             className="w-full rounded-lg border border-border/70 bg-background px-3 py-2 text-sm font-medium outline-none transition-colors focus:border-primary/50"
             placeholder="Title"
             maxLength={200}
           />
+          <label
+            htmlFor={`${EDIT_CONTENT_INPUT_ID}-${note.id}`}
+            className="block text-xs font-medium text-muted-foreground"
+          >
+            Content
+          </label>
           <textarea
+            id={`${EDIT_CONTENT_INPUT_ID}-${note.id}`}
             ref={contentRef}
             defaultValue={note.content}
             rows={5}
@@ -307,14 +326,28 @@ function CreateNoteForm({
           className="space-y-3 rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm"
         >
           <h3 className="text-sm font-semibold text-foreground">Create Note</h3>
+          <label
+            htmlFor={CREATE_TITLE_INPUT_ID}
+            className="block text-xs font-medium text-muted-foreground"
+          >
+            Title
+          </label>
           <input
+            id={CREATE_TITLE_INPUT_ID}
             name="title"
             required
             maxLength={200}
             placeholder="Title"
             className="w-full rounded-lg border border-border/70 bg-background px-3 py-2 text-sm font-medium outline-none transition-colors focus:border-primary/50"
           />
+          <label
+            htmlFor={CREATE_CONTENT_INPUT_ID}
+            className="block text-xs font-medium text-muted-foreground"
+          >
+            Content
+          </label>
           <textarea
+            id={CREATE_CONTENT_INPUT_ID}
             name="content"
             required
             rows={4}
