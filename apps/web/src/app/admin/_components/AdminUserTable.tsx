@@ -238,7 +238,7 @@ export function AdminUserTable({
     return list.filter((user) => {
       const role = getPrimaryRole(user.role ?? 'user');
       return (
-        user.name.toLowerCase().includes(query) ||
+        (user.name ?? '').toLowerCase().includes(query) ||
         user.email.toLowerCase().includes(query) ||
         role.toLowerCase().includes(query)
       );
