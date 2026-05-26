@@ -10,6 +10,7 @@ import {
   getPasswordStrength,
   validatePasswordPolicy,
 } from '../../../lib/validation';
+import { getResetPasswordPublicError } from '../../../lib/auth-errors';
 
 function ResetPasswordForm() {
   const router = useRouter();
@@ -50,7 +51,7 @@ function ResetPasswordForm() {
     });
 
     if (error) {
-      setError(error.message ?? 'Reset failed.');
+      setError(getResetPasswordPublicError(error));
     } else {
       setSuccess('Password set. Redirecting to sign in...');
       setTimeout(() => {

@@ -11,6 +11,10 @@ import {
   isValidEmail,
   validatePasswordPolicy,
 } from '../../lib/validation';
+import {
+  getResendVerificationPublicMessage,
+  isRateLimitedAuthError,
+} from '../../lib/auth-errors';
 
 export default function AuthPage() {
   const router = useRouter();
@@ -27,6 +31,7 @@ export default function AuthPage() {
   );
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [name, setName] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -39,6 +44,7 @@ export default function AuthPage() {
     name?: string;
     email?: string;
     password?: string;
+    confirmPassword?: string;
   }>({});
   const APP_URL = process.env.NEXT_PUBLIC_APP_URL as string;
   const appUrl =
@@ -56,9 +62,15 @@ export default function AuthPage() {
   }, []);
 
   const validate = () => {
-    const nextErrors: { name?: string; email?: string; password?: string } = {};
+    const nextErrors: {
+      name?: string;
+      email?: string;
+      password?: string;
+      confirmPassword?: string;
+    } = {};
     const emailValue = email.trim();
     const passwordValue = password.trim();
+    const confirmPasswordValue = confirmPassword.trim();
     const nameValue = name.trim();
 
     if (!isValidEmail(emailValue)) {
@@ -69,6 +81,12 @@ export default function AuthPage() {
       const passwordError = validatePasswordPolicy(passwordValue);
       if (passwordError) {
         nextErrors.password = passwordError;
+      }
+
+      if (!confirmPasswordValue) {
+        nextErrors.confirmPassword = 'Please confirm your password.';
+      } else if (passwordValue !== confirmPasswordValue) {
+        nextErrors.confirmPassword = 'Passwords do not match.';
       }
     } else if (!passwordValue) {
       nextErrors.password = 'Password is required.';
@@ -88,17 +106,19 @@ export default function AuthPage() {
 
   const handleResendVerification = async () => {
     setResendLoading(true);
+    setError('');
     const { error } = await authClient.sendVerificationEmail({
       email: email.trim(),
-      callbackURL: `${appUrl}/dashboard`,
+      callbackURL: `${appUrl}/auth/verify-email`,
     });
-    if (error) {
-      setError(
-        error.status === 429
-          ? 'Too many requests. Please wait a moment and try again.'
-          : (error.message ?? 'Failed to resend.'),
-      );
-    } else setResendSent(true);
+
+    if (error && isRateLimitedAuthError(error)) {
+      setResendSent(false);
+      setError(getResendVerificationPublicMessage(error));
+    } else {
+      setResendSent(true);
+    }
+
     setResendLoading(false);
   };
 
@@ -254,7 +274,8 @@ export default function AuthPage() {
                 animate={{ opacity: 1 }}
                 className="text-green-500 text-sm font-medium mb-4 bg-green-500/10 py-2.5 rounded-xl border border-green-500/20"
               >
-                Verification email resent
+                If your account exists and is not verified, we sent a
+                verification link.
               </motion.p>
             ) : (
               <button
@@ -273,6 +294,7 @@ export default function AuthPage() {
                 setMode('signin');
                 setError('');
                 setResendSent(false);
+                setConfirmPassword('');
                 setFieldErrors({});
               }}
               className="mt-4 text-xs text-muted-foreground hover:text-foreground transition-colors font-medium"
@@ -365,10 +387,22 @@ export default function AuthPage() {
                 animate="visible"
                 exit="exit"
               >
+                <label
+                  htmlFor="auth-name"
+                  className="mb-1.5 block text-xs font-medium text-muted-foreground"
+                >
+                  Full name
+                </label>
                 <input
+                  id="auth-name"
                   className="w-full px-4 py-3 bg-background/50 border border-border/60 rounded-xl text-[14px] outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all placeholder:text-muted-foreground/70"
                   type="text"
                   placeholder="Full name"
+                  autoComplete="name"
+                  aria-invalid={fieldErrors.name ? 'true' : 'false'}
+                  aria-describedby={
+                    fieldErrors.name ? 'auth-name-error' : undefined
+                  }
                   value={name}
                   onChange={(e) => {
                     setName(e.target.value);
@@ -378,7 +412,7 @@ export default function AuthPage() {
                   required
                 />
                 {fieldErrors.name ? (
-                  <p className="mt-1 text-xs text-red-500">
+                  <p id="auth-name-error" className="mt-1 text-xs text-red-500">
                     {fieldErrors.name}
                   </p>
                 ) : null}
@@ -386,10 +420,22 @@ export default function AuthPage() {
             )}
           </AnimatePresence>
 
+          <label
+            htmlFor="auth-email"
+            className="block text-xs font-medium text-muted-foreground"
+          >
+            Email address
+          </label>
           <input
+            id="auth-email"
             className="w-full px-4 py-3 bg-background/50 border border-border/60 rounded-xl text-[14px] outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all placeholder:text-muted-foreground/70"
             type="email"
             placeholder="Email address"
+            autoComplete="email"
+            aria-invalid={fieldErrors.email ? 'true' : 'false'}
+            aria-describedby={
+              fieldErrors.email ? 'auth-email-error' : undefined
+            }
             value={email}
             onChange={(e) => {
               setEmail(e.target.value);
@@ -398,15 +444,33 @@ export default function AuthPage() {
             required
           />
           {fieldErrors.email ? (
-            <p className="-mt-2 text-xs text-red-500">{fieldErrors.email}</p>
+            <p id="auth-email-error" className="-mt-2 text-xs text-red-500">
+              {fieldErrors.email}
+            </p>
           ) : null}
+
+          <label
+            htmlFor="auth-password"
+            className="block text-xs font-medium text-muted-foreground"
+          >
+            {mode === 'signup' ? 'Create password' : 'Password'}
+          </label>
           <PasswordInput
+            id="auth-password"
+            label={mode === 'signup' ? 'Create password' : 'Password'}
             placeholder="Password"
             value={password}
             onChange={(e) => {
               setPassword(e.target.value);
               setFieldErrors((prev) => ({ ...prev, password: undefined }));
             }}
+            autoComplete={
+              mode === 'signup' ? 'new-password' : 'current-password'
+            }
+            aria-invalid={fieldErrors.password ? 'true' : 'false'}
+            aria-describedby={
+              fieldErrors.password ? 'auth-password-error' : undefined
+            }
             minLength={8}
             required
           />
@@ -419,8 +483,59 @@ export default function AuthPage() {
             </p>
           ) : null}
           {fieldErrors.password ? (
-            <p className="-mt-2 text-xs text-red-500">{fieldErrors.password}</p>
+            <p id="auth-password-error" className="-mt-2 text-xs text-red-500">
+              {fieldErrors.password}
+            </p>
           ) : null}
+
+          <AnimatePresence initial={false}>
+            {mode === 'signup' && (
+              <motion.div
+                key="confirm-password"
+                variants={formVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+              >
+                <label
+                  htmlFor="auth-confirm-password"
+                  className="mb-1.5 block text-xs font-medium text-muted-foreground"
+                >
+                  Confirm password
+                </label>
+                <PasswordInput
+                  id="auth-confirm-password"
+                  label="Confirm password"
+                  placeholder="Confirm password"
+                  value={confirmPassword}
+                  onChange={(e) => {
+                    setConfirmPassword(e.target.value);
+                    setFieldErrors((prev) => ({
+                      ...prev,
+                      confirmPassword: undefined,
+                    }));
+                  }}
+                  autoComplete="new-password"
+                  aria-invalid={fieldErrors.confirmPassword ? 'true' : 'false'}
+                  aria-describedby={
+                    fieldErrors.confirmPassword
+                      ? 'auth-confirm-password-error'
+                      : undefined
+                  }
+                  minLength={8}
+                  required
+                />
+                {fieldErrors.confirmPassword ? (
+                  <p
+                    id="auth-confirm-password-error"
+                    className="mt-1 text-xs text-red-500"
+                  >
+                    {fieldErrors.confirmPassword}
+                  </p>
+                ) : null}
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           <AnimatePresence>
             {error && (
@@ -461,6 +576,7 @@ export default function AuthPage() {
               onClick={() => {
                 setMode(mode === 'signin' ? 'signup' : 'signin');
                 setError('');
+                setConfirmPassword('');
                 setFieldErrors({});
               }}
               className="text-foreground font-medium hover:underline"

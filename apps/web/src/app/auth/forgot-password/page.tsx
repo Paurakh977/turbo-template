@@ -5,6 +5,10 @@ import Link from 'next/link';
 import { authClient } from '../../../lib/auth-client';
 import { motion } from 'framer-motion';
 import { isValidEmail } from '../../../lib/validation';
+import {
+  getForgotPasswordPublicMessage,
+  isRateLimitedAuthError,
+} from '../../../lib/auth-errors';
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
@@ -31,13 +35,14 @@ export default function ForgotPasswordPage() {
       email: normalizedEmail,
       redirectTo: `${appUrl}/auth/reset-password`,
     });
-    if (error) {
-      setError(
-        error.status === 429
-          ? 'Too many requests. Please wait a moment and try again.'
-          : (error.message ?? 'Something went wrong'),
-      );
-    } else setSent(true);
+
+    if (error && isRateLimitedAuthError(error)) {
+      setError(getForgotPasswordPublicMessage(error));
+      setLoading(false);
+      return;
+    }
+
+    setSent(true);
     setLoading(false);
   };
 
@@ -104,10 +109,20 @@ export default function ForgotPasswordPage() {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          <label
+            htmlFor="forgot-email"
+            className="block text-xs font-medium text-muted-foreground"
+          >
+            Email address
+          </label>
           <input
+            id="forgot-email"
             className="w-full px-4 py-3 bg-background/50 border border-border/60 rounded-xl text-[14px] outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all placeholder:text-muted-foreground/70"
             type="email"
             placeholder="Your email address"
+            autoComplete="email"
+            aria-invalid={fieldError ? 'true' : 'false'}
+            aria-describedby={fieldError ? 'forgot-email-error' : undefined}
             value={email}
             onChange={(e) => {
               setEmail(e.target.value);
@@ -118,6 +133,7 @@ export default function ForgotPasswordPage() {
 
           {fieldError && (
             <motion.p
+              id="forgot-email-error"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               className="text-red-500 text-xs bg-red-500/10 p-2.5 rounded-lg border border-red-500/20"

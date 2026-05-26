@@ -27,8 +27,8 @@ interface PendingDeletionMeta {
   ipAddress: string | null;
   userAgent: string | null;
   email: string | null;
-  sessionToken: string | null; 
-  sessionId: string | null;    
+  sessionToken: string | null;
+  sessionId: string | null;
 }
 
 async function storePendingDeletion(userId: string, meta: PendingDeletionMeta) {
@@ -542,10 +542,10 @@ const auditLogPlugin = (): BetterAuthPlugin => ({
 
           const userId = session.user.id;
           const currentSession = (
-          session as {
-            session?: { token?: string | null; id?: string | null };
-          }
-        ).session;
+            session as {
+              session?: { token?: string | null; id?: string | null };
+            }
+          ).session;
           const body = ctx.body as { password?: string } | undefined;
           const accounts = await db.account.findMany({
             where: { userId },
@@ -573,7 +573,7 @@ const auditLogPlugin = (): BetterAuthPlugin => ({
             ipAddress: ctx.headers?.get('x-forwarded-for') ?? null,
             userAgent: ctx.headers?.get('user-agent') ?? null,
             email: targetUser?.email ?? null,
-            sessionToken: currentSession?.token ?? null, 
+            sessionToken: currentSession?.token ?? null,
             sessionId: currentSession?.id ?? null,
           });
 
@@ -648,7 +648,14 @@ async function sendEmail({
   });
 
   if (error) {
-    console.error('[Email Error]', error);
+    console.error('[Email Error]', {
+      name: error.name,
+      statusCode: error.statusCode,
+      message: error.message,
+      subject,
+      recipient: recipient.includes('@') ? recipient.split('@')[1] : 'unknown',
+    });
+    throw error;
   } else if (devEmailOverride) {
     console.log(
       `[Email] Redirected from ${to} → ${recipient} | Subject: ${subject}`,
@@ -993,7 +1000,7 @@ export const auth = betterAuth({
       id,
     }),
     sendResetPassword: async ({ user, url }) => {
-      sendEmail({
+      void sendEmail({
         to: user.email,
         subject: 'Reset your password — Ozon',
         html: `
@@ -1010,6 +1017,8 @@ export const auth = betterAuth({
             </p>
           </div>
         `,
+      }).catch((error: unknown) => {
+        console.error('[Email Delivery Error] reset_password', error);
       });
     },
     revokeSessionsOnPasswordReset: true,
@@ -1020,7 +1029,7 @@ export const auth = betterAuth({
   // -------------------------------------------------------------------------
   emailVerification: {
     sendVerificationEmail: async ({ user, url }) => {
-      sendEmail({
+      void sendEmail({
         to: user.email,
         subject: 'Verify your email — Ozon',
         html: `
@@ -1037,8 +1046,11 @@ export const auth = betterAuth({
             </p>
           </div>
         `,
+      }).catch((error: unknown) => {
+        console.error('[Email Delivery Error] verification_email', error);
       });
     },
+    sendOnSignIn: true,
     callbackURL: `${appURL}/auth/verify-email`,
   },
 
@@ -1166,7 +1178,7 @@ export const auth = betterAuth({
       },
       otpOptions: {
         sendOTP: async ({ user, otp }) => {
-          sendEmail({
+          void sendEmail({
             to: user.email,
             subject: 'Your verification code — Ozon',
             html: `
@@ -1182,6 +1194,8 @@ export const auth = betterAuth({
                 </p>
               </div>
             `,
+          }).catch((error: unknown) => {
+            console.error('[Email Delivery Error] two_factor_otp', error);
           });
         },
         period: process.env.TWO_FACTOR_OTP_PERIOD

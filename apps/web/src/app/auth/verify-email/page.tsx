@@ -5,6 +5,10 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { authClient } from '../../../lib/auth-client';
 import { motion, AnimatePresence } from 'framer-motion';
+import {
+  getVerifyEmailCallbackError,
+  getVerifyEmailPublicError,
+} from '../../../lib/auth-errors';
 
 function VerifyEmailContent() {
   const router = useRouter();
@@ -17,6 +21,15 @@ function VerifyEmailContent() {
   useEffect(() => {
     let isMounted = true;
     const token = searchParams.get('token');
+    const callbackError = getVerifyEmailCallbackError(
+      searchParams.get('error'),
+    );
+
+    if (callbackError) {
+      setStatus('error');
+      setMessage(callbackError);
+      return;
+    }
 
     if (!token) {
       setStatus('error');
@@ -32,10 +45,7 @@ function VerifyEmailContent() {
         if (!isMounted) return;
         if (error) {
           setStatus('error');
-          setMessage(
-            error.message ??
-              'Verification link may have expired. Please request a new one.',
-          );
+          setMessage(getVerifyEmailPublicError(error));
           return;
         }
 
