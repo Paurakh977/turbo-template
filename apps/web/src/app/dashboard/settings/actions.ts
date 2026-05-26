@@ -9,6 +9,49 @@ import { isAPIError } from 'better-auth/api';
 
 type AuthSession = NonNullable<Awaited<ReturnType<typeof auth.api.getSession>>>;
 
+function trimTrailingSlash(value: string): string {
+  return value.endsWith('/') ? value.slice(0, -1) : value;
+}
+
+function buildAbsoluteUrl(baseUrl: string, pathname: string): string {
+  const normalizedBase = trimTrailingSlash(baseUrl);
+  const normalizedPath = pathname.startsWith('/') ? pathname : `/${pathname}`;
+  return `${normalizedBase}${normalizedPath}`;
+}
+
+function inferOriginFromHeaders(h: Headers): string | null {
+  const forwardedProto = h
+    .get('x-forwarded-proto')
+    ?.split(',')[0]
+    ?.trim()
+    .toLowerCase();
+  const forwardedHost = h.get('x-forwarded-host')?.split(',')[0]?.trim();
+  const host = forwardedHost ?? h.get('host')?.split(',')[0]?.trim();
+  if (!host) return null;
+
+  const protocol =
+    forwardedProto ??
+    (host.includes('localhost') || host.startsWith('127.0.0.1')
+      ? 'http'
+      : 'https');
+
+  return `${protocol}://${host}`;
+}
+
+async function getAppBaseUrl(h?: Headers): Promise<string> {
+  const publicAppUrl = process.env.NEXT_PUBLIC_APP_URL?.trim() || '';
+  if (publicAppUrl) return trimTrailingSlash(publicAppUrl);
+
+  const requestHeaders = h ?? (await headers());
+  const inferred = inferOriginFromHeaders(requestHeaders);
+  if (inferred) return trimTrailingSlash(inferred);
+
+  const authUrl = process.env.BETTER_AUTH_URL?.trim() || '';
+  if (authUrl) return trimTrailingSlash(authUrl);
+
+  return 'http://localhost:3000';
+}
+
 async function getSessionOrRedirect() {
   const h = await headers();
   const session = await auth.api.getSession({ headers: h });
@@ -130,13 +173,16 @@ export async function requestPasswordResetAction() {
     return { error: 'Your role cannot manage security settings.' };
   }
 
+  const h = await headers();
+  const appBaseUrl = await getAppBaseUrl(h);
+
   try {
     await auth.api.requestPasswordReset({
       body: {
         email: session.user.email,
-        redirectTo: '/auth/reset-password',
+        redirectTo: buildAbsoluteUrl(appBaseUrl, '/auth/reset-password'),
       },
-      headers: await headers(),
+      headers: h,
     });
   } catch (error) {
     return {
@@ -198,15 +244,14 @@ export async function runLabsSettingAction() {
 
 export async function deleteAccountAction(formData: FormData) {
   const session = await getSessionOrRedirect();
+  const h = await headers();
+  const appBaseUrl = await getAppBaseUrl(h);
 
   const accounts = await db.account.findMany({
     where: { userId: session.user.id },
     select: { providerId: true },
   });
 
-  const hasOAuthAccount = accounts.some(
-    (acc) => acc.providerId !== 'credential',
-  );
   const hasCredentialAccount = accounts.some(
     (acc) => acc.providerId === 'credential',
   );
@@ -222,7 +267,9 @@ export async function deleteAccountAction(formData: FormData) {
     return { error: 'Password is required to confirm account deletion.' };
   }
 
-  const deleteBody: { password?: string } = {};
+  const deleteBody: { password?: string; callbackURL: string } = {
+    callbackURL: buildAbsoluteUrl(appBaseUrl, '/'),
+  };
   if (password) {
     deleteBody.password = password;
   }
@@ -230,7 +277,7 @@ export async function deleteAccountAction(formData: FormData) {
   try {
     await auth.api.deleteUser({
       body: deleteBody,
-      headers: await headers(),
+      headers: h,
     });
   } catch (error) {
     return {

@@ -10,11 +10,11 @@ export const THEME_INIT_SCRIPT = `
     var d = window.matchMedia('${THEME_QUERY}').matches;
     var r = t === 'dark' || t === 'light' ? t : (d ? 'dark' : 'light');
     document.documentElement.classList.toggle('dark', r === 'dark');
-    document.cookie = '${THEME_STORAGE_KEY}=' + r + '; path=/; max-age=31536000; SameSite=Lax';
+    var isHttps = window.location.protocol === 'https:';
+    document.cookie = '${THEME_STORAGE_KEY}=' + encodeURIComponent(r) + '; path=/; max-age=31536000; SameSite=Lax' + (isHttps ? '; Secure' : '');
   } catch (_) {}
 })();
 `;
-
 
 export function resolveThemeFromBrowser(): ThemeMode {
   const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
@@ -24,7 +24,8 @@ export function resolveThemeFromBrowser(): ThemeMode {
 }
 
 export function applyTheme(theme: ThemeMode): void {
+  const isHttps = window.location.protocol === 'https:';
   window.localStorage.setItem(THEME_STORAGE_KEY, theme);
-  document.cookie = `${THEME_STORAGE_KEY}=${theme}; path=/; max-age=31536000; SameSite=Lax`;
+  document.cookie = `${THEME_STORAGE_KEY}=${encodeURIComponent(theme)}; path=/; max-age=31536000; SameSite=Lax${isHttps ? '; Secure' : ''}`;
   document.documentElement.classList.toggle('dark', theme === 'dark');
 }
