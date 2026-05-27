@@ -40,12 +40,12 @@ async function storePendingDeletion(userId: string, meta: PendingDeletionMeta) {
         'PX',
         PENDING_TTL_MS,
       )
-      .catch((e) => console.error('[Redis Error] storePendingDeletion:', e));
+      .catch((e) => {
+        console.error('[Redis Error] storePendingDeletion:', e);
+        storePendingInMemory(`deletion:${userId}`, meta);
+      });
   } else {
-    pendingUserUpdates.set(`deletion:${userId}`, {
-      data: meta as unknown as UserData,
-      ts: Date.now(),
-    });
+    storePendingInMemory(`deletion:${userId}`, meta);
   }
 }
 
@@ -53,6 +53,7 @@ async function popPendingDeletion(
   userId: string,
 ): Promise<PendingDeletionMeta | undefined> {
   if (redis) {
+    let parsed: PendingDeletionMeta | undefined;
     const raw = await redis.get(`pending_deletion:${userId}`).catch((e) => {
       console.error('[Redis Error] popPendingDeletion:', e);
       return null;
@@ -62,19 +63,19 @@ async function popPendingDeletion(
         .del(`pending_deletion:${userId}`)
         .catch((e) => console.error('[Redis Error]', e));
       try {
-        return JSON.parse(raw) as PendingDeletionMeta;
+        parsed = JSON.parse(raw) as PendingDeletionMeta;
       } catch {
-        return undefined;
+        console.error('[Redis Error] popPendingDeletion: invalid payload', {
+          userId,
+        });
       }
     }
-    return undefined;
+
+    return (
+      parsed ?? popPendingFromMemory<PendingDeletionMeta>(`deletion:${userId}`)
+    );
   } else {
-    const key = `deletion:${userId}`;
-    const entry = pendingUserUpdates.get(key);
-    pendingUserUpdates.delete(key);
-    if (!entry) return undefined;
-    if (Date.now() - entry.ts > PENDING_TTL_MS) return undefined;
-    return entry.data as unknown as PendingDeletionMeta;
+    return popPendingFromMemory<PendingDeletionMeta>(`deletion:${userId}`);
   }
 }
 
@@ -147,6 +148,22 @@ interface SessionData {
 const pendingUserUpdates = new Map<string, { data: UserData; ts: number }>();
 
 const PENDING_TTL_MS = 30_000;
+
+function storePendingInMemory(key: string, data: unknown) {
+  pendingUserUpdates.set(key, {
+    data: data as UserData,
+    ts: Date.now(),
+  });
+}
+
+function popPendingFromMemory<T>(key: string): T | undefined {
+  const entry = pendingUserUpdates.get(key);
+  pendingUserUpdates.delete(key);
+  if (!entry) return undefined;
+  if (Date.now() - entry.ts > PENDING_TTL_MS) return undefined;
+  return entry.data as unknown as T;
+}
+
 async function storePendingUser(userId: string, data: UserData) {
   if (redis) {
     await redis
@@ -156,13 +173,17 @@ async function storePendingUser(userId: string, data: UserData) {
         'PX',
         PENDING_TTL_MS,
       )
-      .catch((e) => console.error('[Redis Error]', e));
+      .catch((e) => {
+        console.error('[Redis Error] storePendingUser:', e);
+        storePendingInMemory(userId, data);
+      });
   } else {
-    pendingUserUpdates.set(userId, { data, ts: Date.now() });
+    storePendingInMemory(userId, data);
   }
 }
 async function popPendingUser(userId: string): Promise<UserData | undefined> {
   if (redis) {
+    let parsed: UserData | undefined;
     const raw = await redis.get(`pending_user_update:${userId}`).catch((e) => {
       console.error('[Redis Error]', e);
       return null;
@@ -172,18 +193,18 @@ async function popPendingUser(userId: string): Promise<UserData | undefined> {
         .del(`pending_user_update:${userId}`)
         .catch((e) => console.error('[Redis Error]', e));
       try {
-        return JSON.parse(raw) as UserData;
+        parsed = JSON.parse(raw) as UserData;
       } catch (e) {
-        return undefined;
+        console.error('[Redis Error] popPendingUser: invalid payload', {
+          userId,
+          error: e,
+        });
       }
     }
-    return undefined;
+
+    return parsed ?? popPendingFromMemory<UserData>(userId);
   } else {
-    const entry = pendingUserUpdates.get(userId);
-    pendingUserUpdates.delete(userId);
-    if (!entry) return undefined;
-    if (Date.now() - entry.ts > PENDING_TTL_MS) return undefined; // stale entry
-    return entry.data;
+    return popPendingFromMemory<UserData>(userId);
   }
 }
 
@@ -612,8 +633,6 @@ const hasGoogle = Boolean(googleClientId && googleClientSecret);
 const hasGithub = Boolean(githubClientId && githubClientSecret);
 const resend = resendApiKey ? new Resend(resendApiKey) : null;
 const canSendEmail = Boolean(resend);
-const useSecureCookies = baseURL.startsWith('https://');
-
 const redis = redisUrl ? new Redis(redisUrl) : null;
 
 // ---------------------------------------------------------------------------
@@ -690,15 +709,43 @@ export const auth = betterAuth({
   secondaryStorage: redis
     ? {
         get: async (key) => {
-          const value = await redis.get(key);
+          const value = await redis.get(key).catch((error) => {
+            console.error('[Redis Error] secondaryStorage.get failed:', error);
+            return null;
+          });
           return value ?? null;
         },
         set: async (key, value, ttl) => {
-          if (ttl) await redis.set(key, value, 'EX', ttl);
-          else await redis.set(key, value);
+          const ttlSeconds =
+            typeof ttl === 'number' && Number.isFinite(ttl) && ttl > 0
+              ? Math.max(1, Math.floor(ttl))
+              : undefined;
+
+          if (ttlSeconds) {
+            await redis.set(key, value, 'EX', ttlSeconds).catch((error) =>
+              console.error('[Redis Error] secondaryStorage.set failed:', {
+                key,
+                ttl: ttlSeconds,
+                error,
+              }),
+            );
+            return;
+          }
+
+          await redis.set(key, value).catch((error) =>
+            console.error('[Redis Error] secondaryStorage.set failed:', {
+              key,
+              error,
+            }),
+          );
         },
         delete: async (key) => {
-          await redis.del(key);
+          await redis.del(key).catch((error) =>
+            console.error('[Redis Error] secondaryStorage.delete failed:', {
+              key,
+              error,
+            }),
+          );
         },
       }
     : undefined,
@@ -790,7 +837,10 @@ export const auth = betterAuth({
           if (!u?.id) return;
 
           const old = await popPendingUser(u.id);
-          if (!old) return; // no snapshot means admin-plugin partial update — skip
+          if (!old) {
+            await invalidateUserCache(u.id);
+            return;
+          }
 
           const writes: Promise<unknown>[] = [];
 
@@ -1120,7 +1170,16 @@ export const auth = betterAuth({
     customRules: {
       '/sign-in/email': { window: 60, max: 5 },
       '/sign-up/email': { window: 60, max: 3 },
-      '/forget-password': { window: 60, max: 3 },
+      '/request-password-reset': { window: 60, max: 3 },
+      '/send-verification-email': { window: 60, max: 3 },
+      '/two-factor/send-otp': { window: 60, max: 3 },
+      '/two-factor/verify-totp': { window: 10, max: 3 },
+      '/two-factor/verify-otp': { window: 10, max: 3 },
+      '/two-factor/verify-backup-code': { window: 10, max: 3 },
+      '/change-password': { window: 60, max: 5 },
+      '/change-email': { window: 60, max: 3 },
+      '/reset-password': { window: 60, max: 5 },
+      '/delete-user': { window: 60, max: 2 },
     },
   },
 
@@ -1143,6 +1202,7 @@ export const auth = betterAuth({
   // Advanced
   // -------------------------------------------------------------------------
   advanced: {
+    // Deployment runs behind TLS-terminating nginx/certs in all environments.
     useSecureCookies: true,
     ipAddress: {
       disableIpTracking: false,
@@ -1198,6 +1258,7 @@ export const auth = betterAuth({
             console.error('[Email Delivery Error] two_factor_otp', error);
           });
         },
+        storeOTP: 'encrypted',
         period: process.env.TWO_FACTOR_OTP_PERIOD
           ? parseInt(process.env.TWO_FACTOR_OTP_PERIOD)
           : 3,
