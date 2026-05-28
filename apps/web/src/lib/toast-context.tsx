@@ -1,8 +1,12 @@
 'use client';
 
-import { createContext, useContext, ReactNode } from 'react';
+import { createContext, useContext, ReactNode, useEffect } from 'react';
 import { useToastRegion } from './use-toast-region';
 import { ToastRegion, type ToastKind } from '../app/_components/ToastRegion';
+import {
+  AUTH_RATE_LIMIT_EVENT,
+  AUTH_RATE_LIMIT_MESSAGE,
+} from './auth-rate-limit-event';
 
 type ToastContextType = {
   pushToast: (kind: ToastKind, message: string) => void;
@@ -12,6 +16,19 @@ const ToastContext = createContext<ToastContextType | null>(null);
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const { toasts, pushToast, dismissToast } = useToastRegion();
+
+  useEffect(() => {
+    const onRateLimit = (event: Event) => {
+      const customEvent = event as CustomEvent<{ message?: string }>;
+      const message = customEvent.detail?.message || AUTH_RATE_LIMIT_MESSAGE;
+      pushToast('error', message);
+    };
+
+    window.addEventListener(AUTH_RATE_LIMIT_EVENT, onRateLimit);
+    return () => {
+      window.removeEventListener(AUTH_RATE_LIMIT_EVENT, onRateLimit);
+    };
+  }, [pushToast]);
 
   return (
     <ToastContext.Provider value={{ pushToast }}>
