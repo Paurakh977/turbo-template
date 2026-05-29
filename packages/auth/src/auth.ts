@@ -1153,12 +1153,21 @@ export const auth = betterAuth({
   // -------------------------------------------------------------------------
   // Rate limiting
   //
-  // FIX: customRules paths must be relative to the Better Auth basePath,
-  // NOT include the full "/api/auth" prefix. The `ctx.path` that Better Auth
-  // matches against is the path *after* stripping the basePath.
+  // Three-layer architecture:
+  //   1. Nginx — IP-wide flood protection (broad, connection-level)
+  //   2. Better Auth plugin — per-endpoint, per-user/IP limits (this config)
+  //   3. Server Action rate limiter — custom DB-backed for app-level mutations
   //
-  // Before (wrong): '/api/auth/sign-in/email'
-  // After  (correct): '/sign-in/email'
+  // Endpoint classification:
+  //   - Passive/read: high limits so passive session polling never triggers
+  //     false UX noise (get-session → 60/min, list-accounts → 30/min, etc.)
+  //   - Auth challenge: strict limits to prevent brute-force. Per-page inline
+  //     errors handle 429 (sign-in 5/min, sign-up 3/min, 2FA verify 3/10s)
+  //   - Destructive: tightest limits (delete-user 2/min, change-email 3/min)
+  //
+  // NOTE: customRules paths are relative to the Better Auth basePath (the
+  // `ctx.path` matched is the path *after* stripping the basePath prefix).
+  // Do NOT include leading "/api/auth".
   // -------------------------------------------------------------------------
   rateLimit: {
     enabled: true,
@@ -1168,6 +1177,13 @@ export const auth = betterAuth({
     max: process.env.RATE_LIMIT_MAX ? parseInt(process.env.RATE_LIMIT_MAX) : 20,
     storage: redis ? 'secondary-storage' : 'database',
     customRules: {
+      // ── Passive / read endpoints (relaxed — prevent UX noise) ──────────
+      '/get-session': { window: 60, max: 60 },
+      '/list-accounts': { window: 60, max: 30 },
+      '/admin/list-users': { window: 60, max: 60 },
+      '/admin/check-role-permission': { window: 60, max: 60 },
+
+      // ── Auth challenge endpoints (strict — per-page inline errors) ─────
       '/sign-in/email': { window: 60, max: 5 },
       '/sign-up/email': { window: 60, max: 3 },
       '/request-password-reset': { window: 60, max: 3 },
@@ -1179,6 +1195,8 @@ export const auth = betterAuth({
       '/change-password': { window: 60, max: 5 },
       '/change-email': { window: 60, max: 3 },
       '/reset-password': { window: 60, max: 5 },
+
+      // ── Destructive actions (tightest limits) ──────────────────────────
       '/delete-user': { window: 60, max: 2 },
     },
   },
