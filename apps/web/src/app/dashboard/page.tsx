@@ -1,7 +1,7 @@
 // apps/web/src/app/dashboard/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { authClient } from '../../lib/auth-client';
@@ -19,10 +19,52 @@ type Account = { providerId: string };
 export default function DashboardPage() {
   const router = useRouter();
   const {
-    data: session,
+    data: liveSession,
     isPending,
     error: sessionError,
   } = authClient.useSession();
+
+  // ── Session caching (useRef + sessionStorage for page-refresh resilience) ──
+  const SESSION_CACHE_KEY = 'dash-session';
+  const SESSION_CACHE_TTL = 5 * 60 * 1000;
+
+  const lastSessionRef = useRef(liveSession);
+
+  // Hydrate from sessionStorage after mount — survives F5/Cmd+R
+  useEffect(() => {
+    try {
+      if (typeof window === 'undefined') return;
+      const raw = sessionStorage.getItem(SESSION_CACHE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (Date.now() - parsed.ts > SESSION_CACHE_TTL) {
+        sessionStorage.removeItem(SESSION_CACHE_KEY);
+        return;
+      }
+      if (!lastSessionRef.current) {
+        lastSessionRef.current = parsed.data;
+      }
+    } catch {
+      // Ignore corrupt cache
+    }
+  }, []);
+
+  // Keep cache fresh — write to ref + sessionStorage on every successful fetch
+  useEffect(() => {
+    if (liveSession) {
+      lastSessionRef.current = liveSession;
+      try {
+        sessionStorage.setItem(
+          SESSION_CACHE_KEY,
+          JSON.stringify({ data: liveSession, ts: Date.now() }),
+        );
+      } catch {
+        // Storage full or unavailable
+      }
+    }
+  }, [liveSession]);
+
+  const session = liveSession ?? lastSessionRef.current;
 
   // 2FA setup state
   const [show2FASetup, setShow2FASetup] = useState(false);
@@ -39,6 +81,10 @@ export default function DashboardPage() {
   const [disablePending, setDisablePending] = useState(false);
 
   const { pushToast } = useToast();
+
+  // ── Rate-limit retry state (MUST be before any early return) ─────────
+  const [retryCount, setRetryCount] = useState(0);
+  const [countdown, setCountdown] = useState(0);
 
   // Account listing (used to detect whether a user has a local password/credential)
   const [userAccounts, setUserAccounts] = useState<Account[]>([]);
@@ -81,10 +127,42 @@ export default function DashboardPage() {
   const isOAuthOnly = hasFetchedAccounts && !hasPasswordAccount;
 
   useEffect(() => {
-    if (!isPending && !session && sessionError?.status !== 429) {
+    if (!isPending && !liveSession && sessionError?.status !== 429) {
       router.push('/auth');
     }
-  }, [session, isPending, router, sessionError]);
+  }, [liveSession, isPending, router, sessionError]);
+
+  // ── Rate-limit retry — MUST be before the isPending early return ─────────
+
+  const isFirstLoadRateLimited =
+    !isPending &&
+    !liveSession &&
+    sessionError?.status === 429 &&
+    !lastSessionRef.current;
+
+  useEffect(() => {
+    if (!isFirstLoadRateLimited) {
+      setCountdown(0);
+      return;
+    }
+    const delay = Math.min(5000 * Math.pow(2, retryCount), 60000);
+    setCountdown(Math.ceil(delay / 1000));
+    const cd = setInterval(() => setCountdown((c) => Math.max(0, c - 1)), 1000);
+    const timer = setTimeout(() => {
+      clearInterval(cd);
+      authClient
+        .getSession()
+        .then(({ data }) => {
+          if (data) window.location.reload();
+          else setRetryCount((c) => c + 1);
+        })
+        .catch(() => setRetryCount((c) => c + 1));
+    }, delay);
+    return () => {
+      clearTimeout(timer);
+      clearInterval(cd);
+    };
+  }, [isFirstLoadRateLimited, retryCount]);
 
   if (isPending) {
     return (
@@ -94,13 +172,33 @@ export default function DashboardPage() {
     );
   }
 
-  if (!session && sessionError?.status === 429) {
+  if (isFirstLoadRateLimited) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center text-muted-foreground text-sm">
-        Rate limited. Please wait a moment...
-      </div>
+      <RetryScreen
+        countdown={countdown}
+        onRetry={async () => {
+          try {
+            const { data } = await authClient.getSession();
+            if (data) window.location.reload();
+            else setRetryCount((c) => c + 1);
+          } catch {
+            setRetryCount((c) => c + 1);
+          }
+        }}
+        onSignOut={async () => {
+          await authClient.signOut();
+          router.push('/auth');
+        }}
+      />
     );
   }
+
+  // Degraded state — cached session available, but live fetch is rate limited
+  const isDegraded =
+    !isPending &&
+    !liveSession &&
+    sessionError?.status === 429 &&
+    lastSessionRef.current != null;
 
   if (!session) return null;
 
@@ -298,6 +396,30 @@ export default function DashboardPage() {
       </header>
 
       <main className="flex-1 max-w-[800px] w-full mx-auto px-4 sm:px-6 py-8 sm:py-12">
+        {isDegraded && (
+          <div className="mb-6 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-[13px] text-amber-700 dark:text-amber-300 flex items-center gap-3">
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="shrink-0"
+            >
+              <path d="M18.36 6.64A9 9 0 0 1 20.77 15" />
+              <path d="M6.16 6.16a9 9 0 0 0 0 11.68" />
+              <path d="M10.46 10.46a3 3 0 0 0 0 5.08" />
+              <path d="M20.84 20.84a1 1 0 0 1-1.42 1.42l-17-17a1 1 0 0 1 1.42-1.42l5.4 5.4a9 9 0 0 1 10.3 10.3l1.3 1.3z" />
+            </svg>
+            <span>
+              Connection issue — data may be slightly stale. You&apos;re still
+              signed in.
+            </span>
+          </div>
+        )}
         <motion.div
           variants={containerVariants}
           initial="hidden"
@@ -721,7 +843,96 @@ export default function DashboardPage() {
           <p className="mt-2 text-xs text-red-300">{disableError}</p>
         ) : null}
       </ActionDialog>
+    </div>
+  );
+}
 
+// ── Retry screen for rate-limited session (no cached data available) ──
+function RetryScreen({
+  countdown,
+  onRetry,
+  onSignOut,
+}: {
+  countdown: number;
+  onRetry: () => void;
+  onSignOut: () => Promise<void>;
+}) {
+  return (
+    <div className="min-h-screen bg-background text-foreground font-sans flex flex-col">
+      <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-xl border-b border-border/40">
+        <div className="max-w-[760px] mx-auto px-6 h-16 flex items-center justify-between">
+          <Link
+            href="/"
+            className="flex items-center gap-3 text-foreground no-underline"
+          >
+            <div className="w-9 h-9 border border-border/80 bg-white rounded-xl flex items-center justify-center shadow-sm">
+              <img
+                src="/logo.svg"
+                alt="Ozon"
+                className="w-6 h-6 object-contain"
+              />
+            </div>
+            <span className="font-bold text-[17px] tracking-tight">Ozon</span>
+          </Link>
+          <button
+            onClick={onSignOut}
+            className="text-[13px] font-medium px-3 py-1.5 rounded-lg border border-border/50 bg-card hover:bg-muted text-foreground transition-colors shadow-sm"
+          >
+            Sign out
+          </button>
+        </div>
+      </header>
+      <main className="flex-1 flex items-center justify-center px-4">
+        <div className="text-center max-w-sm">
+          <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
+            <svg
+              width="28"
+              height="28"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="text-amber-600 dark:text-amber-400"
+            >
+              <path d="M18.36 6.64A9 9 0 0 1 20.77 15" />
+              <path d="M6.16 6.16a9 9 0 0 0 0 11.68" />
+              <path d="M10.46 10.46a3 3 0 0 0 0 5.08" />
+              <path d="M20.84 20.84a1 1 0 0 1-1.42 1.42l-17-17a1 1 0 0 1 1.42-1.42l5.4 5.4a9 9 0 0 1 10.3 10.3l1.3 1.3z" />
+            </svg>
+          </div>
+          <h2 className="text-xl font-semibold tracking-tight mb-2">
+            Connection interrupted
+          </h2>
+          <p className="text-muted-foreground text-sm leading-relaxed mb-8">
+            We couldn&apos;t refresh your session. Your data is safe — no
+            changes were lost.
+          </p>
+          <button
+            onClick={onRetry}
+            disabled={countdown > 0}
+            className="w-full py-3 bg-primary text-primary-foreground rounded-xl text-[14px] font-semibold hover:bg-primary/90 transition-all disabled:opacity-60 flex items-center justify-center gap-2 shadow-sm"
+          >
+            {countdown > 0 ? (
+              <>
+                <span className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                Retrying in {countdown}s
+              </>
+            ) : (
+              'Retry Now'
+            )}
+          </button>
+          <div className="mt-8 text-center">
+            <Link
+              href="/auth"
+              className="text-[13px] text-muted-foreground hover:text-foreground font-medium transition-colors"
+            >
+              Sign in again
+            </Link>
+          </div>
+        </div>
+      </main>
     </div>
   );
 }
