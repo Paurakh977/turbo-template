@@ -5,6 +5,10 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { db } from '@repo/database';
 import { auth, hasAdminRole } from '@repo/auth';
+import {
+  checkServerActionRateLimit,
+  getServerActionRateLimitMessage,
+} from '../../../lib/server-action-rate-limit';
 
 type AuthSession = NonNullable<Awaited<ReturnType<typeof auth.api.getSession>>>;
 
@@ -13,6 +17,27 @@ async function getSessionOrRedirect() {
   const session = await auth.api.getSession({ headers: h });
   if (!session) redirect('/auth');
   return session;
+}
+
+async function enforceActionRateLimit(
+  userId: string,
+  action: string,
+  windowMs: number,
+  max: number,
+) {
+  const result = await checkServerActionRateLimit({
+    scope: `notes:${action}`,
+    identifier: userId,
+    windowMs,
+    max,
+    failOpen: false,
+  });
+
+  if (!result.allowed) {
+    return { error: getServerActionRateLimitMessage(result.retryAfterMs) };
+  }
+
+  return null;
 }
 
 function getEffectivePermissionUserId(session: AuthSession): string {
@@ -46,6 +71,14 @@ async function logAudit(
 
 export async function createNoteAction(formData: FormData) {
   const session = await getSessionOrRedirect();
+  const rateLimitError = await enforceActionRateLimit(
+    session.user.id,
+    'create-note',
+    60_000,
+    10,
+  );
+  if (rateLimitError) return rateLimitError;
+
   const effectivePermissionUserId = getEffectivePermissionUserId(session);
 
   const perm = await auth.api.userHasPermission({
@@ -88,6 +121,14 @@ export async function createNoteAction(formData: FormData) {
 
 export async function updateNoteAction(noteId: string, formData: FormData) {
   const session = await getSessionOrRedirect();
+  const rateLimitError = await enforceActionRateLimit(
+    session.user.id,
+    'update-note',
+    60_000,
+    20,
+  );
+  if (rateLimitError) return rateLimitError;
+
   const effectivePermissionUserId = getEffectivePermissionUserId(session);
 
   const perm = await auth.api.userHasPermission({
@@ -139,6 +180,14 @@ export async function updateNoteAction(noteId: string, formData: FormData) {
 
 export async function deleteNoteAction(noteId: string) {
   const session = await getSessionOrRedirect();
+  const rateLimitError = await enforceActionRateLimit(
+    session.user.id,
+    'delete-note',
+    60_000,
+    10,
+  );
+  if (rateLimitError) return rateLimitError;
+
   const effectivePermissionUserId = getEffectivePermissionUserId(session);
 
   const perm = await auth.api.userHasPermission({

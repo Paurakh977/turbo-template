@@ -6,6 +6,10 @@ import { revalidatePath } from 'next/cache';
 import { db } from '@repo/database';
 import { auth } from '@repo/auth';
 import { isAPIError } from 'better-auth/api';
+import {
+  checkServerActionRateLimit,
+  getServerActionRateLimitMessage,
+} from '../../../lib/server-action-rate-limit';
 
 type AuthSession = NonNullable<Awaited<ReturnType<typeof auth.api.getSession>>>;
 
@@ -57,6 +61,27 @@ async function getSessionOrRedirect() {
   const session = await auth.api.getSession({ headers: h });
   if (!session) redirect('/auth');
   return session;
+}
+
+async function enforceActionRateLimit(
+  userId: string,
+  action: string,
+  windowMs: number,
+  max: number,
+) {
+  const result = await checkServerActionRateLimit({
+    scope: `settings:${action}`,
+    identifier: userId,
+    windowMs,
+    max,
+    failOpen: false,
+  });
+
+  if (!result.allowed) {
+    return { error: getServerActionRateLimitMessage(result.retryAfterMs) };
+  }
+
+  return null;
 }
 
 async function logAudit(
@@ -136,6 +161,14 @@ function getActionErrorMessage(
 
 export async function updateDisplayNameAction(formData: FormData) {
   const session = await getSessionOrRedirect();
+  const rateLimitError = await enforceActionRateLimit(
+    session.user.id,
+    'update-display-name',
+    60_000,
+    6,
+  );
+  if (rateLimitError) return rateLimitError;
+
   const allowed = await hasSettingsPermission(session.user.id, 'profile');
   if (!allowed)
     return { error: 'You are not allowed to edit profile settings.' };
@@ -168,6 +201,14 @@ export async function updateDisplayNameAction(formData: FormData) {
 
 export async function requestPasswordResetAction() {
   const session = await getSessionOrRedirect();
+  const rateLimitError = await enforceActionRateLimit(
+    session.user.id,
+    'request-password-reset',
+    60_000,
+    3,
+  );
+  if (rateLimitError) return rateLimitError;
+
   const allowed = await hasSettingsPermission(session.user.id, 'security');
   if (!allowed) {
     return { error: 'Your role cannot manage security settings.' };
@@ -200,6 +241,14 @@ export async function requestPasswordResetAction() {
 
 export async function toggleThemePreferenceAction() {
   const session = await getSessionOrRedirect();
+  const rateLimitError = await enforceActionRateLimit(
+    session.user.id,
+    'toggle-theme-preference',
+    60_000,
+    10,
+  );
+  if (rateLimitError) return rateLimitError;
+
   const effectivePermissionUserId = getEffectivePermissionUserId(session);
   const allowed = await hasSettingsPermission(
     effectivePermissionUserId,
@@ -222,6 +271,14 @@ export async function toggleThemePreferenceAction() {
 
 export async function runLabsSettingAction() {
   const session = await getSessionOrRedirect();
+  const rateLimitError = await enforceActionRateLimit(
+    session.user.id,
+    'run-labs-setting',
+    60_000,
+    5,
+  );
+  if (rateLimitError) return rateLimitError;
+
   const effectivePermissionUserId = getEffectivePermissionUserId(session);
   const allowed = await hasSettingsPermission(
     effectivePermissionUserId,
@@ -244,6 +301,14 @@ export async function runLabsSettingAction() {
 
 export async function deleteAccountAction(formData: FormData) {
   const session = await getSessionOrRedirect();
+  const rateLimitError = await enforceActionRateLimit(
+    session.user.id,
+    'delete-account',
+    60_000,
+    2,
+  );
+  if (rateLimitError) return rateLimitError;
+
   const h = await headers();
   const appBaseUrl = await getAppBaseUrl(h);
 
