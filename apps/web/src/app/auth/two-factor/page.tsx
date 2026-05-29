@@ -50,6 +50,14 @@ function isMissingChallengeError(error: TwoFactorError | null | undefined) {
   );
 }
 
+function isRateLimitedError(error: TwoFactorError | null | undefined): boolean {
+  return error?.status === 429;
+}
+
+function getRateLimitedMessage() {
+  return 'Too many attempts. Please wait a moment and try again.';
+}
+
 function readChallengeSnapshot(): ChallengeSnapshot | null {
   try {
     const raw = window.sessionStorage.getItem(TWO_FACTOR_CHALLENGE_STORAGE_KEY);
@@ -96,6 +104,7 @@ export default function TwoFactorPage() {
   const [info, setInfo] = useState('');
   const [guardReady, setGuardReady] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [otpSending, setOtpSending] = useState(false);
   const [trustDevice, setTrustDevice] = useState(false);
   const [snapshotMethods, setSnapshotMethods] = useState<Set<ChallengeMethod>>(
     new Set(),
@@ -215,6 +224,11 @@ export default function TwoFactorPage() {
         setLoading(false);
         return;
       }
+      if (isRateLimitedError(result.error as TwoFactorError)) {
+        setError(getRateLimitedMessage());
+        setLoading(false);
+        return;
+      }
       setError(result.error.message ?? 'Invalid code. Please try again.');
     } else {
       clearChallengeSnapshot();
@@ -234,6 +248,12 @@ export default function TwoFactorPage() {
       return;
     }
 
+    if (otpSending) return;
+
+    setOtpSending(true);
+    setError('');
+    setInfo('');
+
     const { error } = await authClient.twoFactor.sendOtp();
     if (error) {
       if (isMissingChallengeError(error as TwoFactorError)) {
@@ -245,12 +265,20 @@ export default function TwoFactorPage() {
         window.setTimeout(() => {
           router.replace('/auth');
         }, 1100);
+        setOtpSending(false);
+        return;
+      }
+      if (isRateLimitedError(error as TwoFactorError)) {
+        setError(getRateLimitedMessage());
+        setOtpSending(false);
         return;
       }
       setError(error.message ?? 'Failed to send OTP.');
+      setOtpSending(false);
       return;
     }
     setInfo('OTP sent to your email.');
+    setOtpSending(false);
   };
 
   if (sessionPending || !guardReady) {
@@ -343,9 +371,10 @@ export default function TwoFactorPage() {
                   <button
                     type="button"
                     onClick={sendOtp}
+                    disabled={otpSending}
                     className="text-xs bg-secondary text-secondary-foreground hover:bg-secondary/80 px-3 py-1.5 rounded-md font-medium transition-colors border border-border/50"
                   >
-                    Send OTP
+                    {otpSending ? 'Sending...' : 'Send OTP'}
                   </button>
                 </div>
               )}
