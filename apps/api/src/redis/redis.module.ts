@@ -4,12 +4,21 @@ import Redis from 'ioredis';
 
 export const REDIS_CLIENT = 'REDIS_CLIENT';
 
+type GlobalRedisState = typeof globalThis & {
+  __repoSharedRedisClient?: Redis;
+};
+
 @Global()
 @Module({
   providers: [
     {
       provide: REDIS_CLIENT,
       useFactory: (config: ConfigService): Redis => {
+        const globalRedisState = globalThis as GlobalRedisState;
+        if (globalRedisState.__repoSharedRedisClient) {
+          return globalRedisState.__repoSharedRedisClient;
+        }
+
         const client = new Redis(config.getOrThrow<string>('REDIS_URL'), {
           // Retry strategy: exponential back-off, max 30 s
           retryStrategy: (times) => Math.min(times * 200, 30_000),
@@ -26,6 +35,7 @@ export const REDIS_CLIENT = 'REDIS_CLIENT';
         client.on('reconnecting', () => console.warn('[Redis] Reconnecting…'));
         client.on('end', () => console.log('[Redis] Connection closed'));
 
+        globalRedisState.__repoSharedRedisClient = client;
         return client;
       },
       inject: [ConfigService],
