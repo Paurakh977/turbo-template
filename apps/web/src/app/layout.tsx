@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import localFont from 'next/font/local';
 import '../styles/globals.css';
 import { THEME_INIT_SCRIPT, THEME_STORAGE_KEY } from '../lib/theme';
@@ -28,10 +28,13 @@ export default async function RootLayout({
   const theme = cookieStore.get(THEME_STORAGE_KEY)?.value;
   const themeClass = theme === 'dark' ? 'dark' : '';
 
+  const nonce = (await headers()).get('x-nonce') ?? undefined;
+
   return (
     <html lang="en" className={themeClass} suppressHydrationWarning>
       <head>
         <script
+          nonce={nonce}
           dangerouslySetInnerHTML={{
             __html: THEME_INIT_SCRIPT,
           }}
