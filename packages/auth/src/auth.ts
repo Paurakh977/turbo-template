@@ -20,6 +20,10 @@ export type AdminRole = (typeof ADMIN_ROLES)[number];
 
 import { parseRoles, serializeRoles, getMaxRoleWeight } from './roles';
 
+type GlobalRedisState = typeof globalThis & {
+  __repoSharedRedisClient?: Redis;
+};
+
 // Deletion request context
 // Stashed in the before hook (where headers are available) and consumed in
 // databaseHooks.user.delete.after (where headers are not).
@@ -103,6 +107,9 @@ async function enforceRoleHierarchy(
   const targetUser = await db.user
     .findUnique({ where: { id: targetUserId } })
     .catch(() => null);
+  if (!targetUser) {
+    throw new APIError('NOT_FOUND', { message: 'Target user not found.' });
+  }
   const targetRole = (targetUser?.role as string | null) ?? 'user';
 
   if (getMaxRoleWeight(targetRole) >= getMaxRoleWeight(actorRole)) {
@@ -146,8 +153,10 @@ interface SessionData {
  * somehow never fires (e.g., adapter error).
  */
 const pendingUserUpdates = new Map<string, { data: UserData; ts: number }>();
+const pendingStopImpersonations = new Map<string, number>();
 
 const PENDING_TTL_MS = 30_000;
+const STOP_IMPERSONATION_TTL_MS = 15_000;
 
 function storePendingInMemory(key: string, data: unknown) {
   pendingUserUpdates.set(key, {
@@ -162,6 +171,59 @@ function popPendingFromMemory<T>(key: string): T | undefined {
   if (!entry) return undefined;
   if (Date.now() - entry.ts > PENDING_TTL_MS) return undefined;
   return entry.data as unknown as T;
+}
+
+function storePendingStopImpersonationInMemory(userId: string) {
+  pendingStopImpersonations.set(userId, Date.now());
+}
+
+function popPendingStopImpersonationFromMemory(userId: string): boolean {
+  const ts = pendingStopImpersonations.get(userId);
+  pendingStopImpersonations.delete(userId);
+  if (!ts) return false;
+  return Date.now() - ts <= STOP_IMPERSONATION_TTL_MS;
+}
+
+async function storePendingStopImpersonation(userId: string) {
+  if (redis) {
+    await redis
+      .set(
+        `pending_stop_impersonation:${userId}`,
+        '1',
+        'PX',
+        STOP_IMPERSONATION_TTL_MS,
+      )
+      .catch((e) => {
+        console.error('[Redis Error] storePendingStopImpersonation:', e);
+        storePendingStopImpersonationInMemory(userId);
+      });
+    return;
+  }
+
+  storePendingStopImpersonationInMemory(userId);
+}
+
+async function popPendingStopImpersonation(userId: string): Promise<boolean> {
+  if (redis) {
+    const key = `pending_stop_impersonation:${userId}`;
+    const raw = await redis.get(key).catch((e) => {
+      console.error('[Redis Error] popPendingStopImpersonation:', e);
+      return null;
+    });
+
+    if (raw) {
+      await redis
+        .del(key)
+        .catch((e) =>
+          console.error('[Redis Error] popPendingStopImpersonation.del:', e),
+        );
+      return true;
+    }
+
+    return popPendingStopImpersonationFromMemory(userId);
+  }
+
+  return popPendingStopImpersonationFromMemory(userId);
 }
 
 async function storePendingUser(userId: string, data: UserData) {
@@ -254,6 +316,11 @@ setInterval(() => {
   const cutoff = Date.now() - PENDING_TTL_MS;
   for (const [id, entry] of pendingUserUpdates) {
     if (entry.ts < cutoff) pendingUserUpdates.delete(id);
+  }
+
+  const stopCutoff = Date.now() - STOP_IMPERSONATION_TTL_MS;
+  for (const [userId, ts] of pendingStopImpersonations) {
+    if (ts < stopCutoff) pendingStopImpersonations.delete(userId);
   }
 }, 5 * 60_000).unref();
 
@@ -539,6 +606,40 @@ const auditLogPlugin = (): BetterAuthPlugin => ({
         }),
       },
       {
+        matcher: (ctx) => ctx.path === '/admin/stop-impersonating',
+        handler: createAuthMiddleware(async (ctx) => {
+          const session = await getSessionFromCtx(ctx);
+          const userId = session?.user?.id;
+          if (!userId) return;
+
+          const actorId = (
+            session as unknown as {
+              session?: { impersonatedBy?: string | null };
+            }
+          )?.session?.impersonatedBy;
+          if (!actorId) return;
+
+          const ipAddress = ctx.headers?.get('x-forwarded-for') ?? undefined;
+          const userAgent = ctx.headers?.get('user-agent') ?? undefined;
+
+          await db.auditLog
+            .create({
+              data: {
+                userId,
+                action: 'user_stop_impersonating',
+                actor: actorId,
+                ipAddress,
+                userAgent,
+              },
+            })
+            .catch((e: unknown) =>
+              console.error('[AuditLog] user_stop_impersonating failed:', e),
+            );
+
+          await storePendingStopImpersonation(userId);
+        }),
+      },
+      {
         // Intercept self-user deletion (user deleting their own account).
         //
         // ⚠️  AUDIT LOG REMOVED FROM HERE intentionally.
@@ -633,7 +734,24 @@ const hasGoogle = Boolean(googleClientId && googleClientSecret);
 const hasGithub = Boolean(githubClientId && githubClientSecret);
 const resend = resendApiKey ? new Resend(resendApiKey) : null;
 const canSendEmail = Boolean(resend);
-const redis = redisUrl ? new Redis(redisUrl) : null;
+const globalRedisState = globalThis as GlobalRedisState;
+const redis = (() => {
+  if (!redisUrl) return null;
+  if (globalRedisState.__repoSharedRedisClient) {
+    return globalRedisState.__repoSharedRedisClient;
+  }
+
+  const client = new Redis(redisUrl, {
+    retryStrategy: (times) => Math.min(times * 200, 30_000),
+    maxRetriesPerRequest: 3,
+    enableReadyCheck: true,
+    lazyConnect: false,
+    keepAlive: 10_000,
+  });
+
+  globalRedisState.__repoSharedRedisClient = client;
+  return client;
+})();
 
 // ---------------------------------------------------------------------------
 // Email helper
@@ -996,6 +1114,13 @@ export const auth = betterAuth({
           const s = session as unknown as SessionData;
           if (!s?.userId) return;
 
+          if (
+            s.impersonatedBy &&
+            (await popPendingStopImpersonation(s.userId))
+          ) {
+            return;
+          }
+
           const context = ctx as
             | {
                 headers?: {
@@ -1100,6 +1225,7 @@ export const auth = betterAuth({
         console.error('[Email Delivery Error] verification_email', error);
       });
     },
+    sendOnSignUp: true,
     sendOnSignIn: true,
     callbackURL: `${appURL}/auth/verify-email`,
   },
@@ -1182,6 +1308,15 @@ export const auth = betterAuth({
       '/list-accounts': { window: 60, max: 30 },
       '/admin/list-users': { window: 60, max: 60 },
       '/admin/check-role-permission': { window: 60, max: 60 },
+
+      // ── Admin mutation endpoints (strict) ───────────────────────────────
+      '/admin/set-role': { window: 60, max: 5 },
+      '/admin/ban-user': { window: 60, max: 3 },
+      '/admin/unban-user': { window: 60, max: 3 },
+      '/admin/impersonate-user': { window: 60, max: 3 },
+      '/admin/stop-impersonating': { window: 60, max: 6 },
+      '/admin/remove-user': { window: 60, max: 2 },
+      '/admin/revoke-user-sessions': { window: 60, max: 5 },
 
       // ── Auth challenge endpoints (strict — per-page inline errors) ─────
       '/sign-in/email': { window: 60, max: 5 },
