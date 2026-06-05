@@ -1,3 +1,5 @@
+import { validatePasswordPolicy as validate } from '@repo/auth';
+
 export type PasswordStrength = 'weak' | 'medium' | 'strong';
 
 const MAX_EMAIL_LENGTH = 254;
@@ -10,7 +12,7 @@ const UNQUOTED_LOCAL_PART =
 const DOMAIN_NAME =
   /^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$/;
 const DOMAIN_IPV4 =
-  /^\[(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}\]$/;
+  /^\[(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d)){3}\]$/;
 
 function isValidLocalPart(local: string): boolean {
   if (!local || local.length > MAX_LOCAL_LENGTH) return false;
@@ -49,22 +51,14 @@ export function getPasswordStrength(value: string): PasswordStrength {
   return 'strong';
 }
 
+/**
+ * Client-side password policy validation.
+ * Delegates to the shared server-side implementation in @repo/auth
+ * to guarantee identical rules on client and server.
+ */
 export function validatePasswordPolicy(value: string): string | null {
-  if (value.length < 8) {
-    return 'Password must be at least 8 characters.';
-  }
-
-  if (!/[A-Z]/.test(value) || !/[a-z]/.test(value)) {
-    return 'Password must include uppercase and lowercase letters.';
-  }
-
-  if (!/\d/.test(value)) {
-    return 'Password must include at least one number.';
-  }
-
-  if (!/[^A-Za-z0-9]/.test(value)) {
-    return 'Password must include at least one symbol.';
-  }
-
-  return null;
+  const result = validate(value);
+  return result.valid
+    ? null
+    : (result.message ?? 'Password does not meet policy requirements.');
 }

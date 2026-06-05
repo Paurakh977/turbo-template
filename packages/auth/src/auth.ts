@@ -19,6 +19,7 @@ export const ADMIN_ROLES = ['admin', 'superAdmin'] as const;
 export type AdminRole = (typeof ADMIN_ROLES)[number];
 
 import { parseRoles, serializeRoles, getMaxRoleWeight } from './roles';
+import { validatePasswordPolicy } from './password-policy';
 
 type GlobalRedisState = typeof globalThis & {
   __repoSharedRedisClient?: Redis;
@@ -808,6 +809,36 @@ export const auth = betterAuth({
   baseURL,
   basePath: AUTH_BASE_PATH,
   secret,
+
+  // -------------------------------------------------------------------------
+  // Hooks — server-side password complexity enforcement
+  //
+  // Better Auth only enforces minPasswordLength / maxPasswordLength. This
+  // hook adds uppercase + lowercase + number + symbol requirements that
+  // match the client-side validation in apps/web/src/lib/validation.ts.
+  //
+  // Applied to: sign-up (new accounts) and change-password (credential
+  // accounts updating their password). Reset-password is intentionally
+  // excluded — users clicking an email link should not be blocked by
+  // complexity rules they haven't seen; enforcement happens on next sign-in.
+  // -------------------------------------------------------------------------
+  hooks: {
+    before: createAuthMiddleware(async (ctx) => {
+      if (ctx.path === '/sign-up/email' || ctx.path === '/change-password') {
+        const body = ctx.body as { password?: string; newPassword?: string };
+        const password = body.newPassword ?? body.password;
+
+        if (password && typeof password === 'string') {
+          const result = validatePasswordPolicy(password);
+          if (!result.valid) {
+            throw new APIError('BAD_REQUEST', {
+              message: result.message!,
+            });
+          }
+        }
+      }
+    }),
+  },
 
   account: {
     encryptOAuthTokens: true,

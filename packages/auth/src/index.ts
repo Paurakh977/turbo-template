@@ -25,3 +25,7 @@ export {
   THEME_GRANT_NAME,
   LABS_GRANT_NAME,
 } from './permissions';
+export {
+  validatePasswordPolicy,
+  type PasswordPolicyResult,
+} from './password-policy';
