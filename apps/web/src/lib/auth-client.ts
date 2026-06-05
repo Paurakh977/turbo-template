@@ -38,7 +38,8 @@ const PASSIVE_ENDPOINT_PATTERNS = [
   '/get-session',
   '/list-accounts',
   '/admin/list-users',
-  '/admin/check-role-permission',
+  '/admin/list-user-sessions',
+  '/admin/has-permission',
 ];
 
 const AUTH_CHALLENGE_ENDPOINT_PATTERNS = [
@@ -61,9 +62,12 @@ const HANDLED_PER_CALL_ENDPOINT_PATTERNS = [
   '/admin/ban-user',
   '/admin/unban-user',
   '/admin/revoke-user-sessions',
+  '/admin/revoke-user-session',
   '/admin/impersonate-user',
   '/admin/remove-user',
   '/admin/stop-impersonating',
+  '/admin/create-user',
+  '/admin/set-user-password',
 ];
 
 type EndpointCategory =

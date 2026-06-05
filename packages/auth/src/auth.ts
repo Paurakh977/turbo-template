@@ -1307,7 +1307,8 @@ export const auth = betterAuth({
       '/get-session': { window: 60, max: 60 },
       '/list-accounts': { window: 60, max: 30 },
       '/admin/list-users': { window: 60, max: 60 },
-      '/admin/check-role-permission': { window: 60, max: 60 },
+      '/admin/list-user-sessions': { window: 60, max: 30 },
+      '/admin/has-permission': { window: 60, max: 30 },
 
       // ── Admin mutation endpoints (strict) ───────────────────────────────
       '/admin/set-role': { window: 60, max: 5 },
@@ -1317,6 +1318,9 @@ export const auth = betterAuth({
       '/admin/stop-impersonating': { window: 60, max: 6 },
       '/admin/remove-user': { window: 60, max: 2 },
       '/admin/revoke-user-sessions': { window: 60, max: 5 },
+      '/admin/revoke-user-session': { window: 60, max: 5 },
+      '/admin/create-user': { window: 60, max: 3 },
+      '/admin/set-user-password': { window: 60, max: 3 },
 
       // ── Auth challenge endpoints (strict — per-page inline errors) ─────
       '/sign-in/email': { window: 60, max: 5 },
