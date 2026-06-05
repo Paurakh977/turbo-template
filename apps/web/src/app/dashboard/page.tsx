@@ -13,6 +13,10 @@ import { ActionDialog } from '../_components/ActionDialog';
 import { PasswordInput } from '../_components/PasswordInput';
 import { useToast } from '../../lib/toast-context';
 import { getRoleBadgeStyle } from '../../lib/role-badge';
+import {
+  getPasswordStrength,
+  validatePasswordPolicy,
+} from '../../lib/validation';
 
 type Account = { providerId: string };
 
@@ -81,6 +85,14 @@ export default function DashboardPage() {
   const [disablePending, setDisablePending] = useState(false);
 
   const { pushToast } = useToast();
+
+  // ── Change password modal state ───────────────────────────────────────
+  const [showChangePassword, setShowChangePassword] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [changePasswordError, setChangePasswordError] = useState('');
+  const [changePasswordPending, setChangePasswordPending] = useState(false);
 
   // ── Rate-limit retry state (MUST be before any early return) ─────────
   const [retryCount, setRetryCount] = useState(0);
@@ -334,6 +346,46 @@ export default function DashboardPage() {
         'success',
         `Password setup link sent to ${session.user.email}.`,
       );
+    }
+  };
+
+  const handleChangePassword = async () => {
+    if (!currentPassword || !newPassword) {
+      setChangePasswordError('All fields are required.');
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setChangePasswordError('Passwords do not match.');
+      return;
+    }
+    const passwordError = validatePasswordPolicy(newPassword);
+    if (passwordError) {
+      setChangePasswordError(passwordError);
+      return;
+    }
+
+    setChangePasswordPending(true);
+    try {
+      const { error } = await authClient.changePassword({
+        currentPassword,
+        newPassword,
+        revokeOtherSessions: true,
+      });
+      if (error) {
+        setChangePasswordError(error.message ?? 'Failed to change password.');
+        return;
+      }
+      setShowChangePassword(false);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setChangePasswordError('');
+      pushToast(
+        'success',
+        'Password changed successfully. Other sessions have been signed out.',
+      );
+    } finally {
+      setChangePasswordPending(false);
     }
   };
 
@@ -663,15 +715,32 @@ export default function DashboardPage() {
                     Account Password
                   </p>
                   <p className="text-[12px] text-muted-foreground">
-                    Change or reset your login password.
+                    {hasPasswordAccount
+                      ? 'Change your login password directly.'
+                      : 'Set a password for your account.'}
                   </p>
                 </div>
-                <button
-                  onClick={handleSetPassword}
-                  className="text-xs px-4 py-2 bg-muted border border-border/50 text-foreground hover:bg-muted/80 rounded-lg font-medium transition-colors"
-                >
-                  {hasPasswordAccount ? 'Request Reset' : 'Set Password'}
-                </button>
+                {hasPasswordAccount ? (
+                  <button
+                    onClick={() => {
+                      setCurrentPassword('');
+                      setNewPassword('');
+                      setConfirmNewPassword('');
+                      setChangePasswordError('');
+                      setShowChangePassword(true);
+                    }}
+                    className="text-xs px-4 py-2 bg-muted border border-border/50 text-foreground hover:bg-muted/80 rounded-lg font-medium transition-colors"
+                  >
+                    Change Password
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleSetPassword}
+                    className="text-xs px-4 py-2 bg-muted border border-border/50 text-foreground hover:bg-muted/80 rounded-lg font-medium transition-colors"
+                  >
+                    Set Password
+                  </button>
+                )}
               </div>
             </div>
           </motion.div>
@@ -841,6 +910,64 @@ export default function DashboardPage() {
         />
         {disableError ? (
           <p className="mt-2 text-xs text-red-300">{disableError}</p>
+        ) : null}
+      </ActionDialog>
+
+      <ActionDialog
+        open={showChangePassword}
+        title="Change Password"
+        description="Enter your current password and choose a new one."
+        confirmLabel="Change Password"
+        pending={changePasswordPending}
+        onClose={() => {
+          if (changePasswordPending) return;
+          setShowChangePassword(false);
+          setCurrentPassword('');
+          setNewPassword('');
+          setConfirmNewPassword('');
+          setChangePasswordError('');
+        }}
+        onConfirm={handleChangePassword}
+      >
+        <div className="space-y-3">
+          <PasswordInput
+            placeholder="Current password"
+            value={currentPassword}
+            onChange={(e) => {
+              setCurrentPassword(e.target.value);
+              if (changePasswordError) setChangePasswordError('');
+            }}
+            className="w-full rounded-lg border border-border/70 bg-background px-3 py-2 text-sm outline-none transition-colors focus:border-primary/50"
+          />
+          <PasswordInput
+            placeholder="New password (min 8 characters)"
+            value={newPassword}
+            onChange={(e) => {
+              setNewPassword(e.target.value);
+              if (changePasswordError) setChangePasswordError('');
+            }}
+            className="w-full rounded-lg border border-border/70 bg-background px-3 py-2 text-sm outline-none transition-colors focus:border-primary/50"
+          />
+          {newPassword ? (
+            <p className="text-xs text-muted-foreground">
+              Strength:{' '}
+              <span className="font-medium text-foreground">
+                {getPasswordStrength(newPassword)}
+              </span>
+            </p>
+          ) : null}
+          <PasswordInput
+            placeholder="Confirm new password"
+            value={confirmNewPassword}
+            onChange={(e) => {
+              setConfirmNewPassword(e.target.value);
+              if (changePasswordError) setChangePasswordError('');
+            }}
+            className="w-full rounded-lg border border-border/70 bg-background px-3 py-2 text-sm outline-none transition-colors focus:border-primary/50"
+          />
+        </div>
+        {changePasswordError ? (
+          <p className="mt-2 text-xs text-red-300">{changePasswordError}</p>
         ) : null}
       </ActionDialog>
     </div>
