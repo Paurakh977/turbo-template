@@ -133,9 +133,9 @@ export default function DashboardPage() {
     }
   }, [session?.user?.id, isPending, hasFetchedAccounts]);
 
-  const hasPasswordAccount = userAccounts
-    ? userAccounts.find((acc) => acc.providerId === 'credential')
-    : false;
+  const hasPasswordAccount = userAccounts.some(
+    (acc) => acc.providerId === 'credential',
+  );
   const isOAuthOnly = hasFetchedAccounts && !hasPasswordAccount;
 
   useEffect(() => {
@@ -319,6 +319,12 @@ export default function DashboardPage() {
     try {
       const { error } = await authClient.twoFactor.disable({ password });
       if (error) {
+        if (error.status === 429) {
+          setDisableError(
+            'Too many attempts. Please wait a moment and try again.',
+          );
+          return;
+        }
         setDisableError(error.message ?? 'Unable to disable 2FA.');
         return;
       }
@@ -328,6 +334,10 @@ export default function DashboardPage() {
       setShowDisable2FA(false);
       pushToast('success', '2FA disabled.');
       router.refresh();
+    } catch {
+      setDisableError(
+        'A network error occurred. Please check your connection and try again.',
+      );
     } finally {
       setDisablePending(false);
     }
@@ -350,6 +360,7 @@ export default function DashboardPage() {
   };
 
   const handleChangePassword = async () => {
+    if (!session?.user?.id) return;
     if (!currentPassword || !newPassword) {
       setChangePasswordError('All fields are required.');
       return;
@@ -372,6 +383,12 @@ export default function DashboardPage() {
         revokeOtherSessions: true,
       });
       if (error) {
+        if (error.status === 429) {
+          setChangePasswordError(
+            'Too many attempts. Please wait a moment and try again.',
+          );
+          return;
+        }
         setChangePasswordError(error.message ?? 'Failed to change password.');
         return;
       }
@@ -383,6 +400,10 @@ export default function DashboardPage() {
       pushToast(
         'success',
         'Password changed successfully. Other sessions have been signed out.',
+      );
+    } catch {
+      setChangePasswordError(
+        'A network error occurred. Please check your connection and try again.',
       );
     } finally {
       setChangePasswordPending(false);
