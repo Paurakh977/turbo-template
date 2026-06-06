@@ -44,7 +44,11 @@ const nextConfig = {
       };
     }
     if (!isServer) {
-      config.externals = [...(config.externals || []), 'ioredis'];
+      config.resolve = config.resolve || {};
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        ioredis: false,
+      };
     }
     return config;
   },
