@@ -32,42 +32,54 @@ export function ActionDialog({
 }: ActionDialogProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+  const wasOpenRef = useRef(false);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
-    if (!open) return;
-
-    if (typeof document !== 'undefined') {
-      previouslyFocusedRef.current = document.activeElement as HTMLElement;
+    if (!open) {
+      wasOpenRef.current = false;
+      return;
     }
 
-    const container = containerRef.current;
-    if (container) {
-      const focusables =
-        container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
-      if (focusables.length > 0) {
-        focusables[0].focus();
-      } else {
-        container.focus();
+    if (!wasOpenRef.current) {
+      wasOpenRef.current = true;
+
+      if (typeof document !== 'undefined') {
+        previouslyFocusedRef.current = document.activeElement as HTMLElement;
+      }
+
+      const container = containerRef.current;
+      if (container) {
+        const focusables =
+          container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
+        if (focusables.length > 0) {
+          focusables[0]!.focus();
+        } else {
+          container.focus();
+        }
       }
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && !pending) {
-        onClose();
+        onCloseRef.current();
         return;
       }
 
-      if (event.key === 'Tab' && container) {
+      if (event.key === 'Tab' && containerRef.current) {
         const focusables = Array.from(
-          container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+          containerRef.current.querySelectorAll<HTMLElement>(
+            FOCUSABLE_SELECTOR,
+          ),
         );
         if (focusables.length === 0) {
           event.preventDefault();
           return;
         }
 
-        const first = focusables[0];
-        const last = focusables[focusables.length - 1];
+        const first = focusables[0]!;
+        const last = focusables[focusables.length - 1]!;
 
         if (event.shiftKey) {
           if (document.activeElement === first) {
@@ -90,7 +102,7 @@ export function ActionDialog({
         previouslyFocusedRef.current.focus();
       }
     };
-  }, [open, pending, onClose]);
+  }, [open, pending]);
 
   if (!open) return null;
 
