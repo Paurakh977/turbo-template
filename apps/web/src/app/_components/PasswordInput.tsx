@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useId } from 'react';
 
 interface PasswordInputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   label?: string;
@@ -12,20 +12,27 @@ export function PasswordInput({
   ...props
 }: PasswordInputProps) {
   const [showPassword, setShowPassword] = useState(false);
+  const inputId = useId();
 
   return (
     <div className="relative">
       <input
+        id={inputId}
         type={showPassword ? 'text' : 'password'}
         placeholder={label || 'Password'}
         aria-label={label || 'Password'}
-        className={`w-full px-4 py-3 pr-12 bg-background/50 border border-border/60 rounded-xl text-[14px] outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all placeholder:text-muted-foreground/70 ${className || ''}`}
+        className={
+          className
+            ? `pr-12 ${className}`
+            : 'w-full px-4 py-3 pr-12 bg-background/50 border border-border/60 rounded-xl text-[14px] outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all placeholder:text-muted-foreground/70'
+        }
         {...props}
       />
       <button
         type="button"
         onClick={() => setShowPassword(!showPassword)}
-        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors p-1"
+        tabIndex={-1}
+        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-1 rounded-md transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
         aria-label={showPassword ? 'Hide password' : 'Show password'}
         aria-pressed={showPassword}
       >
