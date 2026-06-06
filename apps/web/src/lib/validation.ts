@@ -1,4 +1,4 @@
-import { validatePasswordPolicy as validate } from '@repo/auth';
+import { validatePasswordPolicy as validate } from '@repo/auth/password-policy';
 
 export type PasswordStrength = 'weak' | 'medium' | 'strong';
 

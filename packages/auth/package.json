@@ -24,6 +24,11 @@
       "types": "./src/roles.ts",
       "import": "./dist/roles.js",
       "require": "./dist/roles.js"
+    },
+    "./password-policy": {
+      "types": "./src/password-policy.ts",
+      "import": "./dist/password-policy.js",
+      "require": "./dist/password-policy.js"
     }
   },
   "scripts": {
