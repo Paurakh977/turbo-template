@@ -9,7 +9,7 @@ const CSP_HEADER_TEMPLATE = (nonce: string) => {
     "default-src 'self'",
     `script-src ${scriptSrc}`,
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob:",
+    "img-src 'self' data: blob: https:",
     "font-src 'self'",
     "object-src 'none'",
     "base-uri 'self'",
