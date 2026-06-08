@@ -7,11 +7,13 @@ import { db } from '@repo/database';
 import { auth } from '@repo/auth';
 import { isAPIError } from 'better-auth/api';
 import {
+  createServerAuditLog,
+  getEffectivePermissionUserId,
+} from '../../../lib/server-audit';
+import {
   checkServerActionRateLimit,
   getServerActionRateLimitMessage,
 } from '../../../lib/server-action-rate-limit';
-
-type AuthSession = NonNullable<Awaited<ReturnType<typeof auth.api.getSession>>>;
 
 function trimTrailingSlash(value: string): string {
   return value.endsWith('/') ? value.slice(0, -1) : value;
@@ -84,28 +86,6 @@ async function enforceActionRateLimit(
   return null;
 }
 
-async function logAudit(
-  userId: string,
-  action: string,
-  metadata?: Record<string, unknown>,
-) {
-  try {
-    const h = await headers();
-    await db.auditLog.create({
-      data: {
-        userId,
-        action,
-        ipAddress: h.get('x-forwarded-for') ?? null,
-        userAgent: h.get('user-agent') ?? null,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ...(metadata ? { metadata: metadata as any } : {}),
-      },
-    });
-  } catch (e) {
-    console.error(`[AuditLog] ${action} failed:`, e);
-  }
-}
-
 async function hasSettingsPermission(
   userId: string,
   action: 'profile' | 'security' | 'theme' | 'labs',
@@ -114,13 +94,6 @@ async function hasSettingsPermission(
     body: { userId, permissions: { settings: [action] } },
   });
   return result?.success === true;
-}
-
-function getEffectivePermissionUserId(session: AuthSession): string {
-  const impersonatedBy =
-    (session as { session?: { impersonatedBy?: string | null } }).session
-      ?.impersonatedBy ?? null;
-  return impersonatedBy ?? session.user.id;
 }
 
 function getActionErrorMessage(
@@ -193,7 +166,12 @@ export async function updateDisplayNameAction(formData: FormData) {
     };
   }
 
-  await logAudit(session.user.id, 'profile_updated', { field: 'name' });
+  await createServerAuditLog({
+    userId: session.user.id,
+    action: 'profile_updated',
+    session,
+    metadata: { field: 'name' },
+  });
 
   revalidatePath('/dashboard/settings');
   return { success: true };
@@ -234,7 +212,11 @@ export async function requestPasswordResetAction() {
     };
   }
 
-  await logAudit(session.user.id, 'password_reset_requested');
+  await createServerAuditLog({
+    userId: session.user.id,
+    action: 'password_reset_requested',
+    session,
+  });
 
   return { success: true };
 }
@@ -261,7 +243,11 @@ export async function toggleThemePreferenceAction() {
     };
   }
 
-  await logAudit(session.user.id, 'theme_changed');
+  await createServerAuditLog({
+    userId: session.user.id,
+    action: 'theme_changed',
+    session,
+  });
 
   return {
     success: true,
@@ -291,7 +277,11 @@ export async function runLabsSettingAction() {
     };
   }
 
-  await logAudit(session.user.id, 'labs_toggled');
+  await createServerAuditLog({
+    userId: session.user.id,
+    action: 'labs_toggled',
+    session,
+  });
 
   return {
     success: true,

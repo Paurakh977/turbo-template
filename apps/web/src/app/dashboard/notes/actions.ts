@@ -6,11 +6,13 @@ import { revalidatePath } from 'next/cache';
 import { db } from '@repo/database';
 import { auth, hasAdminRole } from '@repo/auth';
 import {
+  createServerAuditLog,
+  getEffectivePermissionUserId,
+} from '../../../lib/server-audit';
+import {
   checkServerActionRateLimit,
   getServerActionRateLimitMessage,
 } from '../../../lib/server-action-rate-limit';
-
-type AuthSession = NonNullable<Awaited<ReturnType<typeof auth.api.getSession>>>;
 
 async function getSessionOrRedirect() {
   const h = await headers();
@@ -38,35 +40,6 @@ async function enforceActionRateLimit(
   }
 
   return null;
-}
-
-function getEffectivePermissionUserId(session: AuthSession): string {
-  const impersonatedBy =
-    (session as { session?: { impersonatedBy?: string | null } }).session
-      ?.impersonatedBy ?? null;
-  return impersonatedBy ?? session.user.id;
-}
-
-async function logAudit(
-  userId: string,
-  action: string,
-  metadata?: Record<string, unknown>,
-) {
-  try {
-    const h = await headers();
-    await db.auditLog.create({
-      data: {
-        userId,
-        action,
-        ipAddress: h.get('x-forwarded-for') ?? null,
-        userAgent: h.get('user-agent') ?? null,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        metadata: metadata as any,
-      },
-    });
-  } catch (e) {
-    console.error(`[AuditLog] ${action} failed:`, e);
-  }
 }
 
 export async function createNoteAction(formData: FormData) {
@@ -106,7 +79,12 @@ export async function createNoteAction(formData: FormData) {
     },
   });
 
-  await logAudit(session.user.id, 'note_created', { noteId: note.id, title });
+  await createServerAuditLog({
+    userId: session.user.id,
+    action: 'note_created',
+    session,
+    metadata: { noteId: note.id, title },
+  });
 
   revalidatePath('/dashboard/notes');
   return {
@@ -169,9 +147,14 @@ export async function updateNoteAction(noteId: string, formData: FormData) {
     },
   });
 
-  await logAudit(session.user.id, 'note_updated', {
-    noteId,
-    title: title || note.title,
+  await createServerAuditLog({
+    userId: session.user.id,
+    action: 'note_updated',
+    session,
+    metadata: {
+      noteId,
+      title: title || note.title,
+    },
   });
 
   revalidatePath('/dashboard/notes');
@@ -210,9 +193,14 @@ export async function deleteNoteAction(noteId: string) {
 
   await db.note.delete({ where: { id: noteId } });
 
-  await logAudit(session.user.id, 'note_deleted', {
-    noteId,
-    title: note?.title ?? null,
+  await createServerAuditLog({
+    userId: session.user.id,
+    action: 'note_deleted',
+    session,
+    metadata: {
+      noteId,
+      title: note?.title ?? null,
+    },
   });
 
   revalidatePath('/dashboard/notes');
