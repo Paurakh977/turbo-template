@@ -56,6 +56,11 @@ const ACTION_CONFIG: Record<
     label: 'Stopped impersonating',
     color: 'text-yellow-400',
   },
+  user_impersonation_stopped: {
+    emoji: '👤',
+    label: 'Stopped impersonating',
+    color: 'text-yellow-400',
+  },
   note_created: { emoji: '📝', label: 'Note created', color: 'text-green-400' },
   note_updated: { emoji: '✏️', label: 'Note updated', color: 'text-blue-400' },
   note_deleted: { emoji: '🗑️', label: 'Note deleted', color: 'text-red-400' },
@@ -86,14 +91,39 @@ const ACTION_CONFIG: Record<
   },
 };
 
+function humanizeActionLabel(action: string): string {
+  return action
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
 function formatAction(action: string) {
   const config = ACTION_CONFIG[action];
   if (!config)
-    return { label: action, emoji: '📝', color: 'text-muted-foreground' };
+    return {
+      label: humanizeActionLabel(action),
+      emoji: '📝',
+      color: 'text-muted-foreground',
+    };
   return config;
 }
 
-function formatMetadata(metadata: unknown) {
+type MetadataUserMap = Map<string, { name: string | null; email: string }>;
+
+function resolveUserId(
+  value: unknown,
+  userMap: MetadataUserMap,
+): string | null {
+  if (typeof value !== 'string') return null;
+  const user = userMap.get(value);
+  if (user) {
+    const display = user.name || user.email || value.slice(0, 8);
+    return user.email ? `${display} (${user.email})` : display;
+  }
+  return null;
+}
+
+function formatMetadata(metadata: unknown, userMap?: MetadataUserMap) {
   if (!metadata || typeof metadata !== 'object') return null;
 
   const entries = Object.entries(metadata as Record<string, unknown>);
@@ -111,17 +141,62 @@ function formatMetadata(metadata: unknown) {
       .join(' + ');
   };
 
-  return entries
+  const formatValue = (value: unknown): string => {
+    if (value === null) return 'null';
+    if (value === undefined) return 'undefined';
+    if (typeof value === 'string') return value;
+    if (
+      typeof value === 'number' ||
+      typeof value === 'boolean' ||
+      typeof value === 'bigint'
+    ) {
+      return String(value);
+    }
+    if (Array.isArray(value)) {
+      return value.map((item) => formatValue(item)).join(', ');
+    }
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  };
+
+  const summary = entries
     .map(([key, value]) => {
+      if (key === 'performedViaImpersonation') {
+        return value === true ? 'via impersonation' : null;
+      }
+      if (key === 'impersonatedBy') {
+        if (userMap) {
+          const resolved = resolveUserId(value, userMap);
+          if (resolved) return `by ${resolved}`;
+        }
+        return null;
+      }
+      if (key === 'noteId') return null;
       if (key === 'from' || key === 'to')
         return `${key === 'from' ? 'from' : 'to'} ${formatRoleList(value)}`;
       if (key === 'reason') return `reason: ${value}`;
       if (key === 'oldEmail') return `old: ${value}`;
       if (key === 'email') return `email: ${value}`;
       if (key === 'name') return `name: ${value}`;
-      return `${key}: ${value}`;
+      return `${key}: ${formatValue(value)}`;
     })
+    .filter((value): value is string => Boolean(value))
     .join(', ');
+
+  return summary || null;
+}
+
+function getPrimaryIp(ipAddress: string | null): string | null {
+  if (!ipAddress) return null;
+  return (
+    ipAddress
+      .split(',')
+      .map((part) => part.trim())
+      .find(Boolean) ?? null
+  );
 }
 
 function formatUserDisplay(
@@ -158,13 +233,17 @@ export default async function AuditLogPage(props: Props) {
   await requireAdmin();
 
   const searchParams = await props.searchParams;
-  const page = Math.max(1, Number(searchParams.page) || 1);
+  const requestedPage =
+    typeof searchParams.page === 'string'
+      ? Number.parseInt(searchParams.page, 10)
+      : 1;
+  const page =
+    Number.isFinite(requestedPage) && requestedPage > 0 ? requestedPage : 1;
   const q = typeof searchParams.q === 'string' ? searchParams.q.trim() : '';
   const filterAction =
     typeof searchParams.action === 'string' ? searchParams.action : 'all';
 
   const take = 50;
-  const skip = (page - 1) * take;
 
   const where: any = {};
   if (filterAction && filterAction !== 'all') {
@@ -180,29 +259,31 @@ export default async function AuditLogPage(props: Props) {
         ],
       },
       select: { id: true },
+      take: 300,
     });
-    const matchedIds = matchingUsers.map((u) => u.id);
+    const matchedIds = [...new Set(matchingUsers.map((u) => u.id))];
+
+    const orClauses: any[] = [{ userId: q }, { actor: q }];
+
     if (matchedIds.length > 0) {
-      where.OR = [
-        { userId: { in: matchedIds } },
-        { actor: { in: matchedIds } },
-      ];
-    } else {
-      where.id = 'none'; // force 0 results
+      orClauses.push({ userId: { in: matchedIds } });
+      orClauses.push({ actor: { in: matchedIds } });
     }
+
+    where.OR = orClauses;
   }
 
-  const [logs, total] = await Promise.all([
-    db.auditLog.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      take,
-      skip,
-    }),
-    db.auditLog.count({ where }),
-  ]);
-
+  const total = await db.auditLog.count({ where });
   const totalPages = Math.ceil(total / take);
+  const currentPage = totalPages > 0 ? Math.min(page, totalPages) : 1;
+  const skip = (currentPage - 1) * take;
+
+  const logs = await db.auditLog.findMany({
+    where,
+    orderBy: { createdAt: 'desc' },
+    take,
+    skip,
+  });
 
   const userIds = [
     ...new Set(
@@ -210,10 +291,20 @@ export default async function AuditLogPage(props: Props) {
     ),
   ];
 
+  const metadataUserIds = logs
+    .filter(
+      (l): l is typeof l & { metadata: Record<string, unknown> } =>
+        Boolean(l.metadata) && typeof l.metadata === 'object',
+    )
+    .map((l) => l.metadata.impersonatedBy)
+    .filter((id): id is string => typeof id === 'string' && id.length > 0);
+
+  const allUserIds = [...new Set([...userIds, ...metadataUserIds])];
+
   const users =
-    userIds.length > 0
+    allUserIds.length > 0
       ? await db.user.findMany({
-          where: { id: { in: userIds } },
+          where: { id: { in: allUserIds } },
           select: { id: true, name: true, email: true },
         })
       : [];
@@ -231,6 +322,20 @@ export default async function AuditLogPage(props: Props) {
     emoji: cfg.emoji,
   }));
 
+  const selectedActionMissing =
+    filterAction !== 'all' &&
+    !allActions.some((entry) => entry.key === filterAction);
+  const actionOptions = selectedActionMissing
+    ? [
+        {
+          key: filterAction,
+          label: formatAction(filterAction).label,
+          emoji: formatAction(filterAction).emoji,
+        },
+        ...allActions,
+      ]
+    : allActions;
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
@@ -245,7 +350,7 @@ export default async function AuditLogPage(props: Props) {
       <AuditFilters
         initialQuery={q}
         initialAction={filterAction}
-        actions={allActions}
+        actions={actionOptions}
       />
 
       <div className="rounded-2xl border border-border/60 bg-card shadow-sm overflow-hidden dark:bg-white/[0.01] dark:shadow-[0_4px_24px_rgba(0,0,0,0.2)]">
@@ -289,7 +394,16 @@ export default async function AuditLogPage(props: Props) {
                   const userDisplay = getUserDisplay(log.userId);
                   const actorDisplay = getUserDisplay(log.actor);
                   const isUserAction =
-                    !log.actor && USER_ACTIONS_WITHOUT_ACTOR.has(log.action);
+                    !log.actor &&
+                    Boolean(log.userId) &&
+                    USER_ACTIONS_WITHOUT_ACTOR.has(log.action);
+                  const actedViaImpersonation =
+                    Boolean(log.metadata) &&
+                    typeof log.metadata === 'object' &&
+                    (log.metadata as Record<string, unknown>)
+                      .performedViaImpersonation === true;
+                  const primaryIp = getPrimaryIp(log.ipAddress);
+                  const metadataText = formatMetadata(log.metadata, userMap);
 
                   return (
                     <tr
@@ -298,7 +412,7 @@ export default async function AuditLogPage(props: Props) {
                     >
                       <td className="px-5 py-3.5">
                         <div
-                          className={`inline-flex items-center gap-1.5 font-medium px-2 py-1 rounded-md bg-secondary text-foreground`}
+                          className={`inline-flex items-center gap-1.5 font-medium px-2 py-1 rounded-md bg-secondary ${action.color}`}
                         >
                           <span>{action.emoji}</span>
                           <span className="text-[12px]">{action.label}</span>
@@ -324,10 +438,23 @@ export default async function AuditLogPage(props: Props) {
                       </td>
                       <td className="px-5 py-3.5">
                         {log.actor && actorDisplay ? (
-                          <div className="flex flex-col">
-                            <span className="text-[13px] font-medium text-foreground">
-                              {actorDisplay.name}
-                            </span>
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span
+                                className={`text-[13px] font-medium ${
+                                  actorDisplay.isPartial
+                                    ? 'text-amber-500'
+                                    : 'text-foreground'
+                                }`}
+                              >
+                                {actorDisplay.name}
+                              </span>
+                              {actedViaImpersonation && (
+                                <span className="text-[11px] font-medium text-amber-500/90 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                                  Impersonated
+                                </span>
+                              )}
+                            </div>
                             {actorDisplay.email && (
                               <span className="text-[12px] text-muted-foreground">
                                 {actorDisplay.email}
@@ -345,9 +472,12 @@ export default async function AuditLogPage(props: Props) {
                         )}
                       </td>
                       <td className="px-5 py-3.5">
-                        {log.metadata ? (
-                          <span className="text-[12px] text-muted-foreground font-mono bg-muted/50 px-2 py-1 rounded break-all line-clamp-2">
-                            {formatMetadata(log.metadata)}
+                        {metadataText ? (
+                          <span
+                            title={metadataText}
+                            className="text-[12px] text-muted-foreground font-mono bg-muted/50 px-2 py-1 rounded break-words line-clamp-2"
+                          >
+                            {metadataText}
                           </span>
                         ) : (
                           <span className="text-[13px] text-muted-foreground">
@@ -356,7 +486,7 @@ export default async function AuditLogPage(props: Props) {
                         )}
                       </td>
                       <td className="px-5 py-3.5 text-[12px] text-muted-foreground font-mono">
-                        {log.ipAddress ?? '—'}
+                        {primaryIp ?? '—'}
                       </td>
                       <td className="px-5 py-3.5 text-[12px] text-muted-foreground whitespace-nowrap">
                         {formatDistanceToNow(new Date(log.createdAt), {
@@ -387,25 +517,29 @@ export default async function AuditLogPage(props: Props) {
           {totalPages > 1 && (
             <div className="flex items-center gap-2">
               <a
-                href={`?q=${encodeURIComponent(q)}&action=${encodeURIComponent(filterAction)}&page=${Math.max(1, page - 1)}`}
+                href={`?q=${encodeURIComponent(q)}&action=${encodeURIComponent(filterAction)}&page=${Math.max(1, currentPage - 1)}`}
                 className={`px-3 py-1.5 text-[13px] font-medium rounded-lg border ${
-                  page <= 1
+                  currentPage <= 1
                     ? 'border-border/30 text-muted-foreground/50 pointer-events-none'
                     : 'border-border/60 text-foreground hover:bg-background transition-colors'
                 }`}
+                aria-disabled={currentPage <= 1}
+                tabIndex={currentPage <= 1 ? -1 : undefined}
               >
                 Previous
               </a>
               <span className="text-[13px] font-medium px-2">
-                {page} / {totalPages}
+                {currentPage} / {totalPages}
               </span>
               <a
-                href={`?q=${encodeURIComponent(q)}&action=${encodeURIComponent(filterAction)}&page=${Math.min(totalPages, page + 1)}`}
+                href={`?q=${encodeURIComponent(q)}&action=${encodeURIComponent(filterAction)}&page=${Math.min(totalPages, currentPage + 1)}`}
                 className={`px-3 py-1.5 text-[13px] font-medium rounded-lg border ${
-                  page >= totalPages
+                  currentPage >= totalPages
                     ? 'border-border/30 text-muted-foreground/50 pointer-events-none'
                     : 'border-border/60 text-foreground hover:bg-background transition-colors'
                 }`}
+                aria-disabled={currentPage >= totalPages}
+                tabIndex={currentPage >= totalPages ? -1 : undefined}
               >
                 Next
               </a>
