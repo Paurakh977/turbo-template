@@ -9,7 +9,7 @@ WORKDIR /app
 RUN apk add --no-cache libc6-compat python3 make g++ \
   && corepack enable \
   && corepack prepare pnpm@8.15.5 --activate \
-  && pnpm add -g turbo@2.9.7
+  && pnpm add -g turbo@2.10.10
 
 RUN pnpm config set store-dir /pnpm/store
 

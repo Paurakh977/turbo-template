@@ -10,7 +10,7 @@ RUN apk add --no-cache libc6-compat \
 WORKDIR /repo
 
 FROM base AS pruner
-ARG TURBO_VERSION=2.9.7
+ARG TURBO_VERSION=2.10.10
 COPY . .
 RUN pnpm dlx turbo@${TURBO_VERSION} prune api --docker
 
