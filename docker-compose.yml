@@ -116,7 +116,7 @@ services:
       dockerfile: apps/api/Dockerfile.prod
       target: migrator
       args:
-        TURBO_VERSION: '2.9.7'
+        TURBO_VERSION: '2.10.10'
         DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=public
         BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}
         BETTER_AUTH_URL: ${BETTER_AUTH_URL:?BETTER_AUTH_URL is required}
@@ -140,7 +140,7 @@ services:
       dockerfile: apps/api/Dockerfile.prod
       target: runner
       args:
-        TURBO_VERSION: '2.9.7'
+        TURBO_VERSION: '2.10.10'
         DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=public
         BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}
         BETTER_AUTH_URL: ${BETTER_AUTH_URL:?BETTER_AUTH_URL is required}
@@ -195,7 +195,7 @@ services:
       dockerfile: apps/web/Dockerfile.prod
       target: runner
       args:
-        TURBO_VERSION: '2.9.7'
+        TURBO_VERSION: '2.10.10'
         DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=public
         BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}
         BETTER_AUTH_URL: ${BETTER_AUTH_URL:?BETTER_AUTH_URL is required}

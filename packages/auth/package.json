@@ -35,7 +35,7 @@
     "dev": "pnpm build --watch",
     "build": "tsc -b -v",
     "lint": "eslint \"src/**/*.ts\"",
-    "auth:generate": "pnpm dlx @better-auth/cli@latest generate --config ./src/auth.ts --output ../database/prisma/schema.prisma"
+    "auth:generate": "pnpm dlx @better-auth/cli@latest generate --config ./src/auth.ts --output ../database/prisma/models/betterAuth.prisma --yes && node scripts/post-generate.mjs ../database/prisma/models/betterAuth.prisma"
   },
   "dependencies": {
     "@repo/database": "workspace:^",
