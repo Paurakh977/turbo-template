@@ -1,0 +1,15 @@
+{
+  "name": "@repo/migrate",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Standalone Prisma migration runner for production deploy jobs",
+  "license": "MIT",
+  "packageManager": "pnpm@8.15.5",
+  "scripts": {
+    "deploy": "prisma migrate deploy"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "prisma": "7.9.1"
+  }
+}
