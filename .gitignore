@@ -19,6 +19,9 @@ playwright/.cache/
 playwright-report/
 
 
+# Prisma 7 generated client (regenerate with `pnpm db:generate`)
+packages/database/src/generated/
+
 # Turbo
 .turbo
 

@@ -7,10 +7,12 @@
   "types": "./dist/index.d.ts",
   "files": [
     "./dist/**",
-    "./prisma/**"
+    "./prisma/**",
+    "prisma.config.ts"
   ],
   "exports": {
     ".": {
+      "types": "./src/index.ts",
       "import": "./src/index.ts",
       "require": "./dist/index.js"
     }
@@ -20,22 +22,26 @@
     "build": "tsc -b -v",
     "db:seed": "tsx src/seed.ts",
     "lint": "eslint \"src/**/*.ts\"",
-    "db:generate": "prisma generate --schema ./prisma/schema.prisma",
-    "db:push": "prisma db push --schema ./prisma/schema.prisma",
-    "db:migrate:dev": "prisma migrate dev --schema ./prisma/schema.prisma",
-    "db:migrate:deploy": "prisma migrate deploy --schema ./prisma/schema.prisma",
-    "db:studio": "prisma studio --schema ./prisma/schema.prisma"
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:studio": "prisma studio"
   },
   "dependencies": {
-    "@prisma/client": "^6",
+    "@prisma/adapter-pg": "^7.6.0",
+    "@prisma/client": "^7.6.0",
     "crypto-js": "^4.2.0",
-    "prisma": "^6"
+    "dotenv": "^16.4.5",
+    "pg": "^8.13.1"
   },
   "devDependencies": {
     "@repo/eslint-config": "workspace:^",
     "@repo/typescript-config": "workspace:^",
     "@types/node": "^22.19.3",
+    "@types/pg": "^8.11.10",
     "eslint": "^9.39.2",
+    "prisma": "^7.6.0",
     "tsx": "^4.21.0",
     "typescript": "5.5.4"
   }

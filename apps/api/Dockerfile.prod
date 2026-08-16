@@ -39,10 +39,20 @@ RUN pnpm turbo run build --filter=api...
 
 FROM builder AS deployer
 RUN pnpm deploy --filter=api --prod /prod/api
-RUN cd /prod/api && \
-    SCHEMA_PATH=$(find ./node_modules -type f -path "*/@repo/database/prisma/schema.prisma" | head -n 1) && \
-    echo "Found schema at $SCHEMA_PATH" && \
-    ./node_modules/.bin/prisma generate --schema="$SCHEMA_PATH"
+
+FROM node:22-alpine AS migrator
+WORKDIR /app
+
+RUN corepack enable
+
+COPY apps/migrate/package.json apps/migrate/pnpm-lock.yaml ./
+COPY --from=pruner /repo/out/full/packages/database/prisma ./prisma
+COPY --from=pruner /repo/out/full/packages/database/prisma.config.ts ./prisma.config.ts
+RUN --mount=type=cache,id=migrate-pnpm-store,target=/pnpm/store \
+  pnpm install --prod --frozen-lockfile --store-dir /pnpm/store
+
+USER node
+CMD ["./node_modules/.bin/prisma", "migrate", "deploy"]
 
 FROM node:22-alpine AS runner
 WORKDIR /app
@@ -60,4 +70,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD wget -qO- "http://127.0.0.1:${PORT}/" > /dev/null || exit 1
 
 ENTRYPOINT ["dumb-init", "--"]
-CMD ["sh", "-c", "SCHEMA_PATH=$(find ./node_modules -type f -path '*/@repo/database/prisma/schema.prisma' | head -n 1) && ./node_modules/.bin/prisma migrate deploy --schema=\"$SCHEMA_PATH\" && node dist/main"]
+CMD ["node", "dist/main"]
