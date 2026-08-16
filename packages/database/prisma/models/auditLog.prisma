@@ -1,0 +1,19 @@
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String
+  actor     String?
+  targetId  String?
+  metadata  Json?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@index([actor])
+  @@index([userId, action, createdAt])
+  @@index([action, createdAt])
+  @@map("audit_log")
+}

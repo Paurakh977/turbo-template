@@ -3,6 +3,11 @@
 
 // Get a free hosted Postgres database in seconds: `npx create-db`
 
+// Main schema file — contains the generator and datasource blocks.
+// Models are split across the files in the `models/` directory.
+// Prisma automatically combines all `.prisma` files in the schema directory,
+// so models can reference each other across files without imports.
+
 generator client {
   provider = "prisma-client"
   output   = "../src/generated/prisma"
@@ -10,143 +15,4 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-}
-
-model User {
-  id               String      @id
-  name             String
-  email            String
-  emailVerified    Boolean     @default(false)
-  image            String?
-  createdAt        DateTime    @default(now())
-  updatedAt        DateTime    @updatedAt
-  twoFactorEnabled Boolean?    @default(false)
-  role             String      @default("user")
-  banned           Boolean?    @default(false)
-  banReason        String?
-  banExpires       DateTime?
-  notes            Note[]
-  sessions         Session[]
-  accounts         Account[]
-  twofactors       TwoFactor[]
-
-  @@unique([email])
-  @@index([banned])
-  @@map("user")
-}
-
-model Note {
-  id        String   @id @default(cuid())
-  title     String
-  content   String   @db.Text
-  authorId  String
-  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([authorId])
-  @@index([createdAt])
-  @@map("note")
-}
-
-model Session {
-  id             String   @id
-  expiresAt      DateTime
-  token          String
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  ipAddress      String?
-  userAgent      String?
-  userId         String
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  impersonatedBy String?
-
-  @@unique([token])
-  @@index([userId])
-  @@map("session")
-}
-
-model Account {
-  id                    String    @id
-  accountId             String
-  providerId            String
-  userId                String
-  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  accessToken           String?
-  refreshToken          String?
-  idToken               String?
-  accessTokenExpiresAt  DateTime?
-  refreshTokenExpiresAt DateTime?
-  scope                 String?
-  password              String?
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
-
-  @@index([userId])
-  @@map("account")
-}
-
-model Verification {
-  id         String   @id
-  identifier String
-  value      String
-  expiresAt  DateTime
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-
-  @@index([identifier])
-  @@map("verification")
-}
-
-model TwoFactor {
-  id          String   @id
-  secret      String
-  backupCodes String
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  verified    Boolean? @default(true)
-
-  @@index([userId])
-  @@map("twoFactor")
-  @@index([secret])
-}
-
-model RateLimit {
-  id          String @id
-  key         String
-  count       Int
-  lastRequest BigInt
-
-  @@unique([key])
-  @@map("rateLimit")
-}
-
-model Jwks {
-  id         String    @id
-  publicKey  String
-  privateKey String
-  createdAt  DateTime  @default(now())
-  expiresAt  DateTime?
-
-  @@map("jwks")
-}
-
-model AuditLog {
-  id        String   @id @default(cuid())
-  userId    String?
-  action    String
-  actor     String?
-  targetId  String?
-  metadata  Json?
-  ipAddress String?
-  userAgent String?
-  createdAt DateTime @default(now())
-
-  @@index([userId])
-  @@index([action])
-  @@index([createdAt])
-  @@index([actor])
-  @@index([userId, action, createdAt])
-  @@index([action, createdAt])
-  @@map("audit_log")
 }
