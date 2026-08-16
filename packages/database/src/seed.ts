@@ -1,5 +1,9 @@
 // packages/database/src/seed.ts
-import { PrismaClient } from '@prisma/client';
+import 'dotenv/config';
+import { Pool } from 'pg';
+import { PrismaPg } from '@prisma/adapter-pg';
+import { PrismaClient } from './generated/prisma/client';
+import { getSeedEnv } from './env';
 
 function parseRoles(role: unknown): string[] {
   if (!role) return ['user'];
@@ -41,20 +45,18 @@ function serializeRoles(roles: string[]): string {
   return (tokens.length > 0 ? tokens : ['user']).join(',');
 }
 
-const db = new PrismaClient();
+const pgPool = new Pool({ connectionString: process.env.DATABASE_URL ?? '' });
+const db = new PrismaClient({ adapter: new PrismaPg(pgPool) });
 
 // Better Auth uses this exact bcrypt implementation internally.
 // We call the auth API instead of hashing directly to stay in sync.
 async function seed() {
-  const adminEmail = process.env.SEED_ADMIN_EMAIL;
-  const adminPassword = process.env.SEED_ADMIN_PASSWORD;
-  const adminName = process.env.SEED_ADMIN_NAME ?? 'Admin';
+  const { seedAdminEmail, seedAdminPassword, seedAdminName, betterAuthUrl } =
+    getSeedEnv();
 
-  if (!adminEmail || !adminPassword) {
-    throw new Error(
-      'Set SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD env vars before seeding.',
-    );
-  }
+  const adminEmail = seedAdminEmail;
+  const adminPassword = seedAdminPassword;
+  const adminName = seedAdminName;
 
   if (adminPassword.length < 12) {
     throw new Error('Seed admin password must be at least 12 characters.');
@@ -97,8 +99,7 @@ async function seed() {
 
   // Call Better Auth's own API so password hashing and ID generation
   // are handled by the library — never roll your own hashing here.
-  const BETTER_AUTH_URL =
-    process.env.BETTER_AUTH_URL ?? 'http://localhost:3001';
+  const BETTER_AUTH_URL = betterAuthUrl;
 
   console.log(
     `[Seed] Creating super admin user via Better Auth API at ${BETTER_AUTH_URL}`,
@@ -106,7 +107,10 @@ async function seed() {
 
   const res = await fetch(`${BETTER_AUTH_URL}/api/auth/sign-up/email`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      Origin: BETTER_AUTH_URL,
+    },
     body: JSON.stringify({
       email: adminEmail,
       password: adminPassword,
