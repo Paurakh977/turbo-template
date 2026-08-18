@@ -46,4 +46,7 @@ export const nextJsConfig = [
       "react/react-in-jsx-scope": "off",
     },
   },
+  {
+    ignores: [".next/**", "dist/**", "node_modules/**", "next-env.d.ts"],
+  },
 ];

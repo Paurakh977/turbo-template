@@ -1,4 +1,5 @@
 import { config as baseConfig } from "./base.js";
+import globals from "globals";
 
 /**
  * A custom ESLint configuration for Node.js libraries.
@@ -10,6 +11,7 @@ export const libraryConfig = [
   {
     languageOptions: {
       globals: {
+        ...globals.node,
         React: true,
         JSX: true,
       },
@@ -17,9 +19,6 @@ export const libraryConfig = [
         ecmaVersion: "latest",
         sourceType: "module",
       },
-    },
-    env: {
-      node: true,
     },
     settings: {
       "import/resolver": {
