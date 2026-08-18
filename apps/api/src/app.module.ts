@@ -19,9 +19,15 @@ import { AppController } from './app.controller';
       isGlobal: true,
       envFilePath: '.env',
       validationSchema: Joi.object({
+        HOST: Joi.string().required(),
         PORT: Joi.number().required(),
-        NEXT_PUBLIC_APP_URL: Joi.string().uri().required(),
+        DATABASE_URL: Joi.string().uri().required(),
         REDIS_URL: Joi.string().uri().required(),
+        NEXT_PUBLIC_APP_URL: Joi.string().uri().required(),
+        BETTER_AUTH_URL: Joi.string().uri().required(),
+        BETTER_AUTH_SECRET: Joi.string().min(32).required(),
+        APP_NAME: Joi.string().required(),
+        TRUSTED_ORIGINS: Joi.string().allow('').optional(),
         SST_MAX_KEYS_PER_WINDOW: Joi.number().integer().min(1).default(6),
         SST_KEY_WINDOW_MS: Joi.number().integer().min(1000).default(60_000),
       }).unknown(true), // allow other variables

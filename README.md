@@ -40,8 +40,8 @@ cp .env.example .env
 
 Recommended local defaults:
 
-- `API_HOST=0.0.0.0`
-- `API_PORT=3001`
+- `HOST=0.0.0.0`
+- `PORT=3001`
 - `WEB_HOST=0.0.0.0`
 - `WEB_PORT=3000`
 - `NEXT_PUBLIC_API_URL=/api`
@@ -78,7 +78,7 @@ mkcert -key-file nginx/certs/localhost.key -cert-file nginx/certs/localhost.crt 
 - `INTERNAL_API_URL` is injected by Docker Compose so the web container can reach the API container directly for server-side fetches.
 - `NEXT_ALLOWED_DEV_ORIGINS` is required for `dev` because Next.js is reached through the HTTPS proxy.
 - The same certificate directory is used by both `proxy` and `proxy-dev`.
-- `API_HOST`, `API_PORT`, `WEB_HOST`, and `WEB_PORT` are container-facing bindings, not browser URLs.
+- `HOST`, `PORT`, `WEB_HOST`, and `WEB_PORT` are container-facing bindings, not browser URLs.
 
 ## Development
 

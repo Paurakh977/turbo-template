@@ -43,7 +43,7 @@ Notes:
 - Keep `NEXT_PUBLIC_API_URL=/api` in both `dev` and `prod`
 - `INTERNAL_API_URL` is provided by Compose for server-side calls from the web container to the API container
 - `NEXT_ALLOWED_DEV_ORIGINS` is needed for the Next.js dev server because the browser reaches it through the HTTPS proxy
-- `API_HOST`, `API_PORT`, `WEB_HOST`, and `WEB_PORT` are internal container bindings
+- `HOST`, `PORT`, `WEB_HOST`, and `WEB_PORT` are internal container bindings
 
 ## 2. Add TLS Certificates
 

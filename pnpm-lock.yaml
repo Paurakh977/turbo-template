@@ -177,6 +177,9 @@ importers:
       date-fns:
         specifier: ^4.1.0
         version: 4.4.0
+      dotenv:
+        specifier: ^16.4.5
+        version: 16.6.1
       framer-motion:
         specifier: ^12.38.0
         version: 12.43.0(react-dom@19.2.8)(react@19.2.8)
@@ -263,6 +266,9 @@ importers:
       better-auth:
         specifier: ^1.6.0
         version: 1.6.29(next@16.2.0)(react-dom@19.2.8)(react@19.2.8)
+      dotenv:
+        specifier: ^16.4.5
+        version: 16.6.1
       ioredis:
         specifier: ^5.8.2
         version: 5.11.1

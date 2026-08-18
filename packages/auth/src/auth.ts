@@ -1,3 +1,4 @@
+import './load-env';
 import { db } from '@repo/database';
 import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
@@ -715,15 +716,13 @@ function getEnv(name: string, { required = true } = {}): string | undefined {
 }
 
 const isProduction = process.env.NODE_ENV === 'production';
-const appName = getEnv('APP_NAME', { required: false }) ?? 'Ozon';
+const appName = getEnv('APP_NAME') as string;
 const baseURL = getEnv('BETTER_AUTH_URL') as string;
-const appURL = getEnv('NEXT_PUBLIC_APP_URL', { required: false }) ?? baseURL;
+const appURL = getEnv('NEXT_PUBLIC_APP_URL') as string;
 const secret = getEnv('BETTER_AUTH_SECRET') as string;
 const resendApiKey = getEnv('RESEND_API_KEY', { required: false });
 const devEmailOverride = getEnv('DEV_EMAIL_OVERRIDE', { required: false });
-const emailFrom =
-  getEnv('EMAIL_FROM', { required: false }) ??
-  `${appName} <onboarding@resend.dev>`;
+const emailFrom = getEnv('EMAIL_FROM') as string;
 const redisUrl = getEnv('REDIS_URL', { required: false });
 
 const googleClientId = getEnv('GOOGLE_CLIENT_ID', { required: false });

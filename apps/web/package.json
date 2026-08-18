@@ -16,6 +16,7 @@
     "@repo/ui": "workspace:*",
     "better-auth": "^1.6.0",
     "date-fns": "^4.1.0",
+    "dotenv": "^16.4.5",
     "framer-motion": "^12.38.0",
     "next": "16.2.0",
     "react": "^19.1.0",

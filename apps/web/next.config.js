@@ -1,3 +1,17 @@
+import { config } from 'dotenv';
+import { resolve } from 'node:path';
+
+const hadPort = process.env.PORT !== undefined;
+
+config({ path: resolve(process.cwd(), '../../.env') });
+
+// The root .env sets PORT=3001 for the API. The web dev/start server must
+// keep port 3000 locally, so drop the root value when nothing else (e.g.
+// Docker Compose) already injected it.
+if (!hadPort) {
+  delete process.env.PORT;
+}
+
 function getRequiredEnv(name, { required = true } = {}) {
   const value = process.env[name]?.trim();
 
@@ -13,6 +27,9 @@ function getRequiredEnv(name, { required = true } = {}) {
 }
 
 const nextPublicApiUrl = getRequiredEnv('NEXT_PUBLIC_API_URL');
+const nextPublicAppUrl = getRequiredEnv('NEXT_PUBLIC_APP_URL');
+const betterAuthUrl = getRequiredEnv('BETTER_AUTH_URL');
+const betterAuthSecret = getRequiredEnv('BETTER_AUTH_SECRET');
 const isDevelopment = process.env.NODE_ENV !== 'production';
 const rawAllowedDevOrigins = getRequiredEnv('NEXT_ALLOWED_DEV_ORIGINS', {
   required: isDevelopment,
