@@ -65,6 +65,9 @@ importers:
       compression:
         specifier: ^1.8.1
         version: 1.8.1
+      dotenv:
+        specifier: ^16.4.5
+        version: 16.6.1
       escape-html:
         specifier: ^1.0.3
         version: 1.0.3
