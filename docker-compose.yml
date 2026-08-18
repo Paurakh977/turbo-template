@@ -32,7 +32,7 @@ x-proxy-base: &proxy-base
 
 services:
   postgres:
-    profiles: ['prod', 'dev']
+    profiles: ['prod', 'dev', 'local']
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
@@ -61,7 +61,7 @@ services:
           - postgres
 
   redis:
-    profiles: ['prod', 'dev']
+    profiles: ['prod', 'dev', 'local']
     image: redis:7-alpine
     restart: unless-stopped
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
@@ -86,7 +86,7 @@ services:
           - redis
 
   pgadmin:
-    profiles: ['prod', 'dev']
+    profiles: ['prod', 'dev', 'local']
     image: dpage/pgadmin4:8.11
     restart: unless-stopped
     environment:
@@ -387,6 +387,20 @@ services:
       API_UPSTREAM_HOST: api-dev
       API_UPSTREAM_PORT: ${API_PORT:?API_PORT is required}
       WEB_UPSTREAM_HOST: web-dev
+      WEB_UPSTREAM_PORT: ${WEB_PORT:?WEB_PORT is required}
+
+  proxy-local:
+    <<: *proxy-base
+    profiles: ['local']
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    environment:
+      NGINX_SERVER_NAME: ${NGINX_SERVER_NAME:?NGINX_SERVER_NAME is required}
+      NGINX_SSL_CERT_FILENAME: ${NGINX_SSL_CERT_FILENAME:?NGINX_SSL_CERT_FILENAME is required}
+      NGINX_SSL_KEY_FILENAME: ${NGINX_SSL_KEY_FILENAME:?NGINX_SSL_KEY_FILENAME is required}
+      API_UPSTREAM_HOST: host.docker.internal
+      API_UPSTREAM_PORT: ${API_PORT:?API_PORT is required}
+      WEB_UPSTREAM_HOST: host.docker.internal
       WEB_UPSTREAM_PORT: ${WEB_PORT:?WEB_PORT is required}
 
 networks:
