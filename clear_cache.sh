@@ -4,3 +4,5 @@ find . -type d \( \
   -name "dist" -o \
   -name ".next" \
 \) -prune -exec rm -rf {} +
+
+rm -rf packages/database/src/generated
