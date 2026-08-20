@@ -7,11 +7,17 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 WORKDIR /app
 
-RUN apk add --no-cache libc6-compat python3 make g++ \
+RUN apk add --no-cache libc6-compat python3 make g++ wget \
   && corepack enable \
   && corepack prepare pnpm@8.15.5 --activate \
-  && pnpm add -g turbo@2.10.10
+  && pnpm add -g turbo@2.10.10 \
+  && pnpm config set store-dir /pnpm/store
 
-RUN pnpm config set store-dir /pnpm/store
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.json ./
+COPY apps ./apps
+COPY packages ./packages
+
+RUN --mount=type=cache,id=dev-pnpm-store,target=/pnpm/store \
+  pnpm install --frozen-lockfile
 
 EXPOSE 3000

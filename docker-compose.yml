@@ -258,7 +258,7 @@ services:
       WEB_UPSTREAM_HOST: web
       WEB_UPSTREAM_PORT: ${WEB_PORT:?WEB_PORT is required}
 
-  api-dev:
+  migrate-dev:
     profiles: ['dev']
     image: template-turbo-api:dev
     build:
@@ -266,17 +266,48 @@ services:
       dockerfile: apps/api/Dockerfile.dev
     init: true
     command: >
-      sh -c "pnpm install --frozen-lockfile --store-dir /pnpm/store &&
-             pnpm --filter @repo/database db:generate &&
-             pnpm turbo run dev --filter=api... --no-daemon"
+      sh -c "pnpm --filter @repo/database db:generate &&
+             pnpm --filter @repo/database db:migrate:deploy"
+    restart: 'no'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=public
+    volumes:
+      - .:/app
+      - root-node_modules:/app/node_modules
+      - apps-api-node_modules:/app/apps/api/node_modules
+      - apps-web-node_modules:/app/apps/web/node_modules
+      - packages-api-node_modules:/app/packages/api/node_modules
+      - packages-auth-node_modules:/app/packages/auth/node_modules
+      - packages-database-node_modules:/app/packages/database/node_modules
+      - packages-eslint-config-node_modules:/app/packages/eslint-config/node_modules
+      - packages-tailwind-config-node_modules:/app/packages/tailwind-config/node_modules
+      - packages-ui-node_modules:/app/packages/ui/node_modules
+    networks:
+      app-network:
+        aliases:
+          - migrate-dev
+
+  api-dev:
+    profiles: ['dev']
+    image: template-turbo-api:dev
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile.dev
+    init: true
+    command: ['sh', '-c', 'pnpm turbo run dev --filter=api... --no-daemon']
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate-dev:
+        condition: service_completed_successfully
     environment:
       NODE_ENV: development
-      PNPM_NODE_LINKER: hoisted
       HOST: ${HOST:?HOST is required}
       PORT: ${PORT:?PORT is required}
       DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=public
@@ -295,20 +326,28 @@ services:
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
       CHOKIDAR_USEPOLLING: 'true'
       CHOKIDAR_INTERVAL: '100'
-      WATCHPACK_POLLING: 'true'
       TSC_WATCHFILE: UseDynamicPolling
     expose:
       - '${PORT:?PORT is required}'
+    ports:
+      - '${PORT:?PORT is required}:${PORT:?PORT is required}'
     volumes:
       - .:/app
-      - api-node_modules:/app/node_modules
-      - api-pnpm-store:/pnpm/store
+      - root-node_modules:/app/node_modules
+      - apps-api-node_modules:/app/apps/api/node_modules
+      - apps-web-node_modules:/app/apps/web/node_modules
+      - packages-api-node_modules:/app/packages/api/node_modules
+      - packages-auth-node_modules:/app/packages/auth/node_modules
+      - packages-database-node_modules:/app/packages/database/node_modules
+      - packages-eslint-config-node_modules:/app/packages/eslint-config/node_modules
+      - packages-tailwind-config-node_modules:/app/packages/tailwind-config/node_modules
+      - packages-ui-node_modules:/app/packages/ui/node_modules
       - api-turbo:/app/.turbo
     healthcheck:
       test:
         [
           'CMD-SHELL',
-          'wget -qO- "http://127.0.0.1:$${PORT}/" > /dev/null || exit 1',
+          'wget -qO- "http://127.0.0.1:$${PORT}/api" > /dev/null || exit 1',
         ]
       interval: 15s
       timeout: 5s
@@ -326,10 +365,7 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile.dev
     init: true
-    command: >
-      sh -c "pnpm install --frozen-lockfile --store-dir /pnpm/store &&
-             pnpm --filter @repo/database db:generate &&
-             pnpm turbo run dev --filter=web... --no-daemon"
+    command: ['sh', '-c', 'pnpm turbo run dev --filter=web... --no-daemon']
     depends_on:
       postgres:
         condition: service_healthy
@@ -337,14 +373,15 @@ services:
         condition: service_healthy
       api-dev:
         condition: service_healthy
+      migrate-dev:
+        condition: service_completed_successfully
     environment:
       NODE_ENV: development
-      PNPM_NODE_LINKER: hoisted
       HOSTNAME: ${WEB_HOST:?WEB_HOST is required}
       PORT: ${WEB_PORT:?WEB_PORT is required}
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
       NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?NEXT_PUBLIC_APP_URL is required}
-      NEXT_ALLOWED_DEV_ORIGINS: ${NEXT_ALLOWED_DEV_ORIGINS:?NEXT_ALLOWED_DEV_ORIGINS is required}
+      NEXT_ALLOWED_DEV_ORIGINS: ${NEXT_ALLOWED_DEV_ORIGINS:-}
       INTERNAL_API_URL: http://api-dev:${PORT:?PORT is required}
       DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=public
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}
@@ -357,10 +394,19 @@ services:
       WATCHPACK_POLLING: 'true'
     expose:
       - '${WEB_PORT:?WEB_PORT is required}'
+    ports:
+      - '${WEB_PORT:?WEB_PORT is required}:${WEB_PORT:?WEB_PORT is required}'
     volumes:
       - .:/app
-      - web-node_modules:/app/node_modules
-      - web-pnpm-store:/pnpm/store
+      - root-node_modules:/app/node_modules
+      - apps-api-node_modules:/app/apps/api/node_modules
+      - apps-web-node_modules:/app/apps/web/node_modules
+      - packages-api-node_modules:/app/packages/api/node_modules
+      - packages-auth-node_modules:/app/packages/auth/node_modules
+      - packages-database-node_modules:/app/packages/database/node_modules
+      - packages-eslint-config-node_modules:/app/packages/eslint-config/node_modules
+      - packages-tailwind-config-node_modules:/app/packages/tailwind-config/node_modules
+      - packages-ui-node_modules:/app/packages/ui/node_modules
       - web-turbo:/app/.turbo
       - web-next:/app/apps/web/.next
     healthcheck:
@@ -417,10 +463,15 @@ volumes:
   postgres-data:
   redis-data:
   pgadmin-data:
-  api-node_modules:
-  api-pnpm-store:
+  root-node_modules:
+  apps-api-node_modules:
+  apps-web-node_modules:
+  packages-api-node_modules:
+  packages-auth-node_modules:
+  packages-database-node_modules:
+  packages-eslint-config-node_modules:
+  packages-tailwind-config-node_modules:
+  packages-ui-node_modules:
   api-turbo:
-  web-node_modules:
-  web-pnpm-store:
   web-turbo:
   web-next:
