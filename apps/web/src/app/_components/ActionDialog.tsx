@@ -32,6 +32,7 @@ export function ActionDialog({
 }: ActionDialogProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+  const previousBodyOverflowRef = useRef('');
   const wasOpenRef = useRef(false);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -47,6 +48,10 @@ export function ActionDialog({
 
       if (typeof document !== 'undefined') {
         previouslyFocusedRef.current = document.activeElement as HTMLElement;
+        // Lock body scroll while the modal is open so background content
+        // can't scroll behind the dialog. Restored in the cleanup below.
+        previousBodyOverflowRef.current = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
       }
 
       const container = containerRef.current;
@@ -100,6 +105,9 @@ export function ActionDialog({
       window.removeEventListener('keydown', handleKeyDown);
       if (previouslyFocusedRef.current) {
         previouslyFocusedRef.current.focus();
+      }
+      if (typeof document !== 'undefined') {
+        document.body.style.overflow = previousBodyOverflowRef.current;
       }
     };
   }, [open, pending]);

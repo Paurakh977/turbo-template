@@ -222,3 +222,34 @@ const client = createAuthClient({
 
 export const authClient: typeof client = client;
 export type Session = typeof authClient.$Infer.Session;
+
+// ── Typed account helpers ────────────────────────────────────────────────
+// The client proxy method `authClient.listAccounts()` is inferred from the
+// `/list-accounts` endpoint. These wrappers normalize the response into a
+// typed, minimal shape so call sites never need unsafe casts.
+
+export type LinkedAccount = {
+  providerId: string;
+  accountId: string;
+};
+
+export async function listLinkedAccounts(): Promise<LinkedAccount[]> {
+  const res = await authClient.listAccounts();
+  if (!res || res.error || !Array.isArray(res.data)) return [];
+  return res.data
+    .filter(
+      (account) =>
+        Boolean(account) &&
+        typeof account.providerId === 'string' &&
+        typeof account.accountId === 'string',
+    )
+    .map((account) => ({
+      providerId: account.providerId,
+      accountId: account.accountId,
+    }));
+}
+
+export async function getHasCredentialAccount(): Promise<boolean> {
+  const accounts = await listLinkedAccounts();
+  return accounts.some((a) => a.providerId === 'credential');
+}

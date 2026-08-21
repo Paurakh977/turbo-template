@@ -84,6 +84,7 @@ function ResetPasswordForm() {
 
         <form onSubmit={handleSubmit} className="space-y-3.5">
           <PasswordInput
+            label="New password"
             placeholder="New password (min 8 characters)"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -97,6 +98,7 @@ function ResetPasswordForm() {
             </p>
           ) : null}
           <PasswordInput
+            label="Confirm new password"
             placeholder="Confirm new password"
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}

@@ -9,6 +9,10 @@ import {
   getForgotPasswordPublicMessage,
   isRateLimitedAuthError,
 } from '../../../lib/auth-errors';
+import {
+  buildAbsoluteUrl,
+  getClientAppBaseUrl,
+} from '../../../lib/app-url';
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
@@ -16,9 +20,7 @@ export default function ForgotPasswordPage() {
   const [error, setError] = useState('');
   const [fieldError, setFieldError] = useState('');
   const [loading, setLoading] = useState(false);
-  const APP_URL = process.env.NEXT_PUBLIC_APP_URL as string;
-  const appUrl =
-    APP_URL || (typeof window !== 'undefined' ? window.location.origin : '');
+  const appUrl = getClientAppBaseUrl();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,7 +35,7 @@ export default function ForgotPasswordPage() {
     setFieldError('');
     const { error } = await authClient.requestPasswordReset({
       email: normalizedEmail,
-      redirectTo: `${appUrl}/auth/reset-password`,
+      redirectTo: buildAbsoluteUrl(appUrl, '/auth/reset-password'),
     });
 
     if (error && isRateLimitedAuthError(error)) {

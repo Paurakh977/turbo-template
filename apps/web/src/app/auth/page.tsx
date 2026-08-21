@@ -15,6 +15,7 @@ import {
   getResendVerificationPublicMessage,
   isRateLimitedAuthError,
 } from '../../lib/auth-errors';
+import { getClientAppBaseUrl } from '../../lib/app-url';
 
 export default function AuthPage() {
   const router = useRouter();
@@ -46,9 +47,7 @@ export default function AuthPage() {
     password?: string;
     confirmPassword?: string;
   }>({});
-  const APP_URL = process.env.NEXT_PUBLIC_APP_URL as string;
-  const appUrl =
-    APP_URL || (typeof window !== 'undefined' ? window.location.origin : '');
+  const appUrl = getClientAppBaseUrl();
 
   // Catch error params from Better Auth redirects (e.g. banned user)
   useEffect(() => {
@@ -458,6 +457,7 @@ export default function AuthPage() {
           <PasswordInput
             id="auth-password"
             label={mode === 'signup' ? 'Create password' : 'Password'}
+            showLabel={false}
             placeholder="Password"
             value={password}
             onChange={(e) => {
@@ -506,6 +506,7 @@ export default function AuthPage() {
                 <PasswordInput
                   id="auth-confirm-password"
                   label="Confirm password"
+                  showLabel={false}
                   placeholder="Confirm password"
                   value={confirmPassword}
                   onChange={(e) => {
