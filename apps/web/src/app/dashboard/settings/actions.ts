@@ -14,49 +14,8 @@ import {
   checkServerActionRateLimit,
   getServerActionRateLimitMessage,
 } from '../../../lib/server-action-rate-limit';
-
-function trimTrailingSlash(value: string): string {
-  return value.endsWith('/') ? value.slice(0, -1) : value;
-}
-
-function buildAbsoluteUrl(baseUrl: string, pathname: string): string {
-  const normalizedBase = trimTrailingSlash(baseUrl);
-  const normalizedPath = pathname.startsWith('/') ? pathname : `/${pathname}`;
-  return `${normalizedBase}${normalizedPath}`;
-}
-
-function inferOriginFromHeaders(h: Headers): string | null {
-  const forwardedProto = h
-    .get('x-forwarded-proto')
-    ?.split(',')[0]
-    ?.trim()
-    .toLowerCase();
-  const forwardedHost = h.get('x-forwarded-host')?.split(',')[0]?.trim();
-  const host = forwardedHost ?? h.get('host')?.split(',')[0]?.trim();
-  if (!host) return null;
-
-  const protocol =
-    forwardedProto ??
-    (host.includes('localhost') || host.startsWith('127.0.0.1')
-      ? 'http'
-      : 'https');
-
-  return `${protocol}://${host}`;
-}
-
-async function getAppBaseUrl(h?: Headers): Promise<string> {
-  const publicAppUrl = process.env.NEXT_PUBLIC_APP_URL?.trim() || '';
-  if (publicAppUrl) return trimTrailingSlash(publicAppUrl);
-
-  const requestHeaders = h ?? (await headers());
-  const inferred = inferOriginFromHeaders(requestHeaders);
-  if (inferred) return trimTrailingSlash(inferred);
-
-  const authUrl = process.env.BETTER_AUTH_URL?.trim() || '';
-  if (authUrl) return trimTrailingSlash(authUrl);
-
-  return 'http://localhost:3000';
-}
+import { getAppBaseUrl } from '../../../lib/server/app-url';
+import { buildAbsoluteUrl } from '../../../lib/app-url';
 
 async function getSessionOrRedirect() {
   const h = await headers();

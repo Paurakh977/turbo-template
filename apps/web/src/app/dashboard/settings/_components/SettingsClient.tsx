@@ -110,7 +110,7 @@ function ProfileSection({
     start(async () => {
       try {
         const res = await updateDisplayNameAction(fd);
-        if (res?.error) {
+        if (res && 'error' in res && res.error) {
           setInlineError(res.error);
           toastApi.pushToast('error', res.error);
           return;
@@ -136,6 +136,8 @@ function ProfileSection({
             <img
               src={user.image}
               alt={user.name}
+              loading="lazy"
+              decoding="async"
               className="h-full w-full object-cover"
             />
           ) : (
@@ -249,7 +251,7 @@ function DangerSection({
       }
       try {
         const res = await deleteAccountAction(fd);
-        if (res?.error) {
+        if (res && 'error' in res && res.error) {
           setInlineError(res.error);
           toastApi.pushToast('error', res.error);
           return;
@@ -312,6 +314,7 @@ function DangerSection({
         {requiresDeletePassword ? (
           <>
             <PasswordInput
+              label="Confirm password"
               value={password}
               onChange={(event) => {
                 setPassword(event.target.value);
@@ -355,7 +358,7 @@ function ThemeSection({
     start(async () => {
       try {
         const res = await toggleThemePreferenceAction();
-        if (res?.error) {
+        if (res && 'error' in res && res.error) {
           toastApi.pushToast('error', res.error);
           return;
         }
@@ -413,11 +416,16 @@ function LabsSection({
     start(async () => {
       try {
         const res = await runLabsSettingAction();
-        if (res?.error) {
+        if (res && 'error' in res && res.error) {
           toastApi.pushToast('error', res.error);
           return;
         }
-        toastApi.pushToast('success', res?.message ?? 'Labs action executed.');
+        toastApi.pushToast(
+          'success',
+          res && 'message' in res && res.message
+            ? res.message
+            : 'Labs action executed.',
+        );
       } catch {
         toastApi.pushToast(
           'error',

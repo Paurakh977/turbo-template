@@ -98,7 +98,7 @@ function NoteCard({
 
     startTransition(async () => {
       const res = await updateNoteAction(note.id, fd);
-      if (res?.error) {
+      if (res && 'error' in res && res.error) {
         setEditError(res.error);
         toastApi.pushToast('error', res.error);
         return;
@@ -115,7 +115,7 @@ function NoteCard({
     // request failed (the user briefly saw the note disappear).
     startTransition(async () => {
       const res = await deleteNoteAction(note.id);
-      if (res?.error) {
+      if (res && 'error' in res && res.error) {
         toastApi.pushToast('error', res.error);
         return;
       }
@@ -280,7 +280,7 @@ function CreateNoteForm({
 
     start(async () => {
       const res = await createNoteAction(fd);
-      if (res?.error) {
+      if (res && 'error' in res && res.error) {
         setError(res.error);
         toastApi.pushToast('error', res.error);
         return;
@@ -466,7 +466,12 @@ export function NotesClient({
                 <p className="mt-1 text-xs text-muted-foreground">
                   Create your first note to get started.
                 </p>
-              ) : null}
+              ) : (
+                <p className="mx-auto mt-1 max-w-sm text-xs text-muted-foreground">
+                  Your role does not allow creating notes. Ask an admin or
+                  operator to grant you access if you need to create notes.
+                </p>
+              )}
             </motion.div>
           ) : (
             notes.map((note) => (
