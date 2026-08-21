@@ -13,6 +13,7 @@ import { THEME_GRANT_NAME, LABS_GRANT_NAME } from '@repo/auth/permissions';
 import { ActionDialog } from '../../_components/ActionDialog';
 import { useToast } from '../../../lib/toast-context';
 import { getRoleBadgeStyle } from '../../../lib/role-badge';
+import { resendVerificationEmailAction } from '../actions';
 
 type User = {
   id: string;
@@ -66,6 +67,7 @@ export function AdminUserTable({
   const router = useRouter();
   const [list, setList] = useState(users);
   const [loading, setLoading] = useState<string | null>(null);
+  const [resendingId, setResendingId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const { pushToast } = useToast();
 
@@ -101,6 +103,17 @@ export function AdminUserTable({
 
   const handleError = (msg: string | undefined) =>
     pushToast('error', msg ?? 'An unexpected error occurred.');
+
+  const resendVerification = async (userId: string) => {
+    setResendingId(userId);
+    const result = await resendVerificationEmailAction(userId);
+    if (result && 'error' in result && result.error) {
+      handleError(result.error);
+    } else {
+      pushToast('success', 'Verification email sent.');
+    }
+    setResendingId(null);
+  };
 
   const setRole = async (userId: string, role: RoleToken[]) => {
     setLoading(userId);
@@ -473,6 +486,22 @@ export function AdminUserTable({
                                     Ban
                                   </button>
                                 )}
+
+                                {!user.emailVerified ? (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      void resendVerification(user.id)
+                                    }
+                                    disabled={resendingId === user.id}
+                                    className="rounded-lg border border-sky-500/20 bg-sky-500/10 px-2.5 py-1.5 text-[11px] font-medium text-sky-600 dark:text-sky-400 hover:bg-sky-500/20 transition-colors disabled:opacity-50"
+                                    title="Re-send the email verification link"
+                                  >
+                                    {resendingId === user.id
+                                      ? 'Sending...'
+                                      : 'Resend'}
+                                  </button>
+                                ) : null}
 
                                 <button
                                   type="button"

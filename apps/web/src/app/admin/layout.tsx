@@ -22,19 +22,19 @@ export default async function AdminLayout({
         />
       )}
       <header className="sticky top-0 z-40 border-b border-border/50 bg-card/60 backdrop-blur-xl">
-        <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between gap-4">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-3">
           {/* Left — branding + role badge */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             <Link
               href="/admin"
-              className="flex items-center gap-2 no-underline"
+              className="flex items-center gap-2 no-underline shrink-0"
             >
               <span className="text-xs font-semibold uppercase tracking-widest text-primary bg-primary/10 px-2 py-1 rounded-md border border-primary/20">
                 {session.isSuperAdmin ? 'Super Admin' : 'Admin'}
               </span>
             </Link>
-            <span className="text-muted-foreground/40">|</span>
-            <span className="text-sm text-muted-foreground font-medium truncate max-w-[160px]">
+            <span className="text-muted-foreground/40 hidden sm:inline">|</span>
+            <span className="text-sm text-muted-foreground font-medium truncate max-w-[110px] sm:max-w-[160px]">
               {session.user.name}
             </span>
             <span
@@ -49,23 +49,23 @@ export default async function AdminLayout({
           </div>
 
           {/* Right — nav */}
-          <nav className="flex items-center gap-1">
+          <nav className="flex items-center gap-0.5 sm:gap-1 shrink-0 overflow-x-auto">
             <Link
               href="/admin"
-              className="text-sm px-3 py-1.5 rounded-lg text-foreground font-medium hover:bg-muted/60 transition-colors"
+              className="text-xs sm:text-sm px-2.5 sm:px-3 py-1.5 rounded-lg text-foreground font-medium hover:bg-muted/60 transition-colors whitespace-nowrap"
             >
               Users
             </Link>
             <Link
               href="/admin/audit"
-              className="text-sm px-3 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+              className="text-xs sm:text-sm px-2.5 sm:px-3 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors whitespace-nowrap"
             >
               Audit Log
             </Link>
-            <span className="w-px h-4 bg-border/60 mx-1" />
+            <span className="w-px h-4 bg-border/60 mx-1 hidden sm:block" />
             <Link
               href="/dashboard"
-              className="text-sm px-3 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+              className="text-xs sm:text-sm px-2.5 sm:px-3 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors whitespace-nowrap"
             >
               ← App
             </Link>
@@ -73,7 +73,7 @@ export default async function AdminLayout({
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-6 py-8">{children}</main>
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">{children}</main>
     </div>
   );
 }
