@@ -1,808 +1,33 @@
 import './load-env';
-import { db } from '@repo/database';
 import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { twoFactor } from 'better-auth/plugins/two-factor';
 import { admin } from 'better-auth/plugins/admin';
 import { jwt } from 'better-auth/plugins';
 import { nextCookies } from 'better-auth/next-js';
-import Redis from 'ioredis';
-import { Resend } from 'resend';
+import { createAuthMiddleware, APIError } from 'better-auth/api';
 import { AUTH_BASE_PATH, ADMIN_PLUGIN_ROLES, ac } from './permissions';
+import { parseRoles } from '@repo/roles';
+import { validatePasswordPolicy } from './password-policy';
+import { db } from '@repo/database';
+import { redis } from './redis';
+import { sendEmail } from './email-helpers';
+import { databaseHooks } from './database-hooks';
+import { auditLogPlugin } from './audit-plugin';
 import {
-  createAuthMiddleware,
-  getSessionFromCtx,
-  APIError,
-} from 'better-auth/api';
-import type { BetterAuthPlugin } from 'better-auth';
+  appName,
+  appURL,
+  baseURL,
+  canSendEmail,
+  hasGithub,
+  hasGoogle,
+  secret,
+  getEnv,
+} from './env';
 
 export const ADMIN_ROLES = ['admin', 'superAdmin'] as const;
 export type AdminRole = (typeof ADMIN_ROLES)[number];
 
-import { parseRoles, serializeRoles, getMaxRoleWeight } from './roles';
-import { validatePasswordPolicy } from './password-policy';
-
-type GlobalRedisState = typeof globalThis & {
-  __repoSharedRedisClient?: Redis;
-};
-
-// Deletion request context
-// Stashed in the before hook (where headers are available) and consumed in
-// databaseHooks.user.delete.after (where headers are not).
-interface PendingDeletionMeta {
-  ipAddress: string | null;
-  userAgent: string | null;
-  email: string | null;
-  sessionToken: string | null;
-  sessionId: string | null;
-}
-
-async function storePendingDeletion(userId: string, meta: PendingDeletionMeta) {
-  if (redis) {
-    await redis
-      .set(
-        `pending_deletion:${userId}`,
-        JSON.stringify(meta),
-        'PX',
-        PENDING_TTL_MS,
-      )
-      .catch((e) => {
-        console.error('[Redis Error] storePendingDeletion:', e);
-        storePendingInMemory(`deletion:${userId}`, meta);
-      });
-  } else {
-    storePendingInMemory(`deletion:${userId}`, meta);
-  }
-}
-
-async function popPendingDeletion(
-  userId: string,
-): Promise<PendingDeletionMeta | undefined> {
-  if (redis) {
-    let parsed: PendingDeletionMeta | undefined;
-    const raw = await redis.get(`pending_deletion:${userId}`).catch((e) => {
-      console.error('[Redis Error] popPendingDeletion:', e);
-      return null;
-    });
-    if (raw) {
-      await redis
-        .del(`pending_deletion:${userId}`)
-        .catch((e) => console.error('[Redis Error]', e));
-      try {
-        parsed = JSON.parse(raw) as PendingDeletionMeta;
-      } catch {
-        console.error('[Redis Error] popPendingDeletion: invalid payload', {
-          userId,
-        });
-      }
-    }
-
-    return (
-      parsed ?? popPendingFromMemory<PendingDeletionMeta>(`deletion:${userId}`)
-    );
-  } else {
-    return popPendingFromMemory<PendingDeletionMeta>(`deletion:${userId}`);
-  }
-}
-
-/**
- * Server-side hierarchy guard.
- *
- * Throws APIError('FORBIDDEN') — which Better Auth converts to a 403 — when
- * the authenticated actor attempts to modify/delete/ban/impersonate a target
- * user whose role weight is >= the actor's own role weight.
- *
- * Must be called inside a `before` hook (createAuthMiddleware).  Throwing
- * inside a before hook is the documented way to abort the request chain.
- * (see: better-auth.com/docs/concepts/hooks)
- */
-async function enforceRoleHierarchy(
-  ctx: Parameters<Parameters<typeof createAuthMiddleware>[0]>[0],
-  targetUserId: string,
-): Promise<void> {
-  const session = await getSessionFromCtx(ctx);
-  if (!session) {
-    throw new APIError('UNAUTHORIZED', { message: 'Authentication required.' });
-  }
-
-  const actorRole = (session.user as { role?: string }).role ?? 'user';
-  const targetUser = await db.user
-    .findUnique({ where: { id: targetUserId } })
-    .catch(() => null);
-  if (!targetUser) {
-    throw new APIError('NOT_FOUND', { message: 'Target user not found.' });
-  }
-  const targetRole = (targetUser?.role as string | null) ?? 'user';
-
-  if (getMaxRoleWeight(targetRole) >= getMaxRoleWeight(actorRole)) {
-    throw new APIError('FORBIDDEN', {
-      message:
-        'You do not have permission to perform this action on a user with equal or higher privileges.',
-    });
-  }
-}
-
-// Better Auth types `data` / `oldData` in databaseHooks as `{}` — these
-// interfaces let us safely cast to the actual shape without losing type safety
-// everywhere else in the file.
-interface UserData {
-  id: string;
-  email: string;
-  name?: string;
-  role?: string;
-  banned?: boolean;
-  banReason?: string | null;
-}
-
-interface SessionData {
-  userId: string;
-  impersonatedBy?: string | null;
-  ipAddress?: string | null;
-  userAgent?: string | null;
-}
-
-/**
- * Stores the old user state before an update so the `after` hook can diff it.
- *
- * IMPORTANT: This map is intentionally in-process only.
- * Admin plugin operations (setRole / banUser / unbanUser) bypass databaseHooks
- * entirely — those are intercepted at the HTTP layer by `auditLogPlugin`.
- * The only updates that reach databaseHooks are normal user-initiated ones
- * (email change, profile edit) which complete in the same request, so this
- * is safe in practice.
- *
- * Guard: we prune entries older than 30 s to avoid leaks if an `after` hook
- * somehow never fires (e.g., adapter error).
- */
-const pendingUserUpdates = new Map<string, { data: UserData; ts: number }>();
-const pendingStopImpersonations = new Map<string, number>();
-
-const PENDING_TTL_MS = 30_000;
-const STOP_IMPERSONATION_TTL_MS = 15_000;
-
-function storePendingInMemory(key: string, data: unknown) {
-  pendingUserUpdates.set(key, {
-    data: data as UserData,
-    ts: Date.now(),
-  });
-}
-
-function popPendingFromMemory<T>(key: string): T | undefined {
-  const entry = pendingUserUpdates.get(key);
-  pendingUserUpdates.delete(key);
-  if (!entry) return undefined;
-  if (Date.now() - entry.ts > PENDING_TTL_MS) return undefined;
-  return entry.data as unknown as T;
-}
-
-function storePendingStopImpersonationInMemory(userId: string) {
-  pendingStopImpersonations.set(userId, Date.now());
-}
-
-function popPendingStopImpersonationFromMemory(userId: string): boolean {
-  const ts = pendingStopImpersonations.get(userId);
-  pendingStopImpersonations.delete(userId);
-  if (!ts) return false;
-  return Date.now() - ts <= STOP_IMPERSONATION_TTL_MS;
-}
-
-async function storePendingStopImpersonation(userId: string) {
-  if (redis) {
-    await redis
-      .set(
-        `pending_stop_impersonation:${userId}`,
-        '1',
-        'PX',
-        STOP_IMPERSONATION_TTL_MS,
-      )
-      .catch((e) => {
-        console.error('[Redis Error] storePendingStopImpersonation:', e);
-        storePendingStopImpersonationInMemory(userId);
-      });
-    return;
-  }
-
-  storePendingStopImpersonationInMemory(userId);
-}
-
-async function popPendingStopImpersonation(userId: string): Promise<boolean> {
-  if (redis) {
-    const key = `pending_stop_impersonation:${userId}`;
-    const raw = await redis.get(key).catch((e) => {
-      console.error('[Redis Error] popPendingStopImpersonation:', e);
-      return null;
-    });
-
-    if (raw) {
-      await redis
-        .del(key)
-        .catch((e) =>
-          console.error('[Redis Error] popPendingStopImpersonation.del:', e),
-        );
-      return true;
-    }
-
-    return popPendingStopImpersonationFromMemory(userId);
-  }
-
-  return popPendingStopImpersonationFromMemory(userId);
-}
-
-async function storePendingUser(userId: string, data: UserData) {
-  if (redis) {
-    await redis
-      .set(
-        `pending_user_update:${userId}`,
-        JSON.stringify(data),
-        'PX',
-        PENDING_TTL_MS,
-      )
-      .catch((e) => {
-        console.error('[Redis Error] storePendingUser:', e);
-        storePendingInMemory(userId, data);
-      });
-  } else {
-    storePendingInMemory(userId, data);
-  }
-}
-async function popPendingUser(userId: string): Promise<UserData | undefined> {
-  if (redis) {
-    let parsed: UserData | undefined;
-    const raw = await redis.get(`pending_user_update:${userId}`).catch((e) => {
-      console.error('[Redis Error]', e);
-      return null;
-    });
-    if (raw) {
-      await redis
-        .del(`pending_user_update:${userId}`)
-        .catch((e) => console.error('[Redis Error]', e));
-      try {
-        parsed = JSON.parse(raw) as UserData;
-      } catch (e) {
-        console.error('[Redis Error] popPendingUser: invalid payload', {
-          userId,
-          error: e,
-        });
-      }
-    }
-
-    return parsed ?? popPendingFromMemory<UserData>(userId);
-  } else {
-    return popPendingFromMemory<UserData>(userId);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Cache invalidation
-// Destroys the user's secondary storage cache in Redis (if enabled) so that
-// the next request misses the cache, hits the DB, and fetches the fresh data
-// (like new roles, ban status, etc) instantly.
-// ---------------------------------------------------------------------------
-async function invalidateUserCache(
-  userId: string,
-  options?: { sessionToken?: string | null; sessionId?: string | null },
-) {
-  if (!redis) return;
-  try {
-    const userSessions = await db.session.findMany({ where: { userId } });
-    const pipeline = redis.pipeline();
-    for (const session of userSessions) {
-      // Better Auth usually caches the session using its token as the key
-      pipeline.del(session.token);
-      // Just in case it uses variations in newer versions
-      pipeline.del(`session:${session.token}`);
-      pipeline.del(`session:${session.id}`);
-    }
-    // Also delete any cached user record directly
-    pipeline.del(userId);
-    pipeline.del(`user:${userId}`);
-
-    if (options?.sessionToken) {
-      pipeline.del(options.sessionToken);
-      pipeline.del(`session:${options.sessionToken}`);
-    }
-    if (options?.sessionId) {
-      pipeline.del(`session:${options.sessionId}`);
-    }
-
-    await pipeline.exec();
-    console.log(`[Cache] Invalidated secondary storage for user ${userId}`);
-  } catch (e) {
-    console.error('[Cache Error] Failed to invalidate user cache:', e);
-  }
-}
-
-// Sweep stale entries every 5 minutes so the map can't grow unbounded.
-setInterval(() => {
-  if (redis) return; // Redis handles TTL natively
-  const cutoff = Date.now() - PENDING_TTL_MS;
-  for (const [id, entry] of pendingUserUpdates) {
-    if (entry.ts < cutoff) pendingUserUpdates.delete(id);
-  }
-
-  const stopCutoff = Date.now() - STOP_IMPERSONATION_TTL_MS;
-  for (const [userId, ts] of pendingStopImpersonations) {
-    if (ts < stopCutoff) pendingStopImpersonations.delete(userId);
-  }
-}, 5 * 60_000).unref();
-
-// ---------------------------------------------------------------------------
-// Audit-log plugin
-//
-// Better Auth's admin plugin calls the DB adapter directly, bypassing
-// databaseHooks.user.update. We intercept admin endpoints at the HTTP layer
-// instead — this is the documented/correct pattern per the Better Auth hooks
-// and plugin-creation docs.
-//
-// We use `before` hooks (not `after`) because:
-//   1. We need the old value BEFORE the change (e.g., old role).
-//   2. Fetching in a `before` hook and writing the log is atomic enough for
-//      an audit trail — if the main operation later fails the entry will
-//      note the intent, which is still useful.
-// ---------------------------------------------------------------------------
-const auditLogPlugin = (): BetterAuthPlugin => ({
-  id: 'audit-log-plugin',
-  hooks: {
-    before: [
-      {
-        // Intercept role changes made via the admin panel
-        matcher: (ctx) => ctx.path === '/admin/set-role',
-        handler: createAuthMiddleware(async (ctx) => {
-          const body = ctx.body as
-            | { userId?: string; role?: string | string[] }
-            | undefined;
-          const userId = body?.userId;
-          const newRole = body?.role;
-
-          if (!userId || !newRole) return;
-
-          // 🔒 HIERARCHY GUARD — actor cannot change the role of a peer/superior.
-          await enforceRoleHierarchy(ctx, userId);
-
-          // 🔒 Also prevent assigning a role HIGHER than the actor's own role.
-          const session = await getSessionFromCtx(ctx);
-          const actorRole =
-            (session?.user as { role?: string })?.role ?? 'user';
-          const actorWeight = getMaxRoleWeight(actorRole);
-          const nextRoles = parseRoles(newRole);
-          if (nextRoles.some((r) => getMaxRoleWeight(r) >= actorWeight)) {
-            throw new APIError('FORBIDDEN', {
-              message:
-                'You cannot assign a role equal to or higher than your own.',
-            });
-          }
-
-          const oldUser = await db.user
-            .findUnique({ where: { id: userId } })
-            .catch(() => null);
-          const oldRoles = parseRoles(
-            oldUser?.role as string | string[] | null | undefined,
-          );
-          const oldRole = serializeRoles(oldRoles);
-          const nextRoleJoined = serializeRoles(nextRoles);
-
-          if (oldRole === nextRoleJoined) return;
-
-          const ipAddress = ctx.headers?.get('x-forwarded-for') ?? undefined;
-          const userAgent = ctx.headers?.get('user-agent') ?? undefined;
-
-          await db.auditLog
-            .create({
-              data: {
-                userId,
-                action: 'role_changed',
-                actor: session?.user?.id,
-                ipAddress,
-                userAgent,
-                metadata: { from: oldRole, to: nextRoleJoined },
-              },
-            })
-            .catch((e: unknown) =>
-              console.error('[AuditLog] role_changed failed:', e),
-            );
-
-          // Force cache invalidation so the new role is fetched instantly
-          await invalidateUserCache(userId);
-        }),
-      },
-      {
-        matcher: (ctx) => ctx.path === '/admin/ban-user',
-        handler: createAuthMiddleware(async (ctx) => {
-          const body = ctx.body as
-            | { userId?: string; banReason?: string }
-            | undefined;
-          const userId = body?.userId;
-          if (!userId) return;
-
-          // 🔒 HIERARCHY GUARD
-          await enforceRoleHierarchy(ctx, userId);
-
-          const session = await getSessionFromCtx(ctx);
-          const actorId = session?.user?.id;
-          const ipAddress = ctx.headers?.get('x-forwarded-for') ?? undefined;
-          const userAgent = ctx.headers?.get('user-agent') ?? undefined;
-
-          if (actorId === userId) {
-            console.log('[AuditLog] Skipping self-ban attempt:', userId);
-            return;
-          }
-
-          await db.auditLog
-            .create({
-              data: {
-                userId,
-                action: 'user_banned',
-                actor: actorId,
-                ipAddress,
-                userAgent,
-                metadata: { reason: body?.banReason ?? null },
-              },
-            })
-            .catch((e: unknown) =>
-              console.error('[AuditLog] user_banned failed:', e),
-            );
-
-          await invalidateUserCache(userId);
-        }),
-      },
-      {
-        matcher: (ctx) => ctx.path === '/admin/unban-user',
-        handler: createAuthMiddleware(async (ctx) => {
-          const body = ctx.body as { userId?: string } | undefined;
-          const userId = body?.userId;
-          if (!userId) return;
-
-          // 🔒 HIERARCHY GUARD
-          await enforceRoleHierarchy(ctx, userId);
-
-          const session = await getSessionFromCtx(ctx);
-          const ipAddress = ctx.headers?.get('x-forwarded-for') ?? undefined;
-          const userAgent = ctx.headers?.get('user-agent') ?? undefined;
-
-          await db.auditLog
-            .create({
-              data: {
-                userId,
-                action: 'user_unbanned',
-                actor: session?.user?.id,
-                ipAddress,
-                userAgent,
-              },
-            })
-            .catch((e: unknown) =>
-              console.error('[AuditLog] user_unbanned failed:', e),
-            );
-
-          await invalidateUserCache(userId);
-        }),
-      },
-      {
-        // Intercept session revoke (admin revokes all user sessions)
-        matcher: (ctx) => ctx.path === '/admin/revoke-user-sessions',
-        handler: createAuthMiddleware(async (ctx) => {
-          const body = ctx.body as { userId?: string } | undefined;
-          const userId = body?.userId;
-          if (!userId) return;
-
-          // 🔒 HIERARCHY GUARD
-          await enforceRoleHierarchy(ctx, userId);
-
-          const session = await getSessionFromCtx(ctx);
-          const ipAddress = ctx.headers?.get('x-forwarded-for') ?? undefined;
-          const userAgent = ctx.headers?.get('user-agent') ?? undefined;
-
-          await db.auditLog
-            .create({
-              data: {
-                userId,
-                action: 'sessions_revoked',
-                actor: session?.user?.id,
-                ipAddress,
-                userAgent,
-              },
-            })
-            .catch((e: unknown) =>
-              console.error('[AuditLog] sessions_revoked failed:', e),
-            );
-
-          await invalidateUserCache(userId);
-        }),
-      },
-      {
-        // Intercept user delete (admin hard deletes a user)
-        matcher: (ctx) => ctx.path === '/admin/remove-user',
-        handler: createAuthMiddleware(async (ctx) => {
-          const body = ctx.body as { userId?: string } | undefined;
-          const targetUserId = body?.userId;
-          if (!targetUserId) return;
-
-          // 🔒 HIERARCHY GUARD
-          await enforceRoleHierarchy(ctx, targetUserId);
-
-          const session = await getSessionFromCtx(ctx);
-          const actorId = session?.user?.id;
-          const ipAddress = ctx.headers?.get('x-forwarded-for') ?? undefined;
-          const userAgent = ctx.headers?.get('user-agent') ?? undefined;
-
-          if (actorId === targetUserId) {
-            console.log(
-              '[AuditLog] Skipping self-delete attempt:',
-              targetUserId,
-            );
-            return;
-          }
-
-          const targetUser = await db.user
-            .findUnique({ where: { id: targetUserId } })
-            .catch(() => null);
-
-          await db.auditLog
-            .create({
-              data: {
-                userId: targetUserId,
-                action: 'user_deleted',
-                actor: actorId,
-                ipAddress,
-                userAgent,
-                metadata: { email: targetUser?.email ?? null },
-              },
-            })
-            .catch((e: unknown) =>
-              console.error('[AuditLog] user_deleted failed:', e),
-            );
-
-          await invalidateUserCache(targetUserId);
-        }),
-      },
-      {
-        // Intercept impersonation — superAdmins may impersonate admins,
-        // but admins cannot impersonate other admins or superAdmins.
-        // Also block nested impersonation (impersonating while already being impersonated).
-        matcher: (ctx) => ctx.path === '/admin/impersonate-user',
-        handler: createAuthMiddleware(async (ctx) => {
-          const body = ctx.body as { userId?: string } | undefined;
-          const targetUserId = body?.userId;
-          if (!targetUserId) return;
-
-          // Get session and check if already being impersonated
-          const session = await getSessionFromCtx(ctx);
-          const currentImpersonatedBy = (
-            session as unknown as {
-              session?: { impersonatedBy?: string | null };
-            }
-          )?.session?.impersonatedBy;
-
-          // 🔒 BLOCK NESTED IMPERSONATION - cannot impersonate while already being impersonated
-          if (currentImpersonatedBy) {
-            throw new APIError('FORBIDDEN', {
-              message:
-                'Cannot start impersonation while being impersonated. Stop current impersonation first.',
-            });
-          }
-
-          // 🔒 HIERARCHY GUARD
-          await enforceRoleHierarchy(ctx, targetUserId);
-
-          const actorId = session?.user?.id;
-          const ipAddress = ctx.headers?.get('x-forwarded-for') ?? undefined;
-          const userAgent = ctx.headers?.get('user-agent') ?? undefined;
-
-          const targetUser = await db.user
-            .findUnique({ where: { id: targetUserId } })
-            .catch(() => null);
-
-          await db.auditLog
-            .create({
-              data: {
-                userId: targetUserId,
-                action: 'user_impersonation_started',
-                actor: actorId,
-                ipAddress,
-                userAgent,
-                metadata: { targetEmail: targetUser?.email ?? null },
-              },
-            })
-            .catch((e: unknown) =>
-              console.error('[AuditLog] user_impersonation_started failed:', e),
-            );
-        }),
-      },
-      {
-        matcher: (ctx) => ctx.path === '/admin/stop-impersonating',
-        handler: createAuthMiddleware(async (ctx) => {
-          const session = await getSessionFromCtx(ctx);
-          const userId = session?.user?.id;
-          if (!userId) return;
-
-          const actorId = (
-            session as unknown as {
-              session?: { impersonatedBy?: string | null };
-            }
-          )?.session?.impersonatedBy;
-          if (!actorId) return;
-
-          const ipAddress = ctx.headers?.get('x-forwarded-for') ?? undefined;
-          const userAgent = ctx.headers?.get('user-agent') ?? undefined;
-
-          await db.auditLog
-            .create({
-              data: {
-                userId,
-                action: 'user_stop_impersonating',
-                actor: actorId,
-                ipAddress,
-                userAgent,
-              },
-            })
-            .catch((e: unknown) =>
-              console.error('[AuditLog] user_stop_impersonating failed:', e),
-            );
-
-          await storePendingStopImpersonation(userId);
-        }),
-      },
-      {
-        // Intercept self-user deletion (user deleting their own account).
-        //
-        // ⚠️  AUDIT LOG REMOVED FROM HERE intentionally.
-        //
-        // Previously, `account_deleted` was written in this before hook, which
-        // fired even when Better Auth subsequently rejected the request due to
-        // an incorrect password — producing a false audit entry for a deletion
-        // that never happened.
-        //
-        // The audit log is now written in databaseHooks.user.delete.after,
-        // which only fires after the DB row is actually removed, guaranteeing
-        // the log entry reflects a real deletion.
-        //
-        // This hook now only:
-        //   1. Guards against a missing password for credential accounts.
-        //   2. Stashes IP, user-agent, email, and session context for the
-        //      databaseHooks.user.delete.after audit log + cache invalidation.
-        matcher: (ctx) => ctx.path === '/delete-user',
-        handler: createAuthMiddleware(async (ctx) => {
-          const session = await getSessionFromCtx(ctx);
-          if (!session?.user?.id) return;
-
-          const userId = session.user.id;
-          const currentSession = (
-            session as {
-              session?: { token?: string | null; id?: string | null };
-            }
-          ).session;
-          const body = ctx.body as { password?: string } | undefined;
-          const accounts = await db.account.findMany({
-            where: { userId },
-            select: { providerId: true },
-          });
-
-          const hasCredentialAccount = accounts.some(
-            (acc) => acc.providerId === 'credential',
-          );
-
-          if (hasCredentialAccount && !body?.password) {
-            throw new APIError('BAD_REQUEST', {
-              message: 'Password is required to confirm account deletion.',
-            });
-          }
-
-          // Stash request context now (headers available here) so the
-          // databaseHooks after callback can attach them to the audit entry.
-          // The entry is only consumed if deletion actually commits.
-          const targetUser = await db.user
-            .findUnique({ where: { id: userId } })
-            .catch(() => null);
-
-          await storePendingDeletion(userId, {
-            ipAddress: ctx.headers?.get('x-forwarded-for') ?? null,
-            userAgent: ctx.headers?.get('user-agent') ?? null,
-            email: targetUser?.email ?? null,
-            sessionToken: currentSession?.token ?? null,
-            sessionId: currentSession?.id ?? null,
-          });
-
-          // invalidate cache is implemented in the databaseHooks.user.delete.after
-        }),
-      },
-    ],
-  },
-});
-function getEnv(name: string, { required = true } = {}): string | undefined {
-  const value = process.env[name]?.trim();
-  if (value) return value;
-  if (required)
-    throw new Error(`Missing required environment variable: ${name}`);
-  return undefined;
-}
-
-const isProduction = process.env.NODE_ENV === 'production';
-const appName = getEnv('APP_NAME') as string;
-const baseURL = getEnv('BETTER_AUTH_URL') as string;
-const appURL = getEnv('NEXT_PUBLIC_APP_URL') as string;
-const secret = getEnv('BETTER_AUTH_SECRET') as string;
-const resendApiKey = getEnv('RESEND_API_KEY', { required: false });
-const devEmailOverride = getEnv('DEV_EMAIL_OVERRIDE', { required: false });
-const emailFrom = getEnv('EMAIL_FROM') as string;
-const redisUrl = getEnv('REDIS_URL', { required: false });
-
-const googleClientId = getEnv('GOOGLE_CLIENT_ID', { required: false });
-const googleClientSecret = getEnv('GOOGLE_CLIENT_SECRET', { required: false });
-const githubClientId = getEnv('GITHUB_CLIENT_ID', { required: false });
-const githubClientSecret = getEnv('GITHUB_CLIENT_SECRET', { required: false });
-
-const hasGoogle = Boolean(googleClientId && googleClientSecret);
-const hasGithub = Boolean(githubClientId && githubClientSecret);
-const resend = resendApiKey ? new Resend(resendApiKey) : null;
-const canSendEmail = Boolean(resend);
-const globalRedisState = globalThis as GlobalRedisState;
-const redis = (() => {
-  if (!redisUrl) return null;
-  if (globalRedisState.__repoSharedRedisClient) {
-    return globalRedisState.__repoSharedRedisClient;
-  }
-
-  const client = new Redis(redisUrl, {
-    retryStrategy: (times) => Math.min(times * 200, 30_000),
-    maxRetriesPerRequest: 3,
-    enableReadyCheck: true,
-    lazyConnect: false,
-    keepAlive: 10_000,
-  });
-
-  globalRedisState.__repoSharedRedisClient = client;
-  return client;
-})();
-
-// ---------------------------------------------------------------------------
-// Email helper
-// ---------------------------------------------------------------------------
-async function sendEmail({
-  to,
-  subject,
-  html,
-}: {
-  to: string;
-  subject: string;
-  html: string;
-}) {
-  if (!resend) {
-    console.log(`[AUTH EMAIL][NO_PROVIDER] to=${to} subject=${subject}`);
-    return;
-  }
-  const recipient = devEmailOverride ?? to;
-  const effectiveSubject = devEmailOverride
-    ? `[DEV → ${to}] ${subject}`
-    : subject;
-  const fromAddress = devEmailOverride
-    ? `Ozon <onboarding@resend.dev>`
-    : emailFrom;
-
-  const { error } = await resend.emails.send({
-    from: fromAddress,
-    to: recipient,
-    subject: effectiveSubject,
-    html,
-  });
-
-  if (error) {
-    console.error('[Email Error]', {
-      name: error.name,
-      statusCode: error.statusCode,
-      message: error.message,
-      subject,
-      recipient: recipient.includes('@') ? recipient.split('@')[1] : 'unknown',
-    });
-    throw error;
-  } else if (devEmailOverride) {
-    console.log(
-      `[Email] Redirected from ${to} → ${recipient} | Subject: ${subject}`,
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Auth instance
-// ---------------------------------------------------------------------------
 export const auth = betterAuth({
   appName,
   baseURL,
@@ -841,6 +66,21 @@ export const auth = betterAuth({
 
   account: {
     encryptOAuthTokens: true,
+    // Account linking: when a user signs in via OAuth with an email that
+    // already exists on a local (email/password) account, link the provider
+    // account to that same user instead of failing with duplicate-email
+    // errors or creating a separate identity. Only trusted providers may
+    // link, and `requireLocalEmailVerified` (Better Auth default) requires
+    // the local account email to be verified first — preventing account
+    // takeover by claiming an unverified email via OAuth.
+    accountLinking: {
+      enabled: true,
+      trustedProviders: [
+        'email-password',
+        ...(hasGoogle ? ['google'] : []),
+        ...(hasGithub ? ['github'] : []),
+      ],
+    },
   },
 
   user: {
@@ -851,13 +91,13 @@ export const auth = betterAuth({
 
   // -------------------------------------------------------------------------
   // Secondary storage (Redis)
-  // Removed the verbose per-key console.logs — they produce far too much
-  // noise in production. Replace with a proper logger if you need observability.
+  // All operations are wrapped with error handling — a Redis outage degrades
+  // to primary storage instead of taking down auth-wide operations.
   // -------------------------------------------------------------------------
   secondaryStorage: redis
-    ? {
+    ? ((r) => ({
         get: async (key) => {
-          const value = await redis.get(key).catch((error) => {
+          const value = await r.get(key).catch((error) => {
             console.error('[Redis Error] secondaryStorage.get failed:', error);
             return null;
           });
@@ -870,7 +110,7 @@ export const auth = betterAuth({
               : undefined;
 
           if (ttlSeconds) {
-            await redis.set(key, value, 'EX', ttlSeconds).catch((error) =>
+            await r.set(key, value, 'EX', ttlSeconds).catch((error) =>
               console.error('[Redis Error] secondaryStorage.set failed:', {
                 key,
                 ttl: ttlSeconds,
@@ -880,7 +120,7 @@ export const auth = betterAuth({
             return;
           }
 
-          await redis.set(key, value).catch((error) =>
+          await r.set(key, value).catch((error) =>
             console.error('[Redis Error] secondaryStorage.set failed:', {
               key,
               error,
@@ -888,304 +128,21 @@ export const auth = betterAuth({
           );
         },
         delete: async (key) => {
-          await redis.del(key).catch((error) =>
+          await r.del(key).catch((error) =>
             console.error('[Redis Error] secondaryStorage.delete failed:', {
               key,
               error,
             }),
           );
         },
-      }
+      }))(redis)
     : undefined,
 
   database: prismaAdapter(db, {
     provider: 'postgresql',
   }),
 
-  // -------------------------------------------------------------------------
-  // Database hooks
-  //
-  // These fire for NORMAL (non-admin-plugin) database operations.
-  // Admin plugin operations (setRole, banUser, unbanUser) bypass these hooks
-  // and are captured by the auditLogPlugin above.
-  // -------------------------------------------------------------------------
-  databaseHooks: {
-    user: {
-      create: {
-        before: async (userData, _ctx) => {
-          const data = userData as Record<string, unknown>;
-          if (data.role !== undefined) {
-            data.role = serializeRoles(parseRoles(data.role));
-          }
-          return {
-            data: data as unknown as Parameters<typeof createAuthMiddleware>[0],
-          };
-        },
-        after: async (user, ctx) => {
-          const u = user as unknown as UserData;
-          if (!u?.id) return;
-
-          const context = ctx as
-            | {
-                headers?: {
-                  get: (key: string) => string | null;
-                };
-                request?: {
-                  headers: { get: (key: string) => string | null };
-                };
-              }
-            | undefined;
-
-          const ipAddress =
-            context?.headers?.get('x-forwarded-for') ??
-            context?.request?.headers?.get('x-forwarded-for') ??
-            undefined;
-          const userAgent =
-            context?.headers?.get('user-agent') ??
-            context?.request?.headers?.get('user-agent') ??
-            undefined;
-
-          db.auditLog
-            .create({
-              data: {
-                userId: u.id,
-                action: 'user_signed_up',
-                ipAddress,
-                userAgent,
-                metadata: { email: u.email, name: u.name },
-              },
-            })
-            .catch((e: unknown) =>
-              console.error('[AuditLog] user_signed_up failed:', e),
-            );
-        },
-      },
-
-      update: {
-        // Canonicalize role to Better Auth's comma-separated storage format.
-        before: async (userData, _ctx) => {
-          const data = userData as Record<string, unknown>;
-          if (data.role !== undefined) {
-            data.role = serializeRoles(parseRoles(data.role));
-          }
-
-          const userId = (userData as unknown as UserData).id;
-          if (!userId) return { data };
-
-          const oldUser = await db.user
-            .findUnique({ where: { id: userId } })
-            .catch(() => null);
-          if (oldUser) await storePendingUser(userId, oldUser as UserData);
-
-          return { data };
-        },
-
-        after: async (user) => {
-          const u = user as unknown as UserData;
-          if (!u?.id) return;
-
-          const old = await popPendingUser(u.id);
-          if (!old) {
-            await invalidateUserCache(u.id);
-            return;
-          }
-
-          const writes: Promise<unknown>[] = [];
-
-          // Role change via normal user update (rare; admin path is separate)
-          if (old.role !== u.role) {
-            writes.push(
-              db.auditLog.create({
-                data: {
-                  userId: u.id,
-                  action: 'role_changed',
-                  metadata: { from: old.role ?? 'user', to: u.role ?? 'user' },
-                },
-              }),
-            );
-          }
-
-          // Ban/unban via normal update path
-          if (!old.banned && u.banned) {
-            writes.push(
-              db.auditLog.create({
-                data: {
-                  userId: u.id,
-                  action: 'user_banned',
-                  metadata: { reason: u.banReason ?? null },
-                },
-              }),
-            );
-          }
-          if (old.banned && !u.banned) {
-            writes.push(
-              db.auditLog.create({
-                data: { userId: u.id, action: 'user_unbanned' },
-              }),
-            );
-          }
-
-          // Email change
-          if (old.email !== u.email) {
-            writes.push(
-              db.auditLog.create({
-                data: {
-                  userId: u.id,
-                  action: 'email_changed',
-                  metadata: { oldEmail: old.email },
-                },
-              }),
-            );
-          }
-
-          if (writes.length === 0) return;
-
-          await Promise.allSettled(writes).then((results) => {
-            for (const r of results) {
-              if (r.status === 'rejected') {
-                console.error('[AuditLog] user update hook failed:', r.reason);
-              }
-            }
-          });
-
-          // Always invalidate cache on user update so changes
-          // are reflected immediately without waiting for session expiry.
-          await invalidateUserCache(u.id);
-        },
-      },
-
-      delete: {
-        after: async (user) => {
-          const u = user as unknown as UserData;
-          if (!u?.id) return;
-
-          const meta = await popPendingDeletion(u.id);
-
-          if (meta) {
-            await db.auditLog
-              .create({
-                data: {
-                  userId: u.id,
-                  action: 'account_deleted',
-                  actor: null,
-                  ipAddress: meta.ipAddress ?? null,
-                  userAgent: meta.userAgent ?? null,
-                  metadata: { email: meta.email ?? u.email ?? null },
-                },
-              })
-              .catch((e: unknown) =>
-                console.error('[AuditLog] account_deleted failed:', e),
-              );
-          }
-
-          // Pass session token/id from the stash — by this point the sessions are
-          // already deleted from the DB, so findMany returns []. Without these options
-          // the session-specific Redis keys would survive until natural TTL expiry,
-          // leaving a window where the deleted user's token could still authenticate.
-          await invalidateUserCache(u.id, {
-            sessionToken: meta?.sessionToken ?? null,
-            sessionId: meta?.sessionId ?? null,
-          });
-        },
-      },
-
-      // Self-deletion: audit log + cache invalidation handled in delete.after above.
-      // Admin-initiated deletion: audit log is in auditLogPlugin's /admin/remove-user
-      // hook to capture the actor's identity and IP address.
-    },
-
-    session: {
-      create: {
-        // Fires on sign-in AND impersonation
-        after: async (session, ctx) => {
-          const s = session as unknown as SessionData;
-          if (!s?.userId) return;
-          const context = ctx as
-            | {
-                headers?: {
-                  get: (key: string) => string | null;
-                };
-                request?: {
-                  headers: { get: (key: string) => string | null };
-                };
-              }
-            | undefined;
-
-          const ipAddress =
-            context?.headers?.get('x-forwarded-for') ??
-            context?.request?.headers?.get('x-forwarded-for') ??
-            undefined;
-          const userAgent =
-            context?.headers?.get('user-agent') ??
-            context?.request?.headers?.get('user-agent') ??
-            undefined;
-
-          db.auditLog
-            .create({
-              data: {
-                userId: s.userId,
-                action: s.impersonatedBy
-                  ? 'user_impersonated'
-                  : 'session_created',
-                actor: s.impersonatedBy ?? undefined,
-                ipAddress,
-                userAgent,
-              },
-            })
-            .catch((e: unknown) =>
-              console.error('[AuditLog] session_created failed:', e),
-            );
-        },
-      },
-
-      // Fires on sign-out AND admin session revoke
-      delete: {
-        before: async (session, ctx) => {
-          const s = session as unknown as SessionData;
-          if (!s?.userId) return;
-
-          if (
-            s.impersonatedBy &&
-            (await popPendingStopImpersonation(s.userId))
-          ) {
-            return;
-          }
-
-          const context = ctx as
-            | {
-                headers?: {
-                  get: (key: string) => string | null;
-                };
-              }
-            | undefined;
-
-          const ipAddress =
-            s.ipAddress ??
-            context?.headers?.get('x-forwarded-for') ??
-            context?.headers?.get('x-real-ip') ??
-            undefined;
-          const userAgent =
-            s.userAgent ?? context?.headers?.get('user-agent') ?? undefined;
-
-          await db.auditLog
-            .create({
-              data: {
-                userId: s.userId,
-                action: s.impersonatedBy
-                  ? 'user_stop_impersonating'
-                  : 'user_signed_out',
-                actor: s.impersonatedBy ?? undefined,
-                ipAddress,
-                userAgent,
-              },
-            })
-            .catch((e: unknown) =>
-              console.error('[AuditLog] session delete failed:', e),
-            );
-        },
-      },
-    },
-  },
+  databaseHooks,
 
   // -------------------------------------------------------------------------
   // Email & password
@@ -1262,13 +219,16 @@ export const auth = betterAuth({
 
   // -------------------------------------------------------------------------
   // Social providers
+  //
+  // First-time OAuth users are silently signed up (auto-create account).
+  // Subsequent logins link to the existing account via `accountLinking`.
   // -------------------------------------------------------------------------
   socialProviders: {
     ...(hasGoogle
       ? {
           google: {
-            clientId: googleClientId as string,
-            clientSecret: googleClientSecret as string,
+            clientId: process.env.GOOGLE_CLIENT_ID as string,
+            clientSecret: process.env.GOOGLE_CLIENT_SECRET as string,
             prompt: 'select_account',
           },
         }
@@ -1276,8 +236,8 @@ export const auth = betterAuth({
     ...(hasGithub
       ? {
           github: {
-            clientId: githubClientId as string,
-            clientSecret: githubClientSecret as string,
+            clientId: process.env.GITHUB_CLIENT_ID as string,
+            clientSecret: process.env.GITHUB_CLIENT_SECRET as string,
           },
         }
       : {}),
@@ -1484,6 +444,9 @@ export const auth = betterAuth({
       jwt: {
         expirationTime: '30m',
         definePayload: ({ user }) => ({
+          // Include the stable user id so JWT consumers (microservices, the
+          // API gateway) can resolve the user without a session lookup.
+          id: user.id,
           email: user.email,
           role: parseRoles(user.role as string | string[] | null | undefined),
         }),
