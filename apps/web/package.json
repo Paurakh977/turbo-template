@@ -13,6 +13,7 @@
   "dependencies": {
     "@repo/auth": "workspace:^",
     "@repo/database": "workspace:^",
+    "@repo/roles": "workspace:^",
     "@repo/ui": "workspace:*",
     "better-auth": "^1.6.0",
     "date-fns": "^4.1.0",

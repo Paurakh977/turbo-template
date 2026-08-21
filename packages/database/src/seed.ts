@@ -6,46 +6,11 @@ import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from './generated/prisma/client';
 import { getSeedEnv } from './env';
-
-function parseRoles(role: unknown): string[] {
-  if (!role) return ['user'];
-
-  if (Array.isArray(role)) {
-    const tokens = role.map((value) => String(value).trim()).filter(Boolean);
-    return tokens.length > 0 ? tokens : ['user'];
-  }
-
-  if (typeof role === 'string') {
-    const trimmed = role.trim();
-
-    try {
-      const parsed = JSON.parse(trimmed);
-      if (Array.isArray(parsed)) {
-        const tokens = parsed
-          .map((value) => String(value).trim())
-          .filter(Boolean);
-        return tokens.length > 0 ? tokens : ['user'];
-      }
-    } catch {}
-
-    const tokens = trimmed
-      .split(',')
-      .map((value) => value.trim())
-      .filter(Boolean);
-    return tokens.length > 0 ? tokens : ['user'];
-  }
-
-  return ['user'];
-}
-
-function serializeRoles(roles: string[]): string {
-  const tokens = roles
-    .map((value) => value.trim())
-    .filter(Boolean)
-    .filter((value, index, arr) => arr.indexOf(value) === index);
-
-  return (tokens.length > 0 ? tokens : ['user']).join(',');
-}
+// Canonical role parsing/serialization — shared with the auth package
+// (@repo/auth re-exports the same module) so seeded roles always match the
+// format the auth system produces. Importing from @repo/auth directly would
+// create a circular dependency (auth depends on database).
+import { parseRoles, serializeRoles } from '@repo/roles';
 
 const pgPool = new Pool({ connectionString: process.env.DATABASE_URL ?? '' });
 const db = new PrismaClient({ adapter: new PrismaPg(pgPool) });
