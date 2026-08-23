@@ -7,6 +7,7 @@ import compression from 'compression';
 
 import { AppModule } from './app.module';
 import { getApiEnv } from './env';
+import { HttpExceptionFilter } from './common/http-exception.filter';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -52,6 +53,8 @@ async function bootstrap() {
       forbidNonWhitelisted: true,
     }),
   );
+
+  app.useGlobalFilters(new HttpExceptionFilter());
 
   const trustedOrigins = Array.from(
     new Set(
