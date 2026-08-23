@@ -7,6 +7,7 @@ import { AUTH_BASE_PATH, ADMIN_PLUGIN_ROLES, ac } from '@repo/auth/permissions';
 import {
   AUTH_RATE_LIMIT_EVENT,
   AUTH_RATE_LIMIT_MESSAGE,
+  type AuthRateLimitDetail,
 } from './auth-rate-limit-event';
 
 /**
@@ -97,15 +98,19 @@ function classifyEndpoint(url: string): EndpointCategory {
 // ── Rate-limit notification (throttled) ──────────────────────────────────
 
 let lastRateLimitWarnAt = 0;
-function notifyRateLimit(message?: string) {
+function notifyRateLimit(message?: string, retryAfter?: number) {
   const now = Date.now();
   if (now - lastRateLimitWarnAt < 5000) return;
   lastRateLimitWarnAt = now;
+  const detail: AuthRateLimitDetail = {
+    message: message ?? AUTH_RATE_LIMIT_MESSAGE,
+  };
+  if (retryAfter !== undefined) {
+    detail.retryAfter = retryAfter;
+  }
   if (typeof window !== 'undefined') {
     window.dispatchEvent(
-      new CustomEvent(AUTH_RATE_LIMIT_EVENT, {
-        detail: { message: message ?? AUTH_RATE_LIMIT_MESSAGE },
-      }),
+      new CustomEvent(AUTH_RATE_LIMIT_EVENT, { detail }),
     );
     return;
   }
@@ -113,6 +118,25 @@ function notifyRateLimit(message?: string) {
     '[AuthClient] Rate limited:',
     message ?? AUTH_RATE_LIMIT_MESSAGE,
   );
+}
+
+/**
+ * Parse the HTTP `Retry-After` header into whole seconds.
+ * Accepts the delta-seconds form (e.g. "10", as nginx sends); HTTP-date
+ * strings fall back to undefined so callers use their default message.
+ *
+ * The param is a structural subset of `Headers` because Better Auth's
+ * rate-limit hook exposes a minimal headers-like object, not a real
+ * `Headers` instance (a real one still satisfies this shape).
+ */
+function parseRetryAfter(
+  headers?: { get: (key: string) => string | null },
+): number | undefined {
+  if (!headers) return undefined;
+  const raw = headers.get('Retry-After');
+  if (!raw) return undefined;
+  const seconds = Number.parseInt(raw, 10);
+  return Number.isInteger(seconds) && seconds > 0 ? seconds : undefined;
 }
 
 function resolveRequestUrl(context: RateLimitErrorContext): string {
@@ -208,11 +232,11 @@ const client = createAuthClient({
         case 'destructive': {
           // No per-page handler — user needs a toast to know the action
           // was blocked (delete-user, sign-out, etc.)
-          const retryAfter = context.response?.headers?.get('X-Retry-After');
+          const retryAfter = parseRetryAfter(context.response?.headers);
           const message = retryAfter
             ? `Too many requests. Please try again in ${retryAfter}s.`
             : AUTH_RATE_LIMIT_MESSAGE;
-          notifyRateLimit(message);
+          notifyRateLimit(message, retryAfter);
           break;
         }
       }

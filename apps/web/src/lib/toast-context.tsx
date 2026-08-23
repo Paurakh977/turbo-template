@@ -6,6 +6,7 @@ import { ToastRegion, type ToastKind } from '../app/_components/ToastRegion';
 import {
   AUTH_RATE_LIMIT_EVENT,
   AUTH_RATE_LIMIT_MESSAGE,
+  type AuthRateLimitDetail,
 } from './auth-rate-limit-event';
 
 type ToastContextType = {
@@ -19,9 +20,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const onRateLimit = (event: Event) => {
-      const customEvent = event as CustomEvent<{ message?: string }>;
-      const message = customEvent.detail?.message || AUTH_RATE_LIMIT_MESSAGE;
-      pushToast('error', message);
+      const customEvent = event as CustomEvent<AuthRateLimitDetail>;
+      const { message, retryAfter } = customEvent.detail ?? {};
+      const finalMessage =
+        message ??
+        (retryAfter
+          ? `Too many requests. Please try again in ${retryAfter}s.`
+          : AUTH_RATE_LIMIT_MESSAGE);
+      pushToast('error', finalMessage);
     };
 
     window.addEventListener(AUTH_RATE_LIMIT_EVENT, onRateLimit);

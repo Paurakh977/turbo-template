@@ -47,6 +47,11 @@ export default function Home() {
         const res = await fetch(`${apiBaseUrl}/links`);
         if (res.ok) {
           setLinks(await res.json());
+        } else if (res.status === 429) {
+          // nginx Layer-1 flood limit — consumes its Retry-After header.
+          const retryAfter = res.headers.get('Retry-After');
+          const wait = retryAfter ? ` Please try again in ${retryAfter}s.` : '';
+          pushToast('error', `Too many requests. Please slow down.${wait}`);
         }
       } catch (error) {
         console.error('Error fetching links:', error);
