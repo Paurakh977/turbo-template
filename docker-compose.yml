@@ -11,6 +11,10 @@ x-proxy-base: &proxy-base
     NGINX_SERVER_NAME: ${NGINX_SERVER_NAME:?NGINX_SERVER_NAME is required}
     NGINX_SSL_CERT_FILENAME: ${NGINX_SSL_CERT_FILENAME:?NGINX_SSL_CERT_FILENAME is required}
     NGINX_SSL_KEY_FILENAME: ${NGINX_SSL_KEY_FILENAME:?NGINX_SSL_KEY_FILENAME is required}
+    # Real client IP for nginx rate limits. Direct mode now (127.0.0.0/8 no-op);
+    # set NGINX_TRUSTED_PROXIES to your LB/CDN CIDRs when one is added later.
+    NGINX_TRUSTED_PROXIES: ${NGINX_TRUSTED_PROXIES:-127.0.0.0/8}
+    NGINX_REAL_IP_HEADER: ${NGINX_REAL_IP_HEADER:-X-Forwarded-For}
   ports:
     - '${PROXY_HTTP_PORT:?PROXY_HTTP_PORT is required}:80'
     - '${PROXY_HTTPS_PORT:?PROXY_HTTPS_PORT is required}:443'
@@ -42,7 +46,9 @@ services:
     expose:
       - '5432'
     ports:
-      - '${POSTGRES_PORT:-5432}:5432'
+      # Loopback-only so host-side tools (pnpm db:seed, Prisma Studio) work;
+      # nothing is reachable from external interfaces.
+      - '127.0.0.1:${POSTGRES_PORT:-5432}:5432'
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -70,7 +76,9 @@ services:
     expose:
       - '6379'
     ports:
-      - '${REDIS_PORT:-6379}:6379'
+      # Loopback-only for host-side tools (redis-cli); external interfaces
+      # stay closed.
+      - '127.0.0.1:${REDIS_PORT:-6379}:6379'
     volumes:
       - redis-data:/data
     healthcheck:
@@ -86,18 +94,20 @@ services:
           - redis
 
   pgadmin:
+    # Re-added to prod but locked down: credentials are REQUIRED (from your
+    # .env) and the port is bound to 127.0.0.1 only, so it is never exposed to
+    # the public internet. Access it via an SSH tunnel
+    # (`ssh -L 5050:127.0.0.1:5050 <host>`) or `docker compose exec`.
     profiles: ['prod', 'dev', 'local']
     image: dpage/pgadmin4:8.11
     restart: unless-stopped
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@admin.com
-      PGADMIN_DEFAULT_PASSWORD: admin
-      PGADMIN_CONFIG_SERVER_MODE: 'False'
-      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: 'False'
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:?PGADMIN_EMAIL is required}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:?PGADMIN_PASSWORD is required}
     expose:
       - '80'
     ports:
-      - '${PGADMIN_PORT:-5050}:80'
+      - '127.0.0.1:${PGADMIN_PORT:-5050}:80'
     volumes:
       - pgadmin-data:/var/lib/pgadmin
     depends_on:
@@ -118,8 +128,6 @@ services:
       args:
         TURBO_VERSION: '2.10.10'
         DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=public
-        BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}
-        BETTER_AUTH_URL: ${BETTER_AUTH_URL:?BETTER_AUTH_URL is required}
     restart: 'no'
     depends_on:
       postgres:
@@ -142,8 +150,6 @@ services:
       args:
         TURBO_VERSION: '2.10.10'
         DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=public
-        BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}
-        BETTER_AUTH_URL: ${BETTER_AUTH_URL:?BETTER_AUTH_URL is required}
     restart: unless-stopped
     depends_on:
       postgres:
@@ -197,8 +203,6 @@ services:
       args:
         TURBO_VERSION: '2.10.10'
         DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=public
-        BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}
-        BETTER_AUTH_URL: ${BETTER_AUTH_URL:?BETTER_AUTH_URL is required}
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
         NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?NEXT_PUBLIC_APP_URL is required}
         NEXT_ALLOWED_DEV_ORIGINS: ${NEXT_ALLOWED_DEV_ORIGINS:-}
@@ -253,6 +257,10 @@ services:
       NGINX_SERVER_NAME: ${NGINX_SERVER_NAME:?NGINX_SERVER_NAME is required}
       NGINX_SSL_CERT_FILENAME: ${NGINX_SSL_CERT_FILENAME:?NGINX_SSL_CERT_FILENAME is required}
       NGINX_SSL_KEY_FILENAME: ${NGINX_SSL_KEY_FILENAME:?NGINX_SSL_KEY_FILENAME is required}
+      # Real client IP for nginx rate limits. Direct mode now (127.0.0.0/8 no-op);
+      # set NGINX_TRUSTED_PROXIES to your LB/CDN CIDRs when one is added later.
+      NGINX_TRUSTED_PROXIES: ${NGINX_TRUSTED_PROXIES:-127.0.0.0/8}
+      NGINX_REAL_IP_HEADER: ${NGINX_REAL_IP_HEADER:-X-Forwarded-For}
       API_UPSTREAM_HOST: api
       API_UPSTREAM_PORT: ${PORT:?PORT is required}
       WEB_UPSTREAM_HOST: web
@@ -436,6 +444,10 @@ services:
       NGINX_SERVER_NAME: ${NGINX_SERVER_NAME:?NGINX_SERVER_NAME is required}
       NGINX_SSL_CERT_FILENAME: ${NGINX_SSL_CERT_FILENAME:?NGINX_SSL_CERT_FILENAME is required}
       NGINX_SSL_KEY_FILENAME: ${NGINX_SSL_KEY_FILENAME:?NGINX_SSL_KEY_FILENAME is required}
+      # Real client IP for nginx rate limits. Direct mode now (127.0.0.0/8 no-op);
+      # set NGINX_TRUSTED_PROXIES to your LB/CDN CIDRs when one is added later.
+      NGINX_TRUSTED_PROXIES: ${NGINX_TRUSTED_PROXIES:-127.0.0.0/8}
+      NGINX_REAL_IP_HEADER: ${NGINX_REAL_IP_HEADER:-X-Forwarded-For}
       API_UPSTREAM_HOST: api-dev
       API_UPSTREAM_PORT: ${PORT:?PORT is required}
       WEB_UPSTREAM_HOST: web-dev
@@ -450,6 +462,10 @@ services:
       NGINX_SERVER_NAME: ${NGINX_SERVER_NAME:?NGINX_SERVER_NAME is required}
       NGINX_SSL_CERT_FILENAME: ${NGINX_SSL_CERT_FILENAME:?NGINX_SSL_CERT_FILENAME is required}
       NGINX_SSL_KEY_FILENAME: ${NGINX_SSL_KEY_FILENAME:?NGINX_SSL_KEY_FILENAME is required}
+      # Real client IP for nginx rate limits. Direct mode now (127.0.0.0/8 no-op);
+      # set NGINX_TRUSTED_PROXIES to your LB/CDN CIDRs when one is added later.
+      NGINX_TRUSTED_PROXIES: ${NGINX_TRUSTED_PROXIES:-127.0.0.0/8}
+      NGINX_REAL_IP_HEADER: ${NGINX_REAL_IP_HEADER:-X-Forwarded-For}
       API_UPSTREAM_HOST: host.docker.internal
       API_UPSTREAM_PORT: ${PORT:?PORT is required}
       WEB_UPSTREAM_HOST: host.docker.internal
