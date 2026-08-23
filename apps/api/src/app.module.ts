@@ -7,7 +7,6 @@ import { AuthModule } from '@thallesp/nestjs-better-auth';
 import { auth } from '@repo/auth';
 
 import { RedisModule } from './redis/redis.module';
-import { RatelimitModule } from './ratelimit/ratelimit.module';
 import { LinksModule } from './links/links.module';
 
 import { AppService } from './app.service';
@@ -49,7 +48,6 @@ import { AppController } from './app.controller';
       },
     }),
     LinksModule,
-    RatelimitModule,
   ],
   controllers: [AppController],
   providers: [
