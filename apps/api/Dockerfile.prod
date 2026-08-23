@@ -23,14 +23,10 @@ RUN --mount=type=cache,id=api-pnpm-store,target=/pnpm/store \
 
 FROM installer AS builder
 ARG DATABASE_URL
-ARG BETTER_AUTH_SECRET
-ARG BETTER_AUTH_URL
 ARG TURBO_TEAM
 ARG TURBO_TOKEN
 ENV NODE_ENV=production
 ENV DATABASE_URL=$DATABASE_URL
-ENV BETTER_AUTH_SECRET=$BETTER_AUTH_SECRET
-ENV BETTER_AUTH_URL=$BETTER_AUTH_URL
 ENV TURBO_TEAM=$TURBO_TEAM
 ENV TURBO_TOKEN=$TURBO_TOKEN
 COPY --from=pruner /repo/out/full/ .
@@ -50,6 +46,10 @@ COPY --from=pruner /repo/out/full/packages/database/prisma ./prisma
 COPY --from=pruner /repo/out/full/packages/database/prisma.config.ts ./prisma.config.ts
 RUN --mount=type=cache,id=migrate-pnpm-store,target=/pnpm/store \
   pnpm install --prod --frozen-lockfile --store-dir /pnpm/store
+# Slim the layer: the pnpm store is mounted (not in image) but a few caches
+# can linger. Drop them so the final image only carries what
+# `prisma migrate deploy` needs at runtime.
+RUN rm -rf /pnpm/store node_modules/.cache 2>/dev/null || true
 
 USER node
 CMD ["./node_modules/.bin/prisma", "migrate", "deploy"]
