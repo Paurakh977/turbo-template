@@ -1,8 +1,10 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import { ActionDialog } from '../../_components/ActionDialog';
 import { PasswordInput } from '../../_components/PasswordInput';
-import QRCode from 'react-qr-code';
+
+const QRCode = dynamic(() => import('react-qr-code'), { ssr: false });
 
 // ── Two-Factor Setup ─────────────────────────────────────────────────────
 
