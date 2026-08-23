@@ -240,7 +240,10 @@ importers:
     dependencies:
       '@nestjs/mapped-types':
         specifier: '*'
-        version: 2.1.1(@nestjs/common@11.2.1)(reflect-metadata@0.2.2)
+        version: 2.1.1(@nestjs/common@11.2.1)(class-validator@0.14.4)(reflect-metadata@0.2.2)
+      class-validator:
+        specifier: ^0.14.2
+        version: 0.14.4
     devDependencies:
       '@repo/eslint-config':
         specifier: workspace:*
@@ -2264,7 +2267,7 @@ packages:
       tslib: 2.8.1
       uid: 2.0.2
 
-  /@nestjs/mapped-types@2.1.1(@nestjs/common@11.2.1)(reflect-metadata@0.2.2):
+  /@nestjs/mapped-types@2.1.1(@nestjs/common@11.2.1)(class-validator@0.14.4)(reflect-metadata@0.2.2):
     resolution: {integrity: sha512-SCCoMEJ6jdeI5h/N+KCVF1+pmg/hmEkNA5nHTS8Gvww7T/LCl4o1gFLinw2iQ60w7slFkszHcGLKGdazVI4F8A==}
     peerDependencies:
       '@nestjs/common': ^10.0.0 || ^11.0.0
@@ -2278,6 +2281,7 @@ packages:
         optional: true
     dependencies:
       '@nestjs/common': 11.2.1(class-transformer@0.5.1)(class-validator@0.14.4)(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      class-validator: 0.14.4
       reflect-metadata: 0.2.2
     dev: false
 

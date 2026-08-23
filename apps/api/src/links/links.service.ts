@@ -1,11 +1,9 @@
-import { Injectable } from '@nestjs/common';
-
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { Link, CreateLinkDto, UpdateLinkDto } from '@repo/api';
-import * as escapeHtml from 'escape-html';
 
 @Injectable()
 export class LinksService {
-  private readonly _links: Link[] = [
+  private readonly links: Link[] = [
     {
       id: 0,
       title: 'Installation',
@@ -27,25 +25,62 @@ export class LinksService {
     },
   ];
 
-  create(createLinkDto: CreateLinkDto) {
-    const safeTitle = escapeHtml(createLinkDto.title ?? '');
-    return `TODO: This action should add a new link '${safeTitle}'`;
+  private nextId = 3;
+
+  create(dto: CreateLinkDto): Link {
+    const link: Link = {
+      id: this.nextId++,
+      title: dto.title,
+      url: dto.url,
+      description: dto.description ?? '',
+    };
+
+    this.links.push(link);
+
+    return link;
   }
 
-  findAll() {
-    return this._links;
+  findAll(): Link[] {
+    return this.links;
   }
 
-  findOne(id: number) {
-    return `TODO: This action should return a Link with id #${id}`;
+  findOne(id: number): Link {
+    const link = this.links.find((link) => link.id === id);
+
+    if (!link) {
+      throw new NotFoundException(`Link #${id} not found`);
+    }
+
+    return link;
   }
 
-  update(id: number, updateLinkDto: UpdateLinkDto) {
-    const safeTitle = escapeHtml(updateLinkDto.title ?? '');
-    return `TODO: This action should update a #${id} link ${safeTitle}`;
+  update(id: number, dto: UpdateLinkDto): Link {
+    const link = this.findOne(id);
+
+    if (dto.title !== undefined) {
+      link.title = dto.title;
+    }
+
+    if (dto.url !== undefined) {
+      link.url = dto.url;
+    }
+
+    if (dto.description !== undefined) {
+      link.description = dto.description;
+    }
+
+    return link;
   }
 
-  remove(id: number) {
-    return `TODO: This action should remove a #${id} link`;
+  remove(id: number): { deleted: true; id: number } {
+    const index = this.links.findIndex((link) => link.id === id);
+
+    if (index === -1) {
+      throw new NotFoundException(`Link #${id} not found`);
+    }
+
+    this.links.splice(index, 1);
+
+    return { deleted: true, id };
   }
 }

@@ -6,6 +6,7 @@ import {
   Patch,
   Param,
   Delete,
+  ParseIntPipe,
 } from '@nestjs/common';
 import { AllowAnonymous } from '@thallesp/nestjs-better-auth';
 
@@ -29,17 +30,20 @@ export class LinksController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.linksService.findOne(+id);
+  findOne(@Param('id', ParseIntPipe) id: number) {
+    return this.linksService.findOne(id);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateLinkDto: UpdateLinkDto) {
-    return this.linksService.update(+id, updateLinkDto);
+  update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() updateLinkDto: UpdateLinkDto,
+  ) {
+    return this.linksService.update(id, updateLinkDto);
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.linksService.remove(+id);
+  remove(@Param('id', ParseIntPipe) id: number) {
+    return this.linksService.remove(id);
   }
 }
