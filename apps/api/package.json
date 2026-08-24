@@ -22,6 +22,8 @@
     "@nestjs/throttler": "^6.5.0",
     "@repo/api": "workspace:*",
     "@repo/auth": "workspace:^",
+    "@repo/database": "workspace:^",
+    "@repo/roles": "workspace:^",
     "@thallesp/nestjs-better-auth": "2.6.0",
     "class-transformer": "^0.5.1",
     "class-validator": "catalog:",

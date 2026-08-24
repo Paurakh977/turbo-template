@@ -8,6 +8,10 @@ import { auth } from '@repo/auth';
 
 import { RedisModule } from './redis/redis.module';
 import { LinksModule } from './links/links.module';
+import { NotesModule } from './notes/notes.module';
+import { AuditModule } from './audit/audit.module';
+import { UsersModule } from './users/users.module';
+import { ServerActionRateLimitModule } from './rate-limit/server-action-rate-limit.module';
 
 import { AppService } from './app.service';
 import { AppController } from './app.controller';
@@ -48,6 +52,10 @@ import { AppController } from './app.controller';
       },
     }),
     LinksModule,
+    NotesModule,
+    AuditModule,
+    UsersModule,
+    ServerActionRateLimitModule,
   ],
   controllers: [AppController],
   providers: [
