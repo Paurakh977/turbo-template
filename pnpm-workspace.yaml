@@ -2,6 +2,17 @@ packages:
   - "apps/*"
   - "packages/*"
 
+autoInstallPeers: false
+
+# Resolve peers PER CONSUMER instead of merging everyone onto one maximal
+# peer-suffixed instance. With the default (true), packages/auth's
+# better-auth was pinned to the variant carrying web's next/react and
+# database's dev-only prisma CLI - dragging ~450MB of dead peers into the
+# NestJS api image. false => auth resolves against only what IT provides
+# (@prisma/client + pg); web keeps its own fully-peered instance it really
+# uses.
+dedupePeerDependents: false
+
 # Single source of truth for versions duplicated across workspace manifests.
 # Reference from any package.json as "<dep>": "catalog:"
 # (requires pnpm >= 9.5 - pinned via packageManager in root package.json)
@@ -35,3 +46,7 @@ allowBuilds:
   sharp: true
   # transitive via eslint tooling (napi resolver; ships signed platform pkgs)
   unrs-resolver: true
+
+patchedDependencies:
+  '@prisma/client@7.9.1': patches/@prisma__client@7.9.1.patch
+  better-auth@1.6.29: patches/better-auth@1.6.29.patch

@@ -33,32 +33,86 @@ COPY --from=pruner /repo/out/full/ .
 RUN pnpm --filter @repo/database db:generate
 RUN pnpm turbo run build --filter=api...
 
-FROM builder AS deployer
-RUN pnpm deploy --filter=api --prod /prod/api
+# Production dependency tree assembled FRESH from the exact manifests +
+# lockfile the build used. Deliberately NOT `pnpm deploy` / `prune`: both
+# changed semantics across pnpm 8->11 (peer materialization, injected
+# workspaces, module-dir relayout). A plain --prod install is stable,
+# reviewable, and ships precisely what the lockfile's production graph says.
+FROM base AS prod-deps
+WORKDIR /rt
+COPY --from=pruner /repo/out/json/ .
+COPY --from=pruner /repo/out/pnpm-lock.yaml ./pnpm-lock.yaml
+RUN --mount=type=cache,id=api-pnpm-store,target=/pnpm/store \
+  pnpm install --prod --frozen-lockfile
 
-# Trim runtime dead weight pulled in via optional peer deps (autoInstallPeers):
-#   - typescript: @prisma/client's optional peer, never used at runtime
-#   - @prisma/client ships WASM query compilers base64-embedded for ALL
-#     providers (mysql/sqlite/cockroachdb/sqlserver); keep postgresql only.
-# KEEP (verified by boot smoke test):
-#   - kysely — better-auth's entry eagerly loads @better-auth/kysely-adapter
-#     even when prismaAdapter() is used
-#   - libphonenumber-js — direct dependency of class-validator; removing it
-#     makes Nest report "class-validator package is missing"
-FROM deployer AS trimmer
-RUN rm -rf /prod/api/node_modules/.pnpm/typescript@* /prod/api/node_modules/typescript \
-  && find /prod/api/node_modules/.pnpm/@prisma+client*/node_modules/@prisma/client/runtime \
+# Runtime payload: built outputs of the API and every workspace package it
+# links against.
+FROM prod-deps AS runtime
+COPY --from=builder /app/apps/api/dist ./apps/api/dist
+COPY --from=builder /app/packages/auth/dist ./packages/auth/dist
+COPY --from=builder /app/packages/database/dist ./packages/database/dist
+COPY --from=builder /app/packages/roles/dist ./packages/roles/dist
+COPY --from=builder /app/packages/api/dist ./packages/api/dist
+# --prod frozen installs skip workspace link creation; restore the four
+# @repo/* links Node needs to resolve the imports above.
+RUN mkdir -p /rt/node_modules/@repo \
+  && ln -s ../../packages/auth       /rt/node_modules/@repo/auth \
+  && ln -s ../../packages/database   /rt/node_modules/@repo/database \
+  && ln -s ../../packages/roles      /rt/node_modules/@repo/roles \
+  && ln -s ../../packages/api        /rt/node_modules/@repo/api
+#
+# Dead-weight deletion, each entry tied to its origin chain (boot smoke test
+# guards the whole list - it already caught two wrong guesses):
+#   prisma CLI chain (peer-suffix of @prisma/client satisfied by
+#   packages/database devDeps, dragged through every consumer):
+#     prisma, @prisma/studio-core, @prisma/engines, @electric-sql/pglite,
+#     effect, elkjs, remeda, mysql2
+#   UI/react stack (react peers of better-auth/client chain):
+#     react, react-dom, scheduler, @radix-ui, @types/react*, csstype,
+#     classnames, @visx, d3-*, delaunator, robust-predicates, internmap
+#   typescript: peer-satisfied via database devDeps; never loaded at runtime
+# KEEP - @opentelemetry/semantic-conventions: eagerly imported by
+# @better-auth/core's instrumentation module at startup (verified by boot
+# failure when removed). When real OTel tracing lands, its api+sdk packages
+# install under their own store keys alongside this one.
+RUN rm -rf \
+      /rt/node_modules/.pnpm/prisma@* \
+      /rt/node_modules/.pnpm/@prisma+studio-core* \
+      /rt/node_modules/.pnpm/@prisma+engines@* \
+      /rt/node_modules/.pnpm/@prisma+query-plan-executor* \
+      /rt/node_modules/.pnpm/@prisma+streams-local* \
+      /rt/node_modules/.pnpm/@electric-sql+pglite* \
+      /rt/node_modules/.pnpm/effect@* \
+      /rt/node_modules/.pnpm/elkjs* \
+      /rt/node_modules/.pnpm/remeda@* \
+      /rt/node_modules/.pnpm/mysql2* \
+      /rt/node_modules/.pnpm/react@* \
+      /rt/node_modules/.pnpm/react-dom@* \
+      /rt/node_modules/.pnpm/scheduler@* \
+      /rt/node_modules/.pnpm/@radix-ui+* \
+      /rt/node_modules/.pnpm/@types+react* \
+      /rt/node_modules/.pnpm/csstype* \
+      /rt/node_modules/.pnpm/classnames@* \
+      /rt/node_modules/.pnpm/@visx+* \
+      /rt/node_modules/.pnpm/d3-* \
+      /rt/node_modules/.pnpm/delaunator* \
+      /rt/node_modules/.pnpm/robust-predicates* \
+      /rt/node_modules/.pnpm/internmap* \
+      /rt/node_modules/.pnpm/typescript@* \
+  && find /rt/node_modules/.pnpm/@prisma+client*/node_modules/@prisma/client/runtime \
       -type f \( -name '*_bg.mysql*' -o -name '*_bg.sqlite*' \
                  -o -name '*_bg.cockroachdb*' -o -name '*_bg.sqlserver*' \) -delete
 
 FROM node:22-alpine AS runner
-WORKDIR /app
+WORKDIR /rt
 
 RUN apk add --no-cache dumb-init wget
 
 ENV NODE_ENV=production
 
-COPY --from=trimmer --chown=node:node /prod/api ./
+COPY --from=runtime --chown=node:node /rt ./
+
+WORKDIR /rt/apps/api
 
 # Hardening: no package managers in the running container. (Base layers still
 # carry these bytes, so this is security hygiene, not a size optimization.)
