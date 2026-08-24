@@ -369,10 +369,7 @@ services:
     init: true
     command: ['sh', '-c', 'pnpm turbo run dev --filter=web... --no-daemon']
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      # Architecture B: web talks only to the API (no direct DB/Redis)
       api-dev:
         condition: service_healthy
       migrate-dev:
