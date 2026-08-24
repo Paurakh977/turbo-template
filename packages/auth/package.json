@@ -40,9 +40,9 @@
   "dependencies": {
     "@repo/database": "workspace:^",
     "@repo/roles": "workspace:^",
-    "better-auth": "^1.6.0",
-    "dotenv": "^16.4.5",
-    "ioredis": "^5.8.2",
+    "better-auth": "catalog:",
+    "dotenv": "catalog:",
+    "ioredis": "catalog:",
     "resend": "^6.2.0"
   },
   "devDependencies": {
@@ -50,6 +50,6 @@
     "@repo/typescript-config": "workspace:^",
     "@types/node": "^22.19.3",
     "eslint": "^9.39.2",
-    "typescript": "5.5.4"
+    "typescript": "catalog:"
   }
 }

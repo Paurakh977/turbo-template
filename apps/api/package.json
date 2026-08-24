@@ -11,7 +11,7 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "test:e2e": "jest --config ./test/jest-e2e.json --forceExit",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\""
   },
   "dependencies": {
@@ -22,14 +22,14 @@
     "@nestjs/throttler": "^6.5.0",
     "@repo/api": "workspace:*",
     "@repo/auth": "workspace:^",
-    "@thallesp/nestjs-better-auth": "^2.6.0",
+    "@thallesp/nestjs-better-auth": "2.6.0",
     "class-transformer": "^0.5.1",
-    "class-validator": "^0.14.2",
+    "class-validator": "catalog:",
     "compression": "^1.8.1",
-    "dotenv": "^16.4.5",
+    "dotenv": "catalog:",
     "escape-html": "^1.0.3",
     "helmet": "^8.1.0",
-    "ioredis": "^5.8.2",
+    "ioredis": "catalog:",
     "joi": "^18.1.2",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2"
@@ -55,6 +55,6 @@
     "ts-loader": "^9.5.4",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
-    "typescript": "5.9.3"
+    "typescript": "catalog:"
   }
 }

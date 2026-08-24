@@ -1,0 +1,8 @@
+# Standalone workspace root for the migration-runner image.
+# This file intentionally isolates apps/migrate from the monorepo workspace so
+# its nested pnpm-lock.yaml stays self-contained for Docker builds.
+allowBuilds:
+  # prisma's lifecycle scripts fetch/link the schema engine binaries that
+  # 'migrate deploy' needs at runtime - blocking them breaks the image.
+  "@prisma/engines": true
+  prisma: true

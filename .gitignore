@@ -58,6 +58,9 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# TypeScript incremental build state
+*.tsbuildinfo
+
 # Misc
 .DS_Store
 *.pem

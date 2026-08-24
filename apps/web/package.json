@@ -11,18 +11,18 @@
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
-    "@prisma/adapter-pg": "^7.6.0",
-    "@prisma/client": "^7.9.1",
+    "@prisma/adapter-pg": "catalog:",
+    "@prisma/client": "catalog:",
     "@repo/auth": "workspace:^",
     "@repo/database": "workspace:^",
     "@repo/roles": "workspace:^",
     "@repo/ui": "workspace:*",
-    "better-auth": "^1.6.0",
+    "better-auth": "catalog:",
     "date-fns": "^4.1.0",
-    "dotenv": "^16.4.5",
+    "dotenv": "catalog:",
     "framer-motion": "^12.38.0",
     "next": "16.2.0",
-    "pg": "^8.13.1",
+    "pg": "catalog:",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-qr-code": "^2.0.21"
@@ -39,6 +39,6 @@
     "eslint": "^9.31.0",
     "postcss": "^8.5.12",
     "tailwindcss": "3",
-    "typescript": "5.8.2"
+    "typescript": "catalog:"
   }
 }

@@ -1,3 +1,37 @@
 packages:
   - "apps/*"
   - "packages/*"
+
+# Single source of truth for versions duplicated across workspace manifests.
+# Reference from any package.json as "<dep>": "catalog:"
+# (requires pnpm >= 9.5 - pinned via packageManager in root package.json)
+catalog:
+  "@prisma/adapter-pg": ^7.6.0
+  "@prisma/client": ^7.9.1
+  prisma: ^7.9.1
+  pg: ^8.13.1
+  ioredis: ^5.8.2
+  dotenv: ^16.4.5
+  # PINNED EXACT: 1.7.x went ESM-only ("default": "./dist/index.mjs"); our API
+  # compiles to CJS and jest cannot load it. Upgrade to 1.7 = dedicated PR that
+  # moves the api to ESM/NodeNext first. 1.6.29 = version verified in prod.
+  better-auth: 1.6.29
+  class-validator: ^0.14.2
+  eslint: ^9.39.2
+  # Build tooling pinned EXACT on purpose - a surprise compiler upgrade must
+  # never ride in with an unrelated dep change.
+  typescript: 5.9.3
+
+# pnpm >= 11: allowBuilds replaces onlyBuiltDependencies. Every dependency
+# that ships lifecycle scripts must be explicitly allowed (true) or denied
+# (false); anything unlisted fails the install (ERR_PNPM_IGNORED_BUILDS).
+allowBuilds:
+  "@nestjs/core": true
+  "@prisma/client": true
+  "@prisma/engines": true
+  better-auth: true
+  esbuild: true
+  prisma: true
+  sharp: true
+  # transitive via eslint tooling (napi resolver; ships signed platform pkgs)
+  unrs-resolver: true

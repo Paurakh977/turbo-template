@@ -18,7 +18,7 @@ WORKDIR /app
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 RUN corepack enable
-COPY apps/migrate/package.json apps/migrate/pnpm-lock.yaml ./
+COPY apps/migrate/package.json apps/migrate/pnpm-lock.yaml apps/migrate/pnpm-workspace.yaml ./
 RUN --mount=type=cache,id=migrate-pnpm-store,target=/pnpm/store \
   pnpm install --prod --frozen-lockfile --store-dir /pnpm/store
 

@@ -4,7 +4,7 @@
   "private": true,
   "description": "Standalone Prisma migration runner for production deploy jobs",
   "license": "MIT",
-  "packageManager": "pnpm@8.15.5",
+  "packageManager": "pnpm@11.23.0",
   "scripts": {
     "deploy": "prisma migrate deploy"
   },

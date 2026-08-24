@@ -29,12 +29,12 @@
     "db:studio": "prisma studio"
   },
   "dependencies": {
-    "@prisma/adapter-pg": "^7.6.0",
-    "@prisma/client": "^7.9.1",
+    "@prisma/adapter-pg": "catalog:",
+    "@prisma/client": "catalog:",
     "@repo/roles": "workspace:^",
     "crypto-js": "^4.2.0",
-    "dotenv": "^16.4.5",
-    "pg": "^8.13.1"
+    "dotenv": "catalog:",
+    "pg": "catalog:"
   },
   "devDependencies": {
     "@repo/eslint-config": "workspace:^",
@@ -42,8 +42,8 @@
     "@types/node": "^22.19.3",
     "@types/pg": "^8.11.10",
     "eslint": "^9.39.2",
-    "prisma": "^7.9.1",
+    "prisma": "catalog:",
     "tsx": "^4.21.0",
-    "typescript": "5.5.4"
+    "typescript": "catalog:"
   }
 }
