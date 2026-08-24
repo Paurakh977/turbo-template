@@ -1,8 +1,8 @@
 'use server';
 
-import { db } from '@repo/database';
-import { auth } from '@repo/auth';
 import { isAPIError } from 'better-auth/api';
+import { headers } from 'next/headers';
+import { getAdminUserFromApi, sendVerificationEmailFromApi } from '../../lib/server/auth-http';
 import { canActOn, getPrimaryRole } from '@repo/roles';
 import { requireAdmin } from '../../lib/require-admin';
 import { buildAbsoluteUrl } from '../../lib/app-url';
@@ -56,17 +56,8 @@ export async function resendVerificationEmailAction(
 
   if (!userId) return { error: 'Invalid user.' };
 
-  const target = await db.user
-    .findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        email: true,
-        emailVerified: true,
-        role: true,
-      },
-    })
-    .catch(() => null);
+  // Admin-guarded lookup served by the API tier (Better Auth admin plugin).
+  const target = await getAdminUserFromApi(userId, await headers()).catch(() => null);
 
   if (!target) return { error: 'User not found.' };
 
@@ -94,11 +85,9 @@ export async function resendVerificationEmailAction(
   // email differs from the target user's email. Authz + hierarchy are
   // enforced above in this action instead.
   try {
-    await auth.api.sendVerificationEmail({
-      body: {
-        email: target.email,
-        callbackURL: buildAbsoluteUrl(baseUrl, '/auth/verify-email'),
-      },
+    await sendVerificationEmailFromApi({
+      email: target.email,
+      callbackURL: buildAbsoluteUrl(baseUrl, '/auth/verify-email'),
     });
     return { success: true };
   } catch (error) {

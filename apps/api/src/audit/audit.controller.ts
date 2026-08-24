@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Post, Query, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { AuthGuard, Session } from '@thallesp/nestjs-better-auth';
-import { IsIn, IsOptional, IsString, Matches } from 'class-validator';
+import { IsIn, IsObject, IsOptional, IsString, Matches } from 'class-validator';
 
 import { AuditService } from './audit.service';
 import type { ServerSession } from '../common/session.utils';
@@ -14,8 +14,8 @@ export class RecordAuditDto {
   action!: string;
 
   @IsOptional()
-  @IsString()
-  note?: string;
+  @IsObject()
+  metadata?: Record<string, unknown>;
 }
 
 export class ListAuditQuery {
@@ -64,7 +64,7 @@ export class AuditController {
   ) {
     return this.audit.recordFromSession(
       session,
-      { action: dto.action, metadata: dto.note ? { note: dto.note } : undefined },
+      { action: dto.action, metadata: dto.metadata },
       extractClientMeta(req),
     );
   }

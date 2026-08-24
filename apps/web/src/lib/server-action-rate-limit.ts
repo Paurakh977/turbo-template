@@ -1,7 +1,6 @@
 import 'server-only';
 
-import { db } from '@repo/database';
-import { randomUUID } from 'node:crypto';
+import { callInternalApi } from './server/internal-api';
 
 type ServerActionRateLimitInput = {
   scope: string;
@@ -16,26 +15,21 @@ type ServerActionRateLimitResult = {
   retryAfterMs: number;
 };
 
-const MAX_CONFLICT_RETRIES = 5;
-
-function createRateLimitKey(scope: string, identifier: string) {
-  return `server-action:${scope}:${identifier}`;
-}
-
 export function getServerActionRateLimitMessage(retryAfterMs: number): string {
   const waitSeconds = Math.max(1, Math.ceil(retryAfterMs / 1000));
   return `Too many requests. Please wait ${waitSeconds}s and try again.`;
 }
 
-function isUniqueConstraintError(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as { code?: string }).code === 'P2002'
-  );
-}
-
+/**
+ * Architecture B: server-action rate limiting moved to the API tier's atomic
+ * Redis fixed-window limiter (single Lua INCR+EXPIRE round trip). The
+ * `identifier` argument is retained for call-site compatibility, but the API
+ * derives the bucket key from the authenticated session - a caller can never
+ * consume another user's budget.
+ *
+ * Failure semantics preserved: `failOpen: true` degrades to allowing the
+ * request when the limiter is unreachable; default is fail-closed.
+ */
 export async function checkServerActionRateLimit({
   scope,
   identifier,
@@ -43,77 +37,30 @@ export async function checkServerActionRateLimit({
   max,
   failOpen = false,
 }: ServerActionRateLimitInput): Promise<ServerActionRateLimitResult> {
-  const key = createRateLimitKey(scope, identifier);
-
-  for (let attempt = 0; attempt < MAX_CONFLICT_RETRIES; attempt += 1) {
-    const nowMs = Date.now();
-
-    const current = await db.rateLimit.findUnique({
-      where: { key },
-      select: { count: true, lastRequest: true },
-    });
-
-    if (!current) {
-      try {
-        await db.rateLimit.create({
-          data: {
-            id: randomUUID(),
-            key,
-            count: 1,
-            lastRequest: BigInt(nowMs),
-          },
-        });
-        return { allowed: true, retryAfterMs: 0 };
-      } catch (error) {
-        if (isUniqueConstraintError(error)) {
-          continue;
-        }
-        console.error('[RateLimit] failed to create key:', { key, error });
-        return {
-          allowed: failOpen,
-          retryAfterMs: failOpen ? 0 : windowMs,
-        };
-      }
-    }
-
-    const elapsedMs = nowMs - Number(current.lastRequest);
-    if (elapsedMs >= windowMs) {
-      const rotated = await db.rateLimit.updateMany({
-        where: { key, lastRequest: current.lastRequest },
-        data: { count: 1, lastRequest: BigInt(nowMs) },
-      });
-      if (rotated.count === 1) {
-        return { allowed: true, retryAfterMs: 0 };
-      }
-      continue;
-    }
-
-    if (current.count >= max) {
-      return {
-        allowed: false,
-        retryAfterMs: Math.max(1000, windowMs - elapsedMs),
-      };
-    }
-
-    const incremented = await db.rateLimit.updateMany({
-      where: {
-        key,
-        count: current.count,
-        lastRequest: current.lastRequest,
+  try {
+    const decision = await callInternalApi<ServerActionRateLimitResult>(
+      '/api/rate-limit/check',
+      {
+        method: 'POST',
+        body: { scope, windowMs, max },
       },
-      data: {
-        count: { increment: 1 },
-      },
-    });
-
-    if (incremented.count === 1) {
-      return { allowed: true, retryAfterMs: 0 };
+    );
+    if (
+      typeof decision?.allowed === 'boolean' &&
+      typeof decision.retryAfterMs === 'number'
+    ) {
+      return decision;
     }
+    throw new Error('Malformed rate-limit response');
+  } catch (error) {
+    console.error('[RateLimit] limiter unavailable:', {
+      scope,
+      identifier,
+      error,
+    });
+    return {
+      allowed: failOpen,
+      retryAfterMs: failOpen ? 0 : windowMs,
+    };
   }
-
-  console.error('[RateLimit] contention retries exceeded for key:', key);
-  return {
-    allowed: failOpen,
-    retryAfterMs: failOpen ? 0 : windowMs,
-  };
 }

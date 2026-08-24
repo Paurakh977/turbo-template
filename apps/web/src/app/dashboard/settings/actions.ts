@@ -3,9 +3,15 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
-import { db } from '@repo/database';
-import { auth } from '@repo/auth';
 import { isAPIError } from 'better-auth/api';
+import {
+  getSessionFromApi,
+  userHasPermissionFromApi,
+  updateUserFromApi,
+  requestPasswordResetFromApi,
+  deleteUserFromApi,
+  listAccountsFromApi,
+} from '../../../lib/server/auth-http';
 import {
   createServerAuditLog,
   getEffectivePermissionUserId,
@@ -19,7 +25,7 @@ import { buildAbsoluteUrl } from '../../../lib/app-url';
 
 async function getSessionOrRedirect() {
   const h = await headers();
-  const session = await auth.api.getSession({ headers: h });
+  const session = await getSessionFromApi(h);
   if (!session) redirect('/auth');
   return session;
 }
@@ -49,8 +55,9 @@ async function hasSettingsPermission(
   userId: string,
   action: 'profile' | 'security' | 'theme' | 'labs',
 ): Promise<boolean> {
-  const result = await auth.api.userHasPermission({
-    body: { userId, permissions: { settings: [action] } },
+  const result = await userHasPermissionFromApi({
+    userId,
+    permissions: { settings: [action] },
   });
   return result?.success === true;
 }
@@ -112,10 +119,7 @@ export async function updateDisplayNameAction(formData: FormData) {
   }
 
   try {
-    await auth.api.updateUser({
-      body: { name },
-      headers: await headers(),
-    });
+    await updateUserFromApi({ name }, await headers());
   } catch (error) {
     return {
       error: getActionErrorMessage(
@@ -155,13 +159,13 @@ export async function requestPasswordResetAction() {
   const appBaseUrl = await getAppBaseUrl(h);
 
   try {
-    await auth.api.requestPasswordReset({
-      body: {
+    await requestPasswordResetFromApi(
+      {
         email: session.user.email,
         redirectTo: buildAbsoluteUrl(appBaseUrl, '/auth/reset-password'),
       },
-      headers: h,
-    });
+      h,
+    );
   } catch (error) {
     return {
       error: getActionErrorMessage(
@@ -261,10 +265,7 @@ export async function deleteAccountAction(formData: FormData) {
   const h = await headers();
   const appBaseUrl = await getAppBaseUrl(h);
 
-  const accounts = await db.account.findMany({
-    where: { userId: session.user.id },
-    select: { providerId: true },
-  });
+  const accounts = await listAccountsFromApi(h);
 
   const hasCredentialAccount = accounts.some(
     (acc) => acc.providerId === 'credential',
@@ -289,10 +290,7 @@ export async function deleteAccountAction(formData: FormData) {
   }
 
   try {
-    await auth.api.deleteUser({
-      body: deleteBody,
-      headers: h,
-    });
+    await deleteUserFromApi(deleteBody, h);
   } catch (error) {
     return {
       error: getActionErrorMessage(error, 'Could not delete your account.', {

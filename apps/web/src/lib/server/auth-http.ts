@@ -247,8 +247,11 @@ export type ListUsersQuery = {
   searchOperator?: 'contains' | 'starts_with' | 'ends_with';
 };
 
+/** Minimal shape guaranteed by /admin/list-users entries. */
+export type ListedUser = { id: string } & Record<string, unknown>;
+
 export type ListUsersResult = {
-  users: Array<Record<string, unknown>>;
+  users: ListedUser[];
   total: number;
   limit?: number;
   offset?: number;
@@ -338,4 +341,63 @@ export async function deleteUserFromApi(
     requestHeaders,
     timeoutMs,
   });
+}
+
+export type LinkedAccount = { id: string; providerId: string };
+
+/**
+ * GET /api/auth/list-accounts - linked OAuth/credential providers for the
+ * session user (replaces web's direct db.account.findMany).
+ */
+export async function listAccountsFromApi(
+  requestHeaders: Headers,
+  timeoutMs?: number,
+): Promise<LinkedAccount[]> {
+  const data = await callAuthApi<unknown>('/list-accounts', {
+    requestHeaders,
+    timeoutMs,
+  });
+  if (!Array.isArray(data)) return [];
+  return data.filter(
+    (entry): entry is LinkedAccount =>
+      typeof entry === 'object' &&
+      entry !== null &&
+      typeof (entry as LinkedAccount).providerId === 'string',
+  );
+}
+
+export type AdminUserRecord = {
+  id: string;
+  email: string;
+  name?: string | null;
+  emailVerified?: boolean;
+  role?: string | null;
+  banned?: boolean | null;
+};
+
+/**
+ * GET /api/auth/admin/get-user?id=... - admin-guarded single-user lookup
+ * (replaces web's direct db.user.findUnique in admin actions).
+ */
+export async function getAdminUserFromApi(
+  userId: string,
+  requestHeaders: Headers,
+  timeoutMs?: number,
+): Promise<AdminUserRecord | null> {
+  try {
+    return await callAuthApi<AdminUserRecord>('/admin/get-user', {
+      requestHeaders,
+      query: { id: userId },
+      timeoutMs,
+    });
+  } catch (error) {
+    // Unknown target user surfaces as 404 from the endpoint.
+    if (
+      error instanceof APIError &&
+      error.status === 404
+    ) {
+      return null;
+    }
+    throw error;
+  }
 }

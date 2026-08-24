@@ -3,21 +3,21 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
-import { db } from '@repo/database';
-import { auth } from '@repo/auth';
-import { hasAdminRole } from '@repo/auth/roles';
 import {
-  createServerAuditLog,
-  getEffectivePermissionUserId,
-} from '../../../lib/server-audit';
+  getSessionFromApi,
+  userHasPermissionFromApi,
+} from '../../../lib/server/auth-http';
+import { callInternalApi } from '../../../lib/server/internal-api';
 import {
   checkServerActionRateLimit,
   getServerActionRateLimitMessage,
 } from '../../../lib/server-action-rate-limit';
 
+type NoteActionError = { error: string };
+
 async function getSessionOrRedirect() {
   const h = await headers();
-  const session = await auth.api.getSession({ headers: h });
+  const session = await getSessionFromApi(h);
   if (!session) redirect('/auth');
   return session;
 }
@@ -55,13 +55,11 @@ export async function createNoteAction(formData: FormData) {
 
   const effectivePermissionUserId = getEffectivePermissionUserId(session);
 
-  const perm = await auth.api.userHasPermission({
-    body: {
-      userId: effectivePermissionUserId,
-      permissions: { notes: ['create'] },
-    },
+  const perm = await userHasPermissionFromApi({
+    userId: effectivePermissionUserId,
+    permissions: { notes: ['create'] },
   });
-  if (!perm?.success) {
+  if (perm?.success !== true) {
     return { error: 'Only operators and above can create notes.' };
   }
 
@@ -73,29 +71,31 @@ export async function createNoteAction(formData: FormData) {
   if (!content || content.length > 5000)
     return { error: 'Content is required (max 5000 chars).' };
 
-  const note = await db.note.create({
-    data: { title, content, authorId: session.user.id },
-    include: {
-      author: { select: { id: true, name: true } },
-    },
-  });
+  try {
+    const note = await callInternalApi<{
+      id: string;
+      title: string;
+      createdAt: string;
+      updatedAt: string;
+    }>('/api/notes', {
+      method: 'POST',
+      body: { title, content },
+      requestHeaders: await headers(),
+    });
 
-  await createServerAuditLog({
-    userId: session.user.id,
-    action: 'note_created',
-    session,
-    metadata: { noteId: note.id, title },
-  });
+    // Audit row is written by the API tier alongside the mutation.
 
-  revalidatePath('/dashboard/notes');
-  return {
-    success: true,
-    note: {
-      ...note,
-      createdAt: note.createdAt.toISOString(),
-      updatedAt: note.updatedAt.toISOString(),
-    },
-  };
+    revalidatePath('/dashboard/notes');
+    return {
+      success: true,
+      note: {
+        ...note,
+      },
+    };
+  } catch (error) {
+    console.error('[Notes] create failed:', error);
+    return { error: 'Could not create the note. Please try again.' };
+  }
 }
 
 export async function updateNoteAction(noteId: string, formData: FormData) {
@@ -110,27 +110,12 @@ export async function updateNoteAction(noteId: string, formData: FormData) {
 
   const effectivePermissionUserId = getEffectivePermissionUserId(session);
 
-  const perm = await auth.api.userHasPermission({
-    body: {
-      userId: effectivePermissionUserId,
-      permissions: { notes: ['update'] },
-    },
+  const perm = await userHasPermissionFromApi({
+    userId: effectivePermissionUserId,
+    permissions: { notes: ['update'] },
   });
-  if (!perm?.success) {
+  if (perm?.success !== true) {
     return { error: 'You do not have permission to update notes.' };
-  }
-
-  const note = await db.note.findUnique({ where: { id: noteId } });
-  if (!note) return { error: 'Note not found.' };
-
-  const userFromDb = await db.user.findUnique({
-    where: { id: effectivePermissionUserId },
-    select: { role: true },
-  });
-  const roleRaw = (userFromDb?.role as string | null | undefined) ?? 'user';
-  const isAdmin = hasAdminRole(roleRaw);
-  if (!isAdmin && note.authorId !== session.user.id) {
-    return { error: 'You can only edit your own notes.' };
   }
 
   const title = ((formData.get('title') as string) ?? '').trim();
@@ -140,23 +125,19 @@ export async function updateNoteAction(noteId: string, formData: FormData) {
   if (content && content.length > 5000)
     return { error: 'Content max 5000 chars.' };
 
-  await db.note.update({
-    where: { id: noteId },
-    data: {
-      ...(title && { title }),
-      ...(content && { content }),
-    },
-  });
-
-  await createServerAuditLog({
-    userId: session.user.id,
-    action: 'note_updated',
-    session,
-    metadata: {
-      noteId,
-      title: title || note.title,
-    },
-  });
+  try {
+    // Ownership rule (author-only unless admin) is enforced by the API.
+    await callInternalApi(`/api/notes/${encodeURIComponent(noteId)}`, {
+      method: 'PATCH',
+      body: {
+        ...(title ? { title } : {}),
+        ...(content ? { content } : {}),
+      },
+      requestHeaders: await headers(),
+    });
+  } catch (error) {
+    return toActionError(error, 'Could not update the note.');
+  }
 
   revalidatePath('/dashboard/notes');
   return { success: true };
@@ -174,36 +155,45 @@ export async function deleteNoteAction(noteId: string) {
 
   const effectivePermissionUserId = getEffectivePermissionUserId(session);
 
-  const perm = await auth.api.userHasPermission({
-    body: {
-      userId: effectivePermissionUserId,
-      permissions: { notes: ['delete'] },
-    },
+  const perm = await userHasPermissionFromApi({
+    userId: effectivePermissionUserId,
+    permissions: { notes: ['delete'] },
   });
-  if (!perm?.success) {
+  if (perm?.success !== true) {
     return { error: 'Only superAdmins can delete notes.' };
   }
 
-  const note = await db.note
-    .findUnique({ where: { id: noteId } })
-    .catch(() => null);
-
-  if (!note) {
-    return { error: 'Note not found.' };
+  try {
+    await callInternalApi(`/api/notes/${encodeURIComponent(noteId)}`, {
+      method: 'DELETE',
+      requestHeaders: await headers(),
+    });
+  } catch (error) {
+    return toActionError(error, 'Could not delete the note.');
   }
-
-  await db.note.delete({ where: { id: noteId } });
-
-  await createServerAuditLog({
-    userId: session.user.id,
-    action: 'note_deleted',
-    session,
-    metadata: {
-      noteId,
-      title: note?.title ?? null,
-    },
-  });
 
   revalidatePath('/dashboard/notes');
   return { success: true };
+}
+
+function getEffectivePermissionUserId(session: {
+  user: { id: string };
+  session?: { impersonatedBy?: string | null };
+}): string {
+  return session.session?.impersonatedBy ?? session.user.id;
+}
+
+function toActionError(error: unknown, fallback: string): NoteActionError {
+  // APIError instances carry a human message from the API tier
+  // (NotFound -> "Note not found.", Forbidden -> ownership message).
+  if (
+    error &&
+    typeof error === 'object' &&
+    'message' in error &&
+    typeof (error as { message?: unknown }).message === 'string' &&
+    (error as { message: string }).message
+  ) {
+    return { error: (error as { message: string }).message };
+  }
+  return { error: fallback };
 }

@@ -1,9 +1,26 @@
 import { headers } from 'next/headers';
 import Link from 'next/link';
-import { auth } from '@repo/auth';
 import { requireAdmin } from '../../lib/require-admin';
 import { getPrimaryRole } from '@repo/auth/roles';
-import { AdminUserTable } from './_components/AdminUserTable';
+import { listUsersFromApi } from '../../lib/server/auth-http';
+import {
+  AdminUserTable,
+  type AdminTableUser,
+} from './_components/AdminUserTable';
+
+/** HTTP JSON -> table row (dates arrive as ISO strings). */
+function toTableRow(raw: Record<string, unknown>): AdminTableUser {
+  return {
+    id: String(raw.id),
+    name: typeof raw.name === 'string' ? raw.name : '',
+    email: typeof raw.email === 'string' ? raw.email : '',
+    role: typeof raw.role === 'string' ? raw.role : null,
+    banned: typeof raw.banned === 'boolean' ? raw.banned : null,
+    banReason: typeof raw.banReason === 'string' ? raw.banReason : undefined,
+    emailVerified: raw.emailVerified === true,
+    createdAt: new Date(String(raw.createdAt)),
+  };
+}
 
 export const dynamic = 'force-dynamic';
 
@@ -44,15 +61,15 @@ export default async function AdminPage(props: AdminPageProps) {
 
   const fetchUsers = async (page: number) => {
     const offset = (page - 1) * PAGE_SIZE;
-    return auth.api.listUsers({
-      query: {
+    return listUsersFromApi(
+      {
         limit: PAGE_SIZE,
         offset,
         sortBy: 'createdAt',
         sortDirection: 'desc',
       },
-      headers: await headers(),
-    });
+      await headers(),
+    );
   };
 
   let result = await fetchUsers(requestedPage);
@@ -118,7 +135,7 @@ export default async function AdminPage(props: AdminPageProps) {
       </div>
 
       <AdminUserTable
-        users={result.users}
+        users={result.users.map(toTableRow)}
         total={result.total}
         actorId={session.user.id}
         actorRole={actorRole}

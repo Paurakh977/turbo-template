@@ -1,16 +1,19 @@
 import { headers } from 'next/headers';
-import { auth } from '@repo/auth';
-import { db } from '@repo/database';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { getPrimaryRole } from '@repo/auth/roles';
+import {
+  getSessionFromApi,
+  userHasPermissionFromApi,
+  listAccountsFromApi,
+} from '../../../lib/server/auth-http';
 import { SettingsClient } from './_components/SettingsClient';
 
 export const dynamic = 'force-dynamic';
 
 export default async function SettingsPage() {
   const h = await headers();
-  const session = await auth.api.getSession({ headers: h });
+  const session = await getSessionFromApi(h);
   if (!session) redirect('/auth');
 
   const impersonatedBy =
@@ -23,28 +26,19 @@ export default async function SettingsPage() {
 
   const [canManageProfile, canManageTheme, canManageLabs, accounts] =
     await Promise.all([
-      auth.api.userHasPermission({
-        body: {
-          userId: session.user.id,
-          permissions: { settings: ['profile'] },
-        },
+      userHasPermissionFromApi({
+        userId: session.user.id,
+        permissions: { settings: ['profile'] },
       }),
-      auth.api.userHasPermission({
-        body: {
-          userId: effectiveSettingsPermissionUserId,
-          permissions: { settings: ['theme'] },
-        },
+      userHasPermissionFromApi({
+        userId: effectiveSettingsPermissionUserId,
+        permissions: { settings: ['theme'] },
       }),
-      auth.api.userHasPermission({
-        body: {
-          userId: effectiveSettingsPermissionUserId,
-          permissions: { settings: ['labs'] },
-        },
+      userHasPermissionFromApi({
+        userId: effectiveSettingsPermissionUserId,
+        permissions: { settings: ['labs'] },
       }),
-      db.account.findMany({
-        where: { userId: session.user.id },
-        select: { providerId: true },
-      }),
+      listAccountsFromApi(h),
     ]);
 
   const hasOAuthAccount = accounts.some(

@@ -1,8 +1,9 @@
-import { db } from '@repo/database';
+import { headers } from 'next/headers';
 import { requireAdmin } from '../../../lib/require-admin';
 import { formatDistanceToNow } from 'date-fns';
 import { THEME_GRANT_NAME, LABS_GRANT_NAME } from '@repo/auth/permissions';
 import { parseRoles } from '@repo/auth/roles';
+import { callInternalApi } from '../../../lib/server/internal-api';
 import { AuditFilters } from './_components/AuditFilters';
 
 export const dynamic = 'force-dynamic';
@@ -245,71 +246,47 @@ export default async function AuditLogPage(props: Props) {
 
   const take = 50;
 
-  const where: any = {};
-  if (filterAction && filterAction !== 'all') {
-    where.action = filterAction;
-  }
-  if (q) {
-    const matchingUsers = await db.user.findMany({
-      where: {
-        OR: [
-          { email: { contains: q, mode: 'insensitive' } },
-          { name: { contains: q, mode: 'insensitive' } },
-          { id: q },
-        ],
-      },
-      select: { id: true },
-      take: 300,
-    });
-    const matchedIds = [...new Set(matchingUsers.map((u) => u.id))];
-
-    const orClauses: any[] = [{ userId: q }, { actor: q }];
-
-    if (matchedIds.length > 0) {
-      orClauses.push({ userId: { in: matchedIds } });
-      orClauses.push({ actor: { in: matchedIds } });
-    }
-
-    where.OR = orClauses;
-  }
-
-  const total = await db.auditLog.count({ where });
-  const totalPages = Math.ceil(total / take);
-  const currentPage = totalPages > 0 ? Math.min(page, totalPages) : 1;
-  const skip = (currentPage - 1) * take;
-
-  const logs = await db.auditLog.findMany({
-    where,
-    orderBy: { createdAt: 'desc' },
-    take,
-    skip,
+  // Architecture B: the listing (user search, OR clauses, pagination and
+  // identity resolution) is computed by the API tier in one call.
+  const {
+    logs,
+    total,
+    page: currentPage,
+    totalPages,
+    usersById,
+  } = await callInternalApi<{
+    logs: Array<{
+      id: string;
+      userId: string | null;
+      action: string;
+      actor: string | null;
+      ipAddress: string | null;
+      userAgent: string | null;
+      metadata: unknown;
+      createdAt: string;
+    }>;
+    total: number;
+    page: number;
+    totalPages: number;
+    usersById: Record<
+      string,
+      { id: string; name: string | null; email: string }
+    >;
+  }>('/api/admin/audit-logs', {
+    requestHeaders: await headers(),
+    query: {
+      q: q || undefined,
+      action: filterAction,
+      page,
+    },
+    timeoutMs: 10_000,
   });
 
-  const userIds = [
-    ...new Set(
-      logs.flatMap((l) => [l.userId, l.actor].filter(Boolean) as string[]),
-    ),
-  ];
+  const userMap = new Map(Object.entries(usersById));
 
-  const metadataUserIds = logs
-    .filter(
-      (l): l is typeof l & { metadata: Record<string, unknown> } =>
-        Boolean(l.metadata) && typeof l.metadata === 'object',
-    )
-    .map((l) => l.metadata.impersonatedBy)
-    .filter((id): id is string => typeof id === 'string' && id.length > 0);
-
-  const allUserIds = [...new Set([...userIds, ...metadataUserIds])];
-
-  const users =
-    allUserIds.length > 0
-      ? await db.user.findMany({
-          where: { id: { in: allUserIds } },
-          select: { id: true, name: true, email: true },
-        })
-      : [];
-
-  const userMap = new Map(users.map((u) => [u.id, u]));
+  // Row window for the "showing X–Y of Z" footer (currentPage is the
+  // API-clamped page).
+  const skip = (currentPage - 1) * take;
 
   const getUserDisplay = (id: string | null) => {
     if (!id) return null;

@@ -1,16 +1,16 @@
 import { headers } from 'next/headers';
-import { auth } from '@repo/auth';
-import { hasAdminRole } from '@repo/auth/roles';
-import { db } from '@repo/database';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
+import { hasAdminRole } from '@repo/auth/roles';
+import { getSessionFromApi, userHasPermissionFromApi } from '../../../lib/server/auth-http';
+import { callInternalApi } from '../../../lib/server/internal-api';
 import { NotesClient } from './_components/NotesClient';
 
 export const dynamic = 'force-dynamic';
 
 export default async function NotesPage() {
   const h = await headers();
-  const session = await auth.api.getSession({ headers: h });
+  const session = await getSessionFromApi(h);
   if (!session) redirect('/auth');
 
   const impersonatedBy =
@@ -18,32 +18,12 @@ export default async function NotesPage() {
       ?.impersonatedBy ?? null;
   const effectivePermissionUserId = impersonatedBy ?? session.user.id;
 
-  // Resolve permissions server-side using Better Auth
+  // Resolve permissions server-side via the API tier (Architecture B)
   const [canCreate, canUpdate, canDelete, canListAll] = await Promise.all([
-    auth.api.userHasPermission({
-      body: {
-        userId: effectivePermissionUserId,
-        permissions: { notes: ['create'] },
-      },
-    }),
-    auth.api.userHasPermission({
-      body: {
-        userId: effectivePermissionUserId,
-        permissions: { notes: ['update'] },
-      },
-    }),
-    auth.api.userHasPermission({
-      body: {
-        userId: effectivePermissionUserId,
-        permissions: { notes: ['delete'] },
-      },
-    }),
-    auth.api.userHasPermission({
-      body: {
-        userId: effectivePermissionUserId,
-        permissions: { notes: ['list'] },
-      },
-    }),
+    userHasPermissionFromApi({ userId: effectivePermissionUserId, permissions: { notes: ['create'] } }),
+    userHasPermissionFromApi({ userId: effectivePermissionUserId, permissions: { notes: ['update'] } }),
+    userHasPermissionFromApi({ userId: effectivePermissionUserId, permissions: { notes: ['delete'] } }),
+    userHasPermissionFromApi({ userId: effectivePermissionUserId, permissions: { notes: ['list'] } }),
   ]);
 
   const perms = {
@@ -53,25 +33,14 @@ export default async function NotesPage() {
     canListAll: canListAll?.success === true,
   };
 
-  const effectiveRoleSource = impersonatedBy
-    ? await db.user.findUnique({
-        where: { id: impersonatedBy },
-        select: { role: true },
-      })
-    : session.user;
+  // The API returns the effective viewer's FRESH role alongside the
+  // already-scoped note list (admins see all, others see their own).
+  const { notes, viewerRole } = await callInternalApi<{
+    notes: Parameters<typeof NotesClient>[0]['notes'];
+    viewerRole: string;
+  }>('/api/notes', { requestHeaders: h });
 
-  const roleRaw =
-    (effectiveRoleSource as { role?: string | null | undefined }).role ??
-    'user';
-  const isAdmin = hasAdminRole(roleRaw);
-
-  const notes = await db.note.findMany({
-    where: perms.canListAll ? undefined : { authorId: session.user.id },
-    orderBy: { createdAt: 'desc' },
-    include: {
-      author: { select: { id: true, name: true } },
-    },
-  });
+  const isAdmin = hasAdminRole(viewerRole);
 
   return (
     <div className="min-h-screen bg-background text-foreground">

@@ -15,7 +15,7 @@ import { useToast } from '../../../lib/toast-context';
 import { getRoleBadgeStyle } from '../../../lib/role-badge';
 import { resendVerificationEmailAction } from '../actions';
 
-type User = {
+export type AdminTableUser = {
   id: string;
   name: string;
   email: string;
@@ -27,7 +27,7 @@ type User = {
 };
 
 type Props = {
-  users: User[];
+  users: AdminTableUser[];
   total: number;
   actorId: string;
   actorRole: string;
@@ -148,7 +148,7 @@ export function AdminUserTable({
             : u,
         ),
       );
-      pushToast('success', 'User banned.');
+      pushToast('success', 'AdminTableUser banned.');
       setBanDialog({
         open: false,
         userId: '',
@@ -170,7 +170,7 @@ export function AdminUserTable({
           u.id === userId ? { ...u, banned: false, banReason: null } : u,
         ),
       );
-      pushToast('success', 'User unbanned.');
+      pushToast('success', 'AdminTableUser unbanned.');
     }
     setLoading(null);
   };
@@ -220,7 +220,7 @@ export function AdminUserTable({
       handleError(error.message);
     } else {
       setList((prev) => prev.filter((u) => u.id !== confirmDialog.userId));
-      pushToast('success', 'User removed.');
+      pushToast('success', 'AdminTableUser removed.');
       router.refresh();
       setConfirmDialog({
         open: false,
@@ -285,7 +285,7 @@ export function AdminUserTable({
               <thead>
                 <tr className="border-b border-border/40 bg-muted/20">
                   <th className="px-5 py-4 text-left text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-                    User
+                    AdminTableUser
                   </th>
                   <th className="px-5 py-4 text-left text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
                     Role
