@@ -9,7 +9,7 @@ dependencies:
     specifier: ^16.4.5
     version: 16.6.1
   prisma:
-    specifier: 7.9.1
+    specifier: ^7.9.1
     version: 7.9.1(@types/react@19.2.18)(react-dom@19.2.8)(react@19.2.8)
 
 packages:

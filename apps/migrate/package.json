@@ -10,6 +10,6 @@
   },
   "dependencies": {
     "dotenv": "^16.4.5",
-    "prisma": "7.9.1"
+    "prisma": "^7.9.1"
   }
 }

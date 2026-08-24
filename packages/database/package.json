@@ -30,7 +30,7 @@
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.6.0",
-    "@prisma/client": "^7.6.0",
+    "@prisma/client": "^7.9.1",
     "@repo/roles": "workspace:^",
     "crypto-js": "^4.2.0",
     "dotenv": "^16.4.5",
@@ -42,7 +42,7 @@
     "@types/node": "^22.19.3",
     "@types/pg": "^8.11.10",
     "eslint": "^9.39.2",
-    "prisma": "^7.6.0",
+    "prisma": "^7.9.1",
     "tsx": "^4.21.0",
     "typescript": "5.5.4"
   }
