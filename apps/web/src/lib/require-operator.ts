@@ -1,8 +1,11 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { auth, hasOperatorRole } from '@repo/auth';
+// Pure role-token helper via subpath - see require-admin.ts rationale.
+import { hasOperatorRole } from '@repo/auth/roles';
+import type { Auth } from '@repo/auth';
+import { auth } from '@repo/auth';
 
-export type Session = typeof auth.$Infer.Session;
+export type Session = Auth['$Infer']['Session'];
 
 /**
  * Server-side operator guard.

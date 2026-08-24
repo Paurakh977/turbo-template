@@ -4,7 +4,8 @@ import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { db } from '@repo/database';
-import { auth, hasAdminRole } from '@repo/auth';
+import { auth } from '@repo/auth';
+import { hasAdminRole } from '@repo/auth/roles';
 import {
   createServerAuditLog,
   getEffectivePermissionUserId,

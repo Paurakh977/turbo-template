@@ -1,5 +1,6 @@
 import { headers } from 'next/headers';
-import { auth, hasAdminRole } from '@repo/auth';
+import { auth } from '@repo/auth';
+import { hasAdminRole } from '@repo/auth/roles';
 import { db } from '@repo/database';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';

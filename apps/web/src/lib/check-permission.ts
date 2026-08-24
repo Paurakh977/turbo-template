@@ -1,6 +1,11 @@
-import { auth, statement } from '@repo/auth';
+// Pure permission statement via subpath; the Auth type import is erased at
+// runtime so the TYPE never instantiates BetterAuth. The value import stays
+// only until Phase 1.2 swaps the call below onto the HTTP gateway.
+import type { Auth } from '@repo/auth';
+import { auth } from '@repo/auth';
+import { statement } from '@repo/auth/permissions';
 
-type Session = typeof auth.$Infer.Session;
+type Session = Auth['$Infer']['Session'];
 type PermissionResource = keyof typeof statement;
 type PermissionAction<R extends PermissionResource> =
   (typeof statement)[R][number];
