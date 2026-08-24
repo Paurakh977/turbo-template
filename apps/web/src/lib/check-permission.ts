@@ -1,9 +1,9 @@
 // Pure permission statement via subpath; the Auth type import is erased at
-// runtime so the TYPE never instantiates BetterAuth. The value import stays
-// only until Phase 1.2 swaps the call below onto the HTTP gateway.
+// runtime so the TYPE never instantiates BetterAuth. Permission verdicts are
+// resolved by the API tier over HTTP (single enforcement point, doc C2).
 import type { Auth } from '@repo/auth';
-import { auth } from '@repo/auth';
 import { statement } from '@repo/auth/permissions';
+import { userHasPermissionFromApi } from './server/auth-http';
 
 type Session = Auth['$Infer']['Session'];
 type PermissionResource = keyof typeof statement;
@@ -37,11 +37,9 @@ export async function checkPermission<R extends PermissionResource>(
       [resource]: actions,
     };
 
-    const result = await auth.api.userHasPermission({
-      body: {
-        userId: session.user.id,
-        permissions,
-      },
+    const result = await userHasPermissionFromApi({
+      userId: session.user.id,
+      permissions,
     });
     return result?.success === true;
   } catch {

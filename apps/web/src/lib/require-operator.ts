@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 // Pure role-token helper via subpath - see require-admin.ts rationale.
 import { hasOperatorRole } from '@repo/auth/roles';
 import type { Auth } from '@repo/auth';
-import { auth } from '@repo/auth';
+import { getSessionFromApi } from './server/auth-http';
 
 export type Session = Auth['$Infer']['Session'];
 
@@ -19,7 +19,7 @@ export type Session = Auth['$Infer']['Session'];
  */
 export async function requireOperator(): Promise<Session> {
   const h = await headers();
-  const session = await auth.api.getSession({ headers: h });
+  const session = await getSessionFromApi(h);
 
   if (!session) redirect('/auth');
 

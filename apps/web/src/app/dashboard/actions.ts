@@ -1,8 +1,8 @@
 'use server';
 
 import { headers } from 'next/headers';
-import { auth } from '@repo/auth';
 import { db } from '@repo/database';
+import { getSessionFromApi } from '../../lib/server/auth-http';
 import { checkServerActionRateLimit } from '../../lib/server-action-rate-limit';
 
 /**
@@ -17,7 +17,7 @@ import { checkServerActionRateLimit } from '../../lib/server-action-rate-limit';
 export async function getFreshRoleAction(): Promise<string | null> {
   try {
     const h = await headers();
-    const session = await auth.api.getSession({ headers: h });
+    const session = await getSessionFromApi(h);
     if (!session?.user?.id) return null;
 
     // Read-only action, but it still hits the DB on every tab focus — bound
