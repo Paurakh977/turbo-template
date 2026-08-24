@@ -1,43 +1,128 @@
 {
-  "$schema": "https://v2-9-7.turborepo.dev/schema.json",
-  "ui":"tui",
+  "$schema": "https://v2-10-10.turborepo.dev/schema.json",
+  "ui": "tui",
   "globalDependencies": ["**/.env.*local"],
-  "globalPassThroughEnv": ["*"],
+  "globalEnv": ["NODE_ENV"],
+  "globalPassThroughEnv": [
+    "TURBO_TOKEN",
+    "TURBO_TEAM",
+    "TURBO_TELEMETRY_DISABLED",
+    "NEXT_TELEMETRY_DISABLED",
+    "CI"
+  ],
   "tasks": {
     "dev": {
       "cache": false,
       "persistent": true,
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build"],
+      "passThroughEnv": [
+        "HOST",
+        "PORT",
+        "WEB_HOST",
+        "WEB_PORT",
+        "DATABASE_URL",
+        "REDIS_URL",
+        "BETTER_AUTH_SECRET",
+        "BETTER_AUTH_URL",
+        "TRUSTED_ORIGINS",
+        "NEXT_PUBLIC_API_URL",
+        "NEXT_PUBLIC_APP_URL",
+        "NEXT_ALLOWED_DEV_ORIGINS",
+        "INTERNAL_API_URL",
+        "APP_NAME",
+        "EMAIL_FROM",
+        "RESEND_API_KEY",
+        "DEV_EMAIL_OVERRIDE",
+        "GOOGLE_CLIENT_ID",
+        "GOOGLE_CLIENT_SECRET",
+        "GITHUB_CLIENT_ID",
+        "GITHUB_CLIENT_SECRET",
+        "SEED_ADMIN_EMAIL",
+        "SEED_ADMIN_PASSWORD",
+        "SEED_ADMIN_NAME",
+        "CHOKIDAR_USEPOLLING",
+        "CHOKIDAR_INTERVAL",
+        "WATCHPACK_POLLING",
+        "TSC_WATCHFILE"
+      ]
     },
     "start": {
       "dependsOn": ["^build"],
-      "cache": false
+      "cache": false,
+      "passThroughEnv": [
+        "HOST",
+        "PORT",
+        "DATABASE_URL",
+        "REDIS_URL",
+        "BETTER_AUTH_SECRET",
+        "BETTER_AUTH_URL",
+        "NEXT_PUBLIC_APP_URL"
+      ]
     },
     "build": {
       "dependsOn": ["^build"],
       "outputs": [".next/**", "!.next/cache/**", "dist/**"]
     },
+    "typecheck": {
+      "dependsOn": ["^build"]
+    },
     "lint": {},
-    "test": {},
-    "test:e2e": {},
+    "test": {
+      "passThroughEnv": [
+        "DATABASE_URL",
+        "REDIS_URL",
+        "BETTER_AUTH_SECRET",
+        "BETTER_AUTH_URL",
+        "APP_NAME"
+      ]
+    },
+    "test:e2e": {
+      "passThroughEnv": [
+        "DATABASE_URL",
+        "REDIS_URL",
+        "BETTER_AUTH_SECRET",
+        "BETTER_AUTH_URL",
+        "APP_NAME"
+      ]
+    },
     "db:seed": {
-      "cache": false
+      "cache": false,
+      "passThroughEnv": [
+        "DATABASE_URL",
+        "BETTER_AUTH_URL",
+        "SEED_ADMIN_EMAIL",
+        "SEED_ADMIN_PASSWORD",
+        "SEED_ADMIN_NAME",
+        "NODE_TLS_REJECT_UNAUTHORIZED"
+      ]
     },
     "db:generate": {
-      "cache": false
+      "cache": false,
+      "passThroughEnv": ["DATABASE_URL"]
     },
     "db:push": {
-      "cache": false
+      "cache": false,
+      "passThroughEnv": [
+        "DATABASE_URL",
+        "NODE_TLS_REJECT_UNAUTHORIZED"
+      ]
     },
     "db:migrate:dev": {
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "passThroughEnv": [
+        "DATABASE_URL",
+        "NODE_TLS_REJECT_UNAUTHORIZED"
+      ]
     },
     "db:migrate:deploy": {
-      "cache": false
+      "cache": false,
+      "passThroughEnv": ["DATABASE_URL"]
     },
     "db:studio": {
-      "cache": false
+      "cache": false,
+      "persistent": true,
+      "passThroughEnv": ["DATABASE_URL"]
     },
     "auth:generate": {
       "cache": false
