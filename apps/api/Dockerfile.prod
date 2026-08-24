@@ -36,24 +36,6 @@ RUN pnpm turbo run build --filter=api...
 FROM builder AS deployer
 RUN pnpm deploy --filter=api --prod /prod/api
 
-FROM node:22-alpine AS migrator
-WORKDIR /app
-
-RUN corepack enable
-
-COPY apps/migrate/package.json apps/migrate/pnpm-lock.yaml ./
-COPY --from=pruner /repo/out/full/packages/database/prisma ./prisma
-COPY --from=pruner /repo/out/full/packages/database/prisma.config.ts ./prisma.config.ts
-RUN --mount=type=cache,id=migrate-pnpm-store,target=/pnpm/store \
-  pnpm install --prod --frozen-lockfile --store-dir /pnpm/store
-# Slim the layer: the pnpm store is mounted (not in image) but a few caches
-# can linger. Drop them so the final image only carries what
-# `prisma migrate deploy` needs at runtime.
-RUN rm -rf /pnpm/store node_modules/.cache 2>/dev/null || true
-
-USER node
-CMD ["./node_modules/.bin/prisma", "migrate", "deploy"]
-
 FROM node:22-alpine AS runner
 WORKDIR /app
 
