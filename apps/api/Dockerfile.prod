@@ -36,6 +36,21 @@ RUN pnpm turbo run build --filter=api...
 FROM builder AS deployer
 RUN pnpm deploy --filter=api --prod /prod/api
 
+# Trim runtime dead weight pulled in via optional peer deps (autoInstallPeers):
+#   - typescript: @prisma/client's optional peer, never used at runtime
+#   - @prisma/client ships WASM query compilers base64-embedded for ALL
+#     providers (mysql/sqlite/cockroachdb/sqlserver); keep postgresql only.
+# KEEP (verified by boot smoke test):
+#   - kysely — better-auth's entry eagerly loads @better-auth/kysely-adapter
+#     even when prismaAdapter() is used
+#   - libphonenumber-js — direct dependency of class-validator; removing it
+#     makes Nest report "class-validator package is missing"
+FROM deployer AS trimmer
+RUN rm -rf /prod/api/node_modules/.pnpm/typescript@* /prod/api/node_modules/typescript \
+  && find /prod/api/node_modules/.pnpm/@prisma+client*/node_modules/@prisma/client/runtime \
+      -type f \( -name '*_bg.mysql*' -o -name '*_bg.sqlite*' \
+                 -o -name '*_bg.cockroachdb*' -o -name '*_bg.sqlserver*' \) -delete
+
 FROM node:22-alpine AS runner
 WORKDIR /app
 
@@ -43,7 +58,13 @@ RUN apk add --no-cache dumb-init wget
 
 ENV NODE_ENV=production
 
-COPY --from=deployer --chown=node:node /prod/api ./
+COPY --from=trimmer --chown=node:node /prod/api ./
+
+# Hardening: no package managers in the running container. (Base layers still
+# carry these bytes, so this is security hygiene, not a size optimization.)
+RUN rm -rf /opt/yarn* /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+  && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/yarn \
+           /usr/local/bin/yarnpkg /usr/local/bin/corepack
 
 USER node
 EXPOSE 3001
