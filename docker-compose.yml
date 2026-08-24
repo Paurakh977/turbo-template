@@ -52,10 +52,15 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
+      # MUST stay TCP-explicit (-h 127.0.0.1). Without -h, pg_isready talks
+      # over the unix socket and can pass against the image's temporary init
+      # server (socket-only) while TCP isn't bound yet — on fresh volumes
+      # that marks postgres "healthy" before it accepts connections, and
+      # migrate/api/web boot straight into ECONNREFUSED.
       test:
         [
           'CMD-SHELL',
-          'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB} || exit 1',
+          'pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB} || exit 1',
         ]
       interval: 10s
       timeout: 5s
