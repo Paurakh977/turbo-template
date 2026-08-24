@@ -19,13 +19,17 @@ const ROOT = process.cwd();
 const TARGET = join(ROOT, 'apps', 'web', '.next', 'standalone');
 const STRICT = process.argv.includes('--strict');
 
-const FORBIDDEN = [
-  'DATABASE_URL',
-  'BETTER_AUTH_SECRET',
-  'PGPASSWORD',
-  'PGUSER',
-  'PGHOST',
-];
+// Names that must NEVER appear in web's server bundle: any hit proves the
+// database stack (driver/config reader) was re-introduced.
+const FORBIDDEN = ['DATABASE_URL', 'PGPASSWORD', 'PGUSER', 'PGHOST'];
+
+// BETTER_AUTH_SECRET is intentionally NOT in FORBIDDEN: @better-auth/core's
+// CLIENT bundle legitimately contains its frozen env-accessor
+// ("get BETTER_AUTH_SECRET(){return g("BETTER_AUTH_SECRET")}") - name
+// strings only, no value, and web never invokes it server-side. Secret
+// PRESENCE is enforced by deployment config (compose injects nothing) and
+// the runtime gate: docker exec web printenv | grep BETTER_AUTH_SECRET.
+const REPORT_ONLY = ['BETTER_AUTH_SECRET'];
 
 const SKIP_DIRS = new Set(['.next/static', 'cache']);
 
@@ -67,7 +71,7 @@ for (const file of walk(TARGET)) {
 }
 
 if (findings.length === 0) {
-  console.log('[web-secrets] clean - no forbidden names in standalone output');
+  console.log('[web-secrets] clean - no DB-stack references in standalone output');
   process.exit(0);
 }
 

@@ -12,10 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@prisma/adapter-pg": "catalog:",
-    "@prisma/client": "catalog:",
     "@repo/auth": "workspace:^",
-    "@repo/database": "workspace:^",
     "@repo/roles": "workspace:^",
     "@repo/ui": "workspace:*",
     "better-auth": "catalog:",
@@ -23,7 +20,6 @@
     "dotenv": "catalog:",
     "framer-motion": "^12.38.0",
     "next": "16.2.0",
-    "pg": "catalog:",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-qr-code": "^2.0.21"

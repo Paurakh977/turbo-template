@@ -55,7 +55,7 @@ jobs:
       - name: E2E tests
         run: pnpm test:e2e
 
-      # Reports today; becomes enforcing (--strict) once the web tier stops
-      # holding database credentials (architecture-b-migration.md Phase 2).
+      # Enforces Architecture B: the web tier must carry zero references to
+      # DB credentials (they were removed in the Phase 2 commit).
       - name: Guard - web bundle carries no DB secrets
-        run: node scripts/check-web-secrets.mjs
+        run: node scripts/check-web-secrets.mjs --strict

@@ -70,16 +70,18 @@ export class NotesService {
     }
   }
 
-  async listForSession(session: ServerSession): Promise<SerializedNote[]> {
-    const roleRaw = await this.getFreshRoleRaw(session);
-    const canListAll = hasAdminRole(roleRaw);
+  async listForSession(
+    session: ServerSession,
+  ): Promise<{ notes: SerializedNote[]; viewerRole: string }> {
+    const viewerRole = await this.getFreshRoleRaw(getEffectiveUserId(session));
+    const canListAll = hasAdminRole(viewerRole);
 
     const notes = await db.note.findMany({
       where: canListAll ? undefined : { authorId: session.user.id },
       orderBy: { createdAt: 'desc' },
       include: NOTE_INCLUDE,
     });
-    return notes.map(serialize);
+    return { notes: notes.map(serialize), viewerRole };
   }
 
   async create(
@@ -209,4 +211,4 @@ export class NotesService {
 }
 
 // Re-exported for controller-level reuse without leaking Prisma types.
-export { getSessionRoleRaw };
+

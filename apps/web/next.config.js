@@ -27,11 +27,9 @@ function getRequiredEnv(name, { required = true } = {}) {
 }
 
 const nextPublicApiUrl = getRequiredEnv('NEXT_PUBLIC_API_URL');
-const nextPublicAppUrl = getRequiredEnv('NEXT_PUBLIC_APP_URL');
-// NOTE: BETTER_AUTH_SECRET / BETTER_AUTH_URL are server-side runtime vars for
-// Better Auth. They are supplied at runtime via Compose `environment:` and are
-// intentionally NOT required at build time (so we don't bake secrets into the
-// image). Better Auth validates them when the server starts.
+// Architecture B: web holds no auth runtime. BETTER_AUTH_URL remains a
+// runtime-only var for the browser-client SSR fallback; the signing secret
+// and DB credentials never reach this tier.
 const isDevelopment = process.env.NODE_ENV !== 'production';
 const rawAllowedDevOrigins = getRequiredEnv('NEXT_ALLOWED_DEV_ORIGINS', {
   required: isDevelopment,
@@ -54,15 +52,11 @@ const allowedDevOrigins = rawAllowedDevOrigins
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'standalone',
-  // These must NEVER be bundled into server chunks. Webpack duplicates them
-  // per chunk graph, and multiple live copies of node-postgres in one process
-  // corrupt the wire protocol ("insufficient data left in message", 08P01)
-  // and randomly lose their connection config (ECONNREFUSED). Externalizing
-  // forces a single require() from node_modules at runtime.
-  serverExternalPackages: ['pg', '@prisma/client', '@prisma/adapter-pg', 'ioredis'],
-  // CSP is applied by the Next 16 `proxy.ts` middleware (with a per-request
-  // nonce); nginx supplies HSTS/X-Frame-Options/etc. We only harden headers
-  // here that nothing else sets.
+  // Architecture B: web holds NO database drivers and NO auth runtime.
+  // (serverExternalPackages previously listed pg/@prisma/ioredis to stop
+  // webpack duplicating the bundled driver copies that caused the 08P01
+  // wire-corruption incident; with the packages removed entirely the hazard
+  // class is eliminated by construction.)
   poweredByHeader: false,
   typescript: { ignoreBuildErrors: true },
   webpack(config, { dev, isServer }) {
@@ -73,6 +67,8 @@ const nextConfig = {
       };
     }
     if (!isServer) {
+      // better-auth's server entry references optional integrations; keep
+      // them out of browser bundles.
       config.resolve = config.resolve || {};
       config.resolve.alias = {
         ...config.resolve.alias,

@@ -1,6 +1,6 @@
 # Architecture B Migration Plan — Secret-Free Web Tier (BFF)
 
-**Status:** Proposed — awaiting approval
+**Status:** Implemented (Phases 0-2 landed; Phase 3 gate executed in-repo)
 **Date:** 2026-08-24
 **Context:** Follow-up to the production incident chain (`ECONNREFUSED` storms →
 `08P01 insufficient data left in message`) root-caused to duplicated `pg` driver

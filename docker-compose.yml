@@ -203,16 +203,11 @@ services:
       target: runner
       args:
         TURBO_VERSION: '2.10.10'
-        DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=public
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
         NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?NEXT_PUBLIC_APP_URL is required}
         NEXT_ALLOWED_DEV_ORIGINS: ${NEXT_ALLOWED_DEV_ORIGINS:-}
-        APP_NAME: ${APP_NAME:?APP_NAME is required}
-        EMAIL_FROM: ${EMAIL_FROM:?EMAIL_FROM is required}
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
       api:
         condition: service_healthy
     environment:
@@ -222,21 +217,11 @@ services:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
       NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?NEXT_PUBLIC_APP_URL is required}
       NEXT_ALLOWED_DEV_ORIGINS: ${NEXT_ALLOWED_DEV_ORIGINS:-}
+      # Architecture B: the internet-facing tier holds NO database
+      # credentials and NO auth signing secret. Server-side auth + domain
+      # operations are performed over this internal URL with forwarded
+      # cookies; the API tier owns Postgres and BETTER_AUTH_SECRET alone.
       INTERNAL_API_URL: http://api:${PORT:?PORT is required}
-      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=public
-      # libpq fallbacks: guarantee ANY pg Pool that loses its connectionString
-      # still reaches postgres instead of defaulting to localhost (which
-      # causes ECONNREFUSED storms from inside this container).
-      PGHOST: postgres
-      PGPORT: '5432'
-      PGDATABASE: ${POSTGRES_DB:?POSTGRES_DB is required}
-      PGUSER: ${POSTGRES_USER:?POSTGRES_USER is required}
-      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}
-      BETTER_AUTH_URL: ${BETTER_AUTH_URL:?BETTER_AUTH_URL is required}
-      TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-}
-      APP_NAME: ${APP_NAME:?APP_NAME is required}
-      EMAIL_FROM: ${EMAIL_FROM:?EMAIL_FROM is required}
     expose:
       - '${WEB_PORT:?WEB_PORT is required}'
     healthcheck:
@@ -400,12 +385,9 @@ services:
       NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?NEXT_PUBLIC_APP_URL is required}
       NEXT_ALLOWED_DEV_ORIGINS: ${NEXT_ALLOWED_DEV_ORIGINS:-}
       INTERNAL_API_URL: http://api-dev:${PORT:?PORT is required}
-      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=public
-      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}
+      # Architecture B: no DB credentials / signing secret in the web tier
+      # (dev profile matches prod).
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:?BETTER_AUTH_URL is required}
-      TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-}
-      APP_NAME: ${APP_NAME:?APP_NAME is required}
-      EMAIL_FROM: ${EMAIL_FROM:?EMAIL_FROM is required}
       CHOKIDAR_USEPOLLING: 'true'
       CHOKIDAR_INTERVAL: '100'
       WATCHPACK_POLLING: 'true'
