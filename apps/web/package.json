@@ -11,6 +11,8 @@
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
+    "@prisma/adapter-pg": "^7.6.0",
+    "@prisma/client": "^7.9.1",
     "@repo/auth": "workspace:^",
     "@repo/database": "workspace:^",
     "@repo/roles": "workspace:^",
@@ -20,6 +22,7 @@
     "dotenv": "^16.4.5",
     "framer-motion": "^12.38.0",
     "next": "16.2.0",
+    "pg": "^8.13.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-qr-code": "^2.0.21"

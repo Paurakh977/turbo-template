@@ -54,6 +54,12 @@ const allowedDevOrigins = rawAllowedDevOrigins
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'standalone',
+  // These must NEVER be bundled into server chunks. Webpack duplicates them
+  // per chunk graph, and multiple live copies of node-postgres in one process
+  // corrupt the wire protocol ("insufficient data left in message", 08P01)
+  // and randomly lose their connection config (ECONNREFUSED). Externalizing
+  // forces a single require() from node_modules at runtime.
+  serverExternalPackages: ['pg', '@prisma/client', '@prisma/adapter-pg', 'ioredis'],
   // CSP is applied by the Next 16 `proxy.ts` middleware (with a per-request
   // nonce); nginx supplies HSTS/X-Frame-Options/etc. We only harden headers
   // here that nothing else sets.
