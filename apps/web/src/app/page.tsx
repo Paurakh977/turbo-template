@@ -6,6 +6,7 @@ import { Button } from '@repo/ui/button';
 import Image, { type ImageProps } from 'next/image';
 import Link from 'next/link';
 import { useToast } from '../lib/toast-context';
+import { safeDecodeParam } from '../lib/auth-errors';
 
 import styles from '../styles/page.module.css';
 
@@ -35,7 +36,7 @@ export default function Home() {
     const err = params.get('error');
     const desc = params.get('error_description');
     if (err && desc) {
-      pushToast('error', decodeURIComponent(desc));
+      pushToast('error', safeDecodeParam(desc));
       window.history.replaceState(null, '', window.location.pathname);
     }
   }, [pushToast]);
@@ -54,7 +55,7 @@ export default function Home() {
           pushToast('error', `Too many requests. Please slow down.${wait}`);
         }
       } catch (error) {
-        console.error('Error fetching links:', error);
+        console.error('[Links] fetch failed:', error);
       } finally {
         setLoading(false);
       }

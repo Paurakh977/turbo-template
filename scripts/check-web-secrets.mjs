@@ -29,7 +29,6 @@ const FORBIDDEN = ['DATABASE_URL', 'PGPASSWORD', 'PGUSER', 'PGHOST'];
 // strings only, no value, and web never invokes it server-side. Secret
 // PRESENCE is enforced by deployment config (compose injects nothing) and
 // the runtime gate: docker exec web printenv | grep BETTER_AUTH_SECRET.
-const REPORT_ONLY = ['BETTER_AUTH_SECRET'];
 
 const SKIP_DIRS = new Set(['.next/static', 'cache']);
 

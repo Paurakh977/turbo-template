@@ -3,6 +3,21 @@ import { NextRequest, NextResponse } from 'next/server';
 const isDev = process.env.NODE_ENV === 'development';
 
 /**
+ * Browser-side API origin. When NEXT_PUBLIC_API_URL is an absolute URL (the
+ * documented non-nginx mode) it must be allow-listed, otherwise the landing
+ * page's fetch(`${NEXT_PUBLIC_API_URL}/links`) is blocked by default-src.
+ */
+const connectSrc = (() => {
+  const raw = process.env.NEXT_PUBLIC_API_URL?.trim();
+  if (!raw || raw.startsWith('/')) return "'self'";
+  try {
+    return `'self' ${new URL(raw).origin}`;
+  } catch {
+    return "'self'";
+  }
+})();
+
+/**
  * Build the Content-Security-Policy header.
  *
  * Uses the nonce-based CSP pattern from the Next.js docs:
@@ -20,6 +35,7 @@ const buildCSP = (nonce: string) => {
     "default-src 'self'",
     `script-src ${scriptSrc}`,
     "style-src 'self' 'unsafe-inline'",
+    `connect-src ${connectSrc}`,
     "img-src 'self' data: blob: https:",
     "font-src 'self'",
     "object-src 'none'",

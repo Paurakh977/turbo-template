@@ -27,9 +27,9 @@ function getRequiredEnv(name, { required = true } = {}) {
 }
 
 const nextPublicApiUrl = getRequiredEnv('NEXT_PUBLIC_API_URL');
-// Architecture B: web holds no auth runtime. BETTER_AUTH_URL remains a
-// runtime-only var for the browser-client SSR fallback; the signing secret
-// and DB credentials never reach this tier.
+// Architecture B: web holds no auth runtime. The browser client resolves
+// window.location.origin and the SSR fallback uses NEXT_PUBLIC_APP_URL; the
+// signing secret, BETTER_AUTH_URL and DB credentials never reach this tier.
 const isDevelopment = process.env.NODE_ENV !== 'production';
 const rawAllowedDevOrigins = getRequiredEnv('NEXT_ALLOWED_DEV_ORIGINS', {
   required: isDevelopment,
@@ -58,7 +58,9 @@ const nextConfig = {
   // wire-corruption incident; with the packages removed entirely the hazard
   // class is eliminated by construction.)
   poweredByHeader: false,
-  typescript: { ignoreBuildErrors: true },
+  // Type errors must fail the build; CI runs `turbo run typecheck` too, but a
+  // local `next build` should never be able to ship type-broken code.
+  typescript: { ignoreBuildErrors: false },
   webpack(config, { dev, isServer }) {
     if (dev) {
       config.watchOptions = {

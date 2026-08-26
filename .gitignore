@@ -53,6 +53,7 @@ dist
 # Debug
 logs
 *.log
+*.err
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
