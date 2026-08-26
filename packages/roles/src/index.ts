@@ -135,3 +135,30 @@ export function hasGrantRole(role: unknown, grantRole: string): boolean {
 export function canActOn(actorRole: unknown, targetRole: unknown): boolean {
   return getMaxRoleWeight(actorRole) > getMaxRoleWeight(targetRole);
 }
+
+/**
+ * Closed allowlist of server-action scopes the web tier may throttle through
+ * POST /api/rate-limit/check. SINGLE SOURCE OF TRUTH consumed by BOTH tiers:
+ *
+ * - apps/web composes scope strings as `<family>:<action>` (notes/settings/
+ *   admin wrappers prefix the action name) — every literal below must match
+ *   what a call site actually sends.
+ * - apps/api validates the incoming scope against this exact list; anything
+ *   else is rejected 400, so unknown values can never mint unbounded Redis
+ *   keys.
+ *
+ * Adding a rate-limited web action = add it here first, then use it.
+ */
+export const SERVER_ACTION_SCOPES = [
+  'notes:create-note',
+  'notes:update-note',
+  'notes:delete-note',
+  'settings:update-display-name',
+  'settings:toggle-theme-preference',
+  'settings:run-labs-setting',
+  'settings:delete-account',
+  'admin:resend-verification',
+  'dashboard:fresh-role',
+] as const;
+
+export type ServerActionScope = (typeof SERVER_ACTION_SCOPES)[number];
