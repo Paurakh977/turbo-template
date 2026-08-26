@@ -21,12 +21,46 @@ import {
   canSendEmail,
   hasGithub,
   hasGoogle,
-  secret,
   getEnv,
+  parseIntEnv,
+  secret,
+  isProduction,
+  usingPlaceholderSecret,
 } from './env';
+import { TRUSTED_PROXY_CIDRS } from './client-ip';
 
 export const ADMIN_ROLES = ['admin', 'superAdmin'] as const;
 export type AdminRole = (typeof ADMIN_ROLES)[number];
+
+// Fail-fast guard (H2): the build-time placeholder exists only so module
+// evaluation during `next build` never throws. A SERVER boot in production
+// without a real secret would sign every session/OTP/OAuth token with a key
+// that is public in this repo. Crash loudly instead of running silently on it.
+// The NEXT_PHASE exemption keeps builds green; every runtime path fails.
+if (
+  usingPlaceholderSecret &&
+  process.env.NEXT_PHASE !== 'phase-production-build'
+) {
+  throw new Error(
+    'BETTER_AUTH_SECRET is required in production. Refusing to sign sessions with the public build-time placeholder.',
+  );
+}
+
+// Fail-fast guard (same philosophy as the secret check above): without a
+// mail provider, requireEmailVerification below evaluates to false and
+// production silently downgrades to unverified-email sign-ups. Crash loudly
+// instead; operators who genuinely want email-less auth must opt out
+// explicitly with EMAIL_VERIFICATION=relaxed.
+if (
+  isProduction &&
+  !canSendEmail &&
+  process.env.EMAIL_VERIFICATION !== 'relaxed' &&
+  process.env.NEXT_PHASE !== 'phase-production-build'
+) {
+  throw new Error(
+    'RESEND_API_KEY is required in production: without an email provider, email-verification enforcement silently turns off. Set RESEND_API_KEY, or EMAIL_VERIFICATION=relaxed to accept unverified sign-ups explicitly.',
+  );
+}
 
 export const auth = betterAuth({
   appName,
@@ -134,6 +168,65 @@ export const auth = betterAuth({
               error,
             }),
           );
+        },
+        // Atomic single-use read (Redis >= 6.2 GETDEL): verification tokens
+        // / one-time codes are consumed without the read-then-delete race.
+        // Better Auth gates state changes on a non-null return, so consume
+        // MUST stay atomic across processes - the SecondaryStorage contract
+        // forbids separate get+delete (two consumers could both receive the
+        // value). The legacy path therefore uses ONE Lua GET+DEL script
+        // (mirroring increment() below) so Redis < 6.2 stays supported
+        // atomically; a total storage failure fails CLOSED (null), never
+        // returning a value it failed to consume.
+        getAndDelete: async (key: string) => {
+          try {
+            return await r.getdel(key);
+          } catch (error) {
+            console.error(
+              '[Redis Error] secondaryStorage.getAndDelete (GETDEL) failed:',
+              error,
+            );
+            try {
+              return (await r.eval(
+                `local v = redis.call('GET', KEYS[1])
+if v then redis.call('DEL', KEYS[1]) end
+return v`,
+                1,
+                key,
+              )) as string | null;
+            } catch (fallbackError) {
+              console.error(
+                '[Redis Error] secondaryStorage.getAndDelete failed:',
+                fallbackError,
+              );
+              return null;
+            }
+          }
+        },
+        // Atomic fixed-window counter backing Better Auth's rate limiter
+        // (it wraps this into `consume`; without it the limiter degrades to
+        // a racy get->decide->set and warns "best-effort" at boot).
+        // TTL is applied on creation only - the counter expires a fixed
+        // window after the first hit. `ttl` is in SECONDS.
+        increment: async (key: string, ttl: number) => {
+          try {
+            return (await r.eval(
+              `local v = redis.call('INCR', KEYS[1])
+if v == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
+return v`,
+              1,
+              key,
+              String(Math.max(1, Math.floor(ttl))),
+            )) as number;
+          } catch (error) {
+            console.error(
+              '[Redis Error] secondaryStorage.increment failed:',
+              error,
+            );
+            // Degrade open on limiter-storage failure (same availability
+            // stance as the wrappers above): 0 <= max always allows.
+            return 0;
+          }
         },
       }))(redis)
     : undefined,
@@ -253,17 +346,11 @@ export const auth = betterAuth({
      * correctly on revocation, and gives you a persistent session audit trail.
      */
     storeSessionInDatabase: true,
-    expiresIn: process.env.SESSION_EXPIRES_IN
-      ? parseInt(process.env.SESSION_EXPIRES_IN)
-      : 60 * 60 * 24 * 7, // 7 days
+    expiresIn: parseIntEnv('SESSION_EXPIRES_IN', 60 * 60 * 24 * 7), // 7 days
 
-    updateAge: process.env.SESSION_UPDATE_AGE
-      ? parseInt(process.env.SESSION_UPDATE_AGE)
-      : 60 * 60 * 24, // 1 day
+    updateAge: parseIntEnv('SESSION_UPDATE_AGE', 60 * 60 * 24), // 1 day
 
-    freshAge: process.env.SESSION_FRESH_AGE
-      ? parseInt(process.env.SESSION_FRESH_AGE)
-      : 60 * 15, // 15 minutes for destructive actions like delete-user
+    freshAge: parseIntEnv('SESSION_FRESH_AGE', 60 * 15), // 15 minutes for destructive actions like delete-user
   },
 
   // -------------------------------------------------------------------------
@@ -274,9 +361,9 @@ export const auth = betterAuth({
   //   2. Better Auth plugin — per-endpoint, per-user/IP limits (this config)
   //   3. Server Action rate limiter — custom DB-backed for app-level mutations
   //
-  // Endpoint classification:
-  //   - Passive/read: high limits so passive session polling never triggers
-  //     false UX noise (get-session → 60/min, list-accounts → 30/min, etc.)
+    // Endpoint classification:
+    //   - Passive/read: high limits so passive session polling never triggers
+    //     false UX noise (get-session → 300/min, list-accounts → 60/min, etc.)
   //   - Auth challenge: strict limits to prevent brute-force. Per-page inline
   //     errors handle 429 (sign-in 5/min, sign-up 3/min, 2FA verify 3/10s)
   //   - Destructive: tightest limits (delete-user 2/min, change-email 3/min)
@@ -287,15 +374,18 @@ export const auth = betterAuth({
   // -------------------------------------------------------------------------
   rateLimit: {
     enabled: true,
-    window: process.env.RATE_LIMIT_WINDOW
-      ? parseInt(process.env.RATE_LIMIT_WINDOW)
-      : 60,
-    max: process.env.RATE_LIMIT_MAX ? parseInt(process.env.RATE_LIMIT_MAX) : 20,
+    window: parseIntEnv('RATE_LIMIT_WINDOW', 60),
+    max: parseIntEnv('RATE_LIMIT_MAX', 20),
     storage: redis ? 'secondary-storage' : 'database',
     customRules: {
-      // ── Passive / read endpoints (relaxed — prevent UX noise) ──────────
-      '/get-session': { window: 60, max: 60 },
-      '/list-accounts': { window: 60, max: 30 },
+      // Passive / read endpoints (relaxed - prevent UX noise).
+      // get-session is the HOTTEST path in the app: every server-rendered
+      // dashboard page resolves it (Architecture B web -> API), and the
+      // browser client refetches on window focus. 60/min exhausted in
+      // seconds with two tabs open; 300/min still bounds abuse (5/s avg)
+      // while never bothering real users - the read itself is Redis-cached.
+      '/get-session': { window: 60, max: 300 },
+      '/list-accounts': { window: 60, max: 60 },
       '/admin/list-users': { window: 60, max: 60 },
       '/admin/list-user-sessions': { window: 60, max: 30 },
       '/admin/has-permission': { window: 60, max: 30 },
@@ -335,9 +425,14 @@ export const auth = betterAuth({
   // -------------------------------------------------------------------------
   trustedOrigins: Array.from(
     new Set([
-      'http://localhost:3000',
+      // CSRF-relevant origins (H1): localhost must never be trusted in
+      // production — mirrors the NODE_ENV gating of localhost conveniences in
+      // apps/api/src/main.ts CORS. Local HTTPS prod-profile stacks reach the
+      // app via TRUSTED_ORIGINS (.env.example sets TRUSTED_ORIGINS=https://localhost).
+      ...(isProduction
+        ? []
+        : ['http://localhost:3000', 'https://localhost']),
       appURL,
-      'https://localhost',
       ...(getEnv('TRUSTED_ORIGINS', { required: false })
         ?.split(',')
         .map((o) => o.trim())
@@ -354,6 +449,14 @@ export const auth = betterAuth({
     ipAddress: {
       disableIpTracking: false,
       ipAddressHeaders: ['x-forwarded-for', 'x-real-ip'],
+      // Every hop in front of the API is infrastructure we control (nginx
+      // proxy, web-tier gateway, docker networks). Trusting these ranges lets
+      // Better Auth resolve the real client IP from X-Forwarded-For instead
+      // of warning "could not determine a client IP" and collapsing all
+      // rate-limit buckets into one shared per-path bucket.
+      // Single source of truth: client-ip.ts walks this same list when audit
+      // hooks resolve IPs — keep them identical by construction.
+      trustedProxies: [...TRUSTED_PROXY_CIDRS],
     },
     backgroundTasks: {
       /**
@@ -379,9 +482,7 @@ export const auth = betterAuth({
       issuer: 'Ozon',
       totpOptions: {
         digits: 6,
-        period: process.env.TWO_FACTOR_TOTP_PERIOD
-          ? parseInt(process.env.TWO_FACTOR_TOTP_PERIOD)
-          : 30,
+        period: parseIntEnv('TWO_FACTOR_TOTP_PERIOD', 30),
       },
       otpOptions: {
         sendOTP: async ({ user, otp }) => {
@@ -406,28 +507,18 @@ export const auth = betterAuth({
           });
         },
         storeOTP: 'encrypted',
-        period: process.env.TWO_FACTOR_OTP_PERIOD
-          ? parseInt(process.env.TWO_FACTOR_OTP_PERIOD)
-          : 3,
-        allowedAttempts: process.env.TWO_FACTOR_OTP_ATTEMPTS
-          ? parseInt(process.env.TWO_FACTOR_OTP_ATTEMPTS)
-          : 5,
+        // NOTE: better-auth OTP periods are MINUTES (it multiplies by 60);
+        // every other duration knob in this file is SECONDS.
+        period: parseIntEnv('TWO_FACTOR_OTP_PERIOD', 3), // MINUTES (better-auth multiplies by 60)
+        allowedAttempts: parseIntEnv('TWO_FACTOR_OTP_ATTEMPTS', 5),
       },
       backupCodeOptions: {
-        amount: process.env.TWO_FACTOR_BACKUP_AMOUNT
-          ? parseInt(process.env.TWO_FACTOR_BACKUP_AMOUNT)
-          : 10,
-        length: process.env.TWO_FACTOR_BACKUP_LENGTH
-          ? parseInt(process.env.TWO_FACTOR_BACKUP_LENGTH)
-          : 10,
+        amount: parseIntEnv('TWO_FACTOR_BACKUP_AMOUNT', 10),
+        length: parseIntEnv('TWO_FACTOR_BACKUP_LENGTH', 10),
         storeBackupCodes: 'encrypted',
       },
-      twoFactorCookieMaxAge: process.env.TWO_FACTOR_COOKIE_MAX_AGE
-        ? parseInt(process.env.TWO_FACTOR_COOKIE_MAX_AGE)
-        : 600,
-      trustDeviceMaxAge: process.env.TRUST_DEVICE_MAX_AGE
-        ? parseInt(process.env.TRUST_DEVICE_MAX_AGE)
-        : 60 * 60 * 24 * 30,
+      twoFactorCookieMaxAge: parseIntEnv('TWO_FACTOR_COOKIE_MAX_AGE', 600),
+      trustDeviceMaxAge: parseIntEnv('TRUST_DEVICE_MAX_AGE', 60 * 60 * 24 * 30),
     }),
 
     admin({
