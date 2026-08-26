@@ -3,11 +3,11 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
+import { getSessionFromApi } from '../../../lib/server/auth-http';
 import {
-  getSessionFromApi,
-  userHasPermissionFromApi,
-} from '../../../lib/server/auth-http';
-import { callInternalApi } from '../../../lib/server/internal-api';
+  callInternalApi,
+  getMyPermissionsFromApi,
+} from '../../../lib/server/internal-api';
 import {
   checkServerActionRateLimit,
   getServerActionRateLimitMessage,
@@ -53,13 +53,10 @@ export async function createNoteAction(formData: FormData) {
   );
   if (rateLimitError) return rateLimitError;
 
-  const effectivePermissionUserId = getEffectivePermissionUserId(session);
-
-  const perm = await userHasPermissionFromApi({
-    userId: effectivePermissionUserId,
-    permissions: { notes: ['create'] },
-  });
-  if (perm?.success !== true) {
+  // Verdicts are computed by the API for the EFFECTIVE user (impersonation
+  // aware) - no client-supplied user id involved.
+  const { permissions } = await getMyPermissionsFromApi();
+  if (!permissions.notes.includes('create')) {
     return { error: 'Only operators and above can create notes.' };
   }
 
@@ -108,13 +105,8 @@ export async function updateNoteAction(noteId: string, formData: FormData) {
   );
   if (rateLimitError) return rateLimitError;
 
-  const effectivePermissionUserId = getEffectivePermissionUserId(session);
-
-  const perm = await userHasPermissionFromApi({
-    userId: effectivePermissionUserId,
-    permissions: { notes: ['update'] },
-  });
-  if (perm?.success !== true) {
+  const { permissions } = await getMyPermissionsFromApi();
+  if (!permissions.notes.includes('update')) {
     return { error: 'You do not have permission to update notes.' };
   }
 
@@ -153,14 +145,9 @@ export async function deleteNoteAction(noteId: string) {
   );
   if (rateLimitError) return rateLimitError;
 
-  const effectivePermissionUserId = getEffectivePermissionUserId(session);
-
-  const perm = await userHasPermissionFromApi({
-    userId: effectivePermissionUserId,
-    permissions: { notes: ['delete'] },
-  });
-  if (perm?.success !== true) {
-    return { error: 'Only superAdmins can delete notes.' };
+  const { permissions } = await getMyPermissionsFromApi();
+  if (!permissions.notes.includes('delete')) {
+    return { error: 'You do not have permission to delete notes.' };
   }
 
   try {
@@ -174,13 +161,6 @@ export async function deleteNoteAction(noteId: string) {
 
   revalidatePath('/dashboard/notes');
   return { success: true };
-}
-
-function getEffectivePermissionUserId(session: {
-  user: { id: string };
-  session?: { impersonatedBy?: string | null };
-}): string {
-  return session.session?.impersonatedBy ?? session.user.id;
 }
 
 function toActionError(error: unknown, fallback: string): NoteActionError {

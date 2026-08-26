@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { authClient, listLinkedAccounts, type LinkedAccount } from '../../lib/auth-client';
-import { getPrimaryRole, hasOperatorRole } from '@repo/auth/roles';
+import { getPrimaryRole, hasAdminRole, hasOperatorRole } from '@repo/auth/roles';
 import { motion } from 'framer-motion';
 import { useToast } from '../../lib/toast-context';
 import { buildAbsoluteUrl } from '../../lib/app-url';
@@ -31,6 +31,27 @@ import {
 
 const SESSION_CACHE_KEY = 'dash-session';
 const SESSION_CACHE_TTL = 5 * 60 * 1000;
+
+type CachedSession = {
+  session?: Record<string, unknown>;
+  user?: Record<string, unknown> | null;
+} & Record<string, unknown>;
+
+/**
+ * The cached copy is readable by any script that runs in the page (XSS or a
+ * user opening devtools). Keep only display fields: never persist the session
+ * token or connection metadata.
+ */
+function stripSessionSecrets(data: unknown): unknown {
+  if (!data || typeof data !== 'object') return data;
+  const { session, user } = data as CachedSession;
+  if (!session) return data;
+  const safeSession = { ...session };
+  delete safeSession.token;
+  delete safeSession.ipAddress;
+  delete safeSession.userAgent;
+  return { ...data, session: safeSession, user };
+}
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -68,7 +89,7 @@ export default function DashboardPage() {
       try {
         sessionStorage.setItem(
           SESSION_CACHE_KEY,
-          JSON.stringify({ data: liveSession, ts: Date.now() }),
+          JSON.stringify({ data: stripSessionSecrets(liveSession), ts: Date.now() }),
         );
       } catch {
         // Storage full or unavailable
@@ -112,6 +133,10 @@ export default function DashboardPage() {
   // ── Rate-limit retry state (MUST be before any early return) ─────────
   const [retryCount, setRetryCount] = useState(0);
   const [countdown, setCountdown] = useState(0);
+
+  // 2FA request-in-flight guards (block double-submits)
+  const [enabling2FA, setEnabling2FA] = useState(false);
+  const [verifying2FA, setVerifying2FA] = useState(false);
 
   // Account listing (used to detect whether a user has a local password/credential)
   const [userAccounts, setUserAccounts] = useState<LinkedAccount[]>([]);
@@ -218,12 +243,9 @@ export default function DashboardPage() {
     freshRole ?? ((session.user as { role?: string }).role ?? 'user');
   const role = getPrimaryRole(roleRaw);
 
-  // Admin check for UI - using Better Auth's checkRolePermission for proper AC system
-  const isAdmin =
-    authClient.admin.checkRolePermission({
-      permissions: { user: ['ban'] },
-      role: role as never,
-    }) ?? false;
+  // Same canonical role-token predicate the server-side guards use
+  // (lib/require-admin.ts) so UI gating can never drift from enforcement.
+  const isAdmin = hasAdminRole(roleRaw);
   const isOperator = hasOperatorRole(roleRaw);
 
   const handleSetPassword = async () => {
@@ -246,22 +268,33 @@ export default function DashboardPage() {
   };
 
   const handleEnable2FA = async () => {
-    const password = setupPassword.trim();
+    // Passwords are secrets - send verbatim, never trimmed (a credential
+    // containing leading/trailing spaces must still work).
+    const password = setupPassword;
     if (!password) {
       setSetupError('Password is required.');
       return;
     }
 
-    const { data, error } = await authClient.twoFactor.enable({ password });
-    if (error) {
-      setSetupError(error.message ?? 'Unable to enable 2FA.');
-      return;
-    }
-    if (data) {
-      setTotpURI(data.totpURI);
-      setBackupCodes(data.backupCodes);
-      setSetupStep('qr');
-      setSetupError('');
+    setEnabling2FA(true);
+    try {
+      const { data, error } = await authClient.twoFactor.enable({ password });
+      if (error) {
+        setSetupError(error.message ?? 'Unable to enable 2FA.');
+        return;
+      }
+      if (data) {
+        setTotpURI(data.totpURI);
+        setBackupCodes(data.backupCodes);
+        setSetupStep('qr');
+        setSetupError('');
+      }
+    } catch {
+      setSetupError(
+        'A network error occurred. Please check your connection and try again.',
+      );
+    } finally {
+      setEnabling2FA(false);
     }
   };
 
@@ -272,18 +305,23 @@ export default function DashboardPage() {
       return;
     }
 
-    const { error } = await authClient.twoFactor.verifyTotp({ code });
-    if (error) {
-      if (error.status === 429) {
-        setSetupError('Too many attempts. Please wait and try again.');
+    setVerifying2FA(true);
+    try {
+      const { error } = await authClient.twoFactor.verifyTotp({ code });
+      if (error) {
+        if (error.status === 429) {
+          setSetupError('Too many attempts. Please wait and try again.');
+          return;
+        }
+        if (error.status === 400) {
+          setSetupError(error.message ?? 'Invalid code, try again.');
+          return;
+        }
+        setSetupError(
+          error.message ?? 'Could not verify code. Please try again.',
+        );
         return;
       }
-      if (error.status === 400) {
-        setSetupError(error.message ?? 'Invalid code, try again.');
-        return;
-      }
-      setSetupError(error.message ?? 'Could not verify code. Please try again.');
-    } else {
       setShow2FASetup(false);
       setSetupStep('password');
       setSetupPassword('');
@@ -291,6 +329,12 @@ export default function DashboardPage() {
       setSetupError('');
       pushToast('success', '2FA enabled successfully.');
       router.refresh();
+    } catch {
+      setSetupError(
+        'A network error occurred. Please check your connection and try again.',
+      );
+    } finally {
+      setVerifying2FA(false);
     }
   };
 
@@ -305,7 +349,8 @@ export default function DashboardPage() {
   };
 
   const handleDisable2FA = async () => {
-    const password = disablePassword.trim();
+    // Verbatim - see handleEnable2FA.
+    const password = disablePassword;
     if (!password) {
       setDisableError('Password is required.');
       return;
@@ -448,6 +493,8 @@ export default function DashboardPage() {
         onEnable={handleEnable2FA}
         onVerify={handleVerify2FA}
         onClose={close2FASetup}
+        enabling={enabling2FA}
+        verifying={verifying2FA}
       />
 
       <DisableTwoFactorDialog

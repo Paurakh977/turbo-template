@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { headers as nextHeaders } from 'next/headers';
 import { APIError } from 'better-auth/api';
 
 /**
@@ -56,7 +57,10 @@ function internalApiBaseUrl(): string {
   const raw = process.env.INTERNAL_API_URL?.trim();
   if (!raw) {
     throw new APIError('INTERNAL_SERVER_ERROR', {
-      message: 'INTERNAL_API_URL is not configured; cannot reach API',
+      message:
+        'INTERNAL_API_URL is not set - the web tier cannot reach the API. ' +
+        'Docker Compose injects it (http://api:3001); for host runs add ' +
+        "'INTERNAL_API_URL=http://localhost:3001' to .env and start the API.",
     });
   }
   return raw.replace(/\/+$/, '');
@@ -76,17 +80,55 @@ export type CallInternalApiOptions = {
   timeoutMs?: number;
 };
 
+/** Response shape of GET /api/users/me/permissions. */
+export type MyPermissions = {
+  /** Effective user id (the impersonating admin while impersonating). */
+  userId: string;
+  role: string;
+  permissions: { notes: string[]; settings: string[] };
+};
+
+/**
+ * Per-action permission verdicts for the EFFECTIVE user, resolved by the API
+ * tier through the same auth.api.userHasPermission path that enforces note
+ * mutations server-side. Never call /api/auth/admin/has-permission from web:
+ * with forwarded cookies it evaluates the SESSION user's permissions and
+ * ignores body.userId, which breaks impersonation semantics.
+ */
+export function getMyPermissionsFromApi(
+  requestHeaders?: Headers,
+  timeoutMs?: number,
+): Promise<MyPermissions> {
+  return callInternalApi<MyPermissions>('/api/users/me/permissions', {
+    requestHeaders,
+    timeoutMs,
+  });
+}
+
 export async function callInternalApi<TResponse>(
   path: string,
   options: CallInternalApiOptions = {},
 ): Promise<TResponse> {
   const {
-    requestHeaders,
     method = 'GET',
     body,
     query,
     timeoutMs = DEFAULT_TIMEOUT_MS,
   } = options;
+
+  // Architecture B: the web tier holds no auth secret, so every call to the
+  // API tier must carry the caller's session cookie. If a call site didn't
+  // forward headers explicitly, pull the incoming request headers so cookies
+  // (and IP/UA) are propagated automatically. Without this, the API's global
+  // AuthGuard 401s and Server Components / actions blow up with "Unauthorized".
+  let requestHeaders = options.requestHeaders;
+  if (!requestHeaders) {
+    try {
+      requestHeaders = (await nextHeaders()) as Headers;
+    } catch {
+      requestHeaders = undefined;
+    }
+  }
 
   const url = new URL(path.replace(/^\/+/, ''), `${internalApiBaseUrl()}/`);
   if (query) {

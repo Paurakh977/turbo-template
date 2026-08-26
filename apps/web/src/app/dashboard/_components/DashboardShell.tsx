@@ -4,7 +4,9 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { authClient, type Session } from '../../../lib/auth-client';
-import { getPrimaryRole } from '@repo/auth/roles';
+// Canonical role-token checks (same predicates the server-side guards use),
+// NOT permission-proxy checks - see lib/require-admin.ts for the rationale.
+import { getPrimaryRole, hasAdminRole } from '@repo/auth/roles';
 import { getFreshRoleAction } from '../actions';
 import { useToast } from '../../../lib/toast-context';
 
@@ -98,11 +100,7 @@ export function DashboardShell({
   const roleRaw =
     freshRole ?? (session.user as { role?: string }).role ?? 'user';
   const role = getPrimaryRole(roleRaw);
-  const isAdmin =
-    authClient.admin.checkRolePermission({
-      permissions: { user: ['ban'] },
-      role: role as never,
-    }) ?? false;
+  const isAdmin = hasAdminRole(roleRaw);
 
   const isImpersonating =
     (session as { session?: { impersonatedBy?: string | null } }).session

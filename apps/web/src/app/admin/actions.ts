@@ -57,7 +57,17 @@ export async function resendVerificationEmailAction(
   if (!userId) return { error: 'Invalid user.' };
 
   // Admin-guarded lookup served by the API tier (Better Auth admin plugin).
-  const target = await getAdminUserFromApi(userId, await headers()).catch(() => null);
+  // getAdminUserFromApi maps 404 to null; other failures (API down, 403)
+  // must NOT be reported as "User not found" - surface them honestly.
+  let target: Awaited<ReturnType<typeof getAdminUserFromApi>> = null;
+  try {
+    target = await getAdminUserFromApi(userId, await headers());
+  } catch (error) {
+    console.error('[Admin] user lookup failed:', error);
+    return {
+      error: 'Could not reach the admin service. Please try again.',
+    };
+  }
 
   if (!target) return { error: 'User not found.' };
 

@@ -2,7 +2,6 @@ import Link from 'next/link';
 
 import { requireAdmin } from '../../lib/require-admin';
 import { getPrimaryRole } from '@repo/auth/roles';
-import { ImpersonationBanner } from './_components/ImpersonationBanner';
 
 export default async function AdminLayout({
   children,
@@ -15,12 +14,6 @@ export default async function AdminLayout({
 
   return (
     <div className="min-h-screen bg-background">
-      {session.isImpersonating && (
-        <ImpersonationBanner
-          userName={session.user.name ?? session.user.email}
-          role={role}
-        />
-      )}
       <header className="sticky top-0 z-40 border-b border-border/50 bg-card/60 backdrop-blur-xl">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-3">
           {/* Left — branding + role badge */}

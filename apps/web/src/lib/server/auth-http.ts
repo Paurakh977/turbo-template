@@ -75,7 +75,10 @@ function internalApiBaseUrl(): string {
   const raw = process.env.INTERNAL_API_URL?.trim();
   if (!raw) {
     throw new APIError('INTERNAL_SERVER_ERROR', {
-      message: 'INTERNAL_API_URL is not configured; cannot reach auth API',
+      message:
+        'INTERNAL_API_URL is not set - the web tier cannot reach the auth API. ' +
+        'Docker Compose injects it (http://api:3001); for host runs add ' +
+        "'INTERNAL_API_URL=http://localhost:3001' to .env and start the API.",
     });
   }
   return raw.replace(/\/+$/, '');
@@ -211,32 +214,6 @@ export async function getSessionFromApi(
   return null;
 }
 
-export type UserHasPermissionInput = {
-  userId: string;
-  permissions: Record<string, string[]>;
-};
-
-export type UserHasPermissionResult = { success: boolean; error?: string };
-
-/**
- * POST /api/auth/admin/has-permission
- *
- * Deliberately does NOT forward cookies: current call sites invoke the local
- * equivalent without headers, keying the check on an explicit userId (the
- * impersonating admin's id when applicable). Keeping the transport identical
- * preserves that semantic exactly.
- */
-export async function userHasPermissionFromApi(
-  input: UserHasPermissionInput,
-  timeoutMs?: number,
-): Promise<UserHasPermissionResult | null> {
-  return callAuthApi<UserHasPermissionResult | null>('/admin/has-permission', {
-    method: 'POST',
-    body: input,
-    timeoutMs,
-  });
-}
-
 export type ListUsersQuery = {
   limit?: number;
   offset?: number;
@@ -304,22 +281,6 @@ export async function updateUserFromApi(
   timeoutMs?: number,
 ): Promise<AuthSession['user'] | null> {
   return callAuthApi<AuthSession['user'] | null>('/update-user', {
-    method: 'POST',
-    body: input,
-    requestHeaders,
-    timeoutMs,
-  });
-}
-
-/**
- * POST /api/auth/request-password-reset
- */
-export async function requestPasswordResetFromApi(
-  input: { email: string; redirectTo: string },
-  requestHeaders: Headers,
-  timeoutMs?: number,
-): Promise<{ status: boolean } | null> {
-  return callAuthApi<{ status: boolean } | null>('/request-password-reset', {
     method: 'POST',
     body: input,
     requestHeaders,

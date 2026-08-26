@@ -6,16 +6,12 @@ import { revalidatePath } from 'next/cache';
 import { isAPIError } from 'better-auth/api';
 import {
   getSessionFromApi,
-  userHasPermissionFromApi,
   updateUserFromApi,
-  requestPasswordResetFromApi,
   deleteUserFromApi,
   listAccountsFromApi,
 } from '../../../lib/server/auth-http';
-import {
-  createServerAuditLog,
-  getEffectivePermissionUserId,
-} from '../../../lib/server-audit';
+import { getMyPermissionsFromApi } from '../../../lib/server/internal-api';
+import { createServerAuditLog } from '../../../lib/server-audit';
 import {
   checkServerActionRateLimit,
   getServerActionRateLimitMessage,
@@ -51,15 +47,15 @@ async function enforceActionRateLimit(
   return null;
 }
 
+/**
+ * Permission verdict for the EFFECTIVE user (impersonation aware), computed
+ * by the API tier - identical evaluation to server-side enforcement.
+ */
 async function hasSettingsPermission(
-  userId: string,
   action: 'profile' | 'security' | 'theme' | 'labs',
 ): Promise<boolean> {
-  const result = await userHasPermissionFromApi({
-    userId,
-    permissions: { settings: [action] },
-  });
-  return result?.success === true;
+  const { permissions } = await getMyPermissionsFromApi();
+  return permissions.settings.includes(action);
 }
 
 function getActionErrorMessage(
@@ -94,7 +90,7 @@ function getActionErrorMessage(
     return error.message || fallback;
   }
 
-  if (error instanceof Error && error.message) return error.message;
+  // Non-APIError Errors can carry Node fetch internals - never surface them.
   return fallback;
 }
 
@@ -108,7 +104,7 @@ export async function updateDisplayNameAction(formData: FormData) {
   );
   if (rateLimitError) return rateLimitError;
 
-  const allowed = await hasSettingsPermission(session.user.id, 'profile');
+  const allowed = await hasSettingsPermission('profile');
   if (!allowed)
     return { error: 'You are not allowed to edit profile settings.' };
 
@@ -130,57 +126,11 @@ export async function updateDisplayNameAction(formData: FormData) {
   }
 
   await createServerAuditLog({
-    userId: session.user.id,
     action: 'profile_updated',
-    session,
     metadata: { field: 'name' },
   });
 
   revalidatePath('/dashboard/settings');
-  return { success: true };
-}
-
-export async function requestPasswordResetAction() {
-  const session = await getSessionOrRedirect();
-  const rateLimitError = await enforceActionRateLimit(
-    session.user.id,
-    'request-password-reset',
-    60_000,
-    3,
-  );
-  if (rateLimitError) return rateLimitError;
-
-  const allowed = await hasSettingsPermission(session.user.id, 'security');
-  if (!allowed) {
-    return { error: 'Your role cannot manage security settings.' };
-  }
-
-  const h = await headers();
-  const appBaseUrl = await getAppBaseUrl(h);
-
-  try {
-    await requestPasswordResetFromApi(
-      {
-        email: session.user.email,
-        redirectTo: buildAbsoluteUrl(appBaseUrl, '/auth/reset-password'),
-      },
-      h,
-    );
-  } catch (error) {
-    return {
-      error: getActionErrorMessage(
-        error,
-        'Could not send password reset email right now.',
-      ),
-    };
-  }
-
-  await createServerAuditLog({
-    userId: session.user.id,
-    action: 'password_reset_requested',
-    session,
-  });
-
   return { success: true };
 }
 
@@ -194,11 +144,7 @@ export async function toggleThemePreferenceAction() {
   );
   if (rateLimitError) return rateLimitError;
 
-  const effectivePermissionUserId = getEffectivePermissionUserId(session);
-  const allowed = await hasSettingsPermission(
-    effectivePermissionUserId,
-    'theme',
-  );
+  const allowed = await hasSettingsPermission('theme');
   if (!allowed) {
     return {
       error:
@@ -206,10 +152,11 @@ export async function toggleThemePreferenceAction() {
     };
   }
 
+  // Audit row kept for parity with the pre-migration behavior: the trail
+  // should show who toggled theme preference, even while the persistence
+  // itself is still a demo no-op.
   await createServerAuditLog({
-    userId: session.user.id,
     action: 'theme_changed',
-    session,
   });
 
   return {
@@ -228,11 +175,7 @@ export async function runLabsSettingAction() {
   );
   if (rateLimitError) return rateLimitError;
 
-  const effectivePermissionUserId = getEffectivePermissionUserId(session);
-  const allowed = await hasSettingsPermission(
-    effectivePermissionUserId,
-    'labs',
-  );
+  const allowed = await hasSettingsPermission('labs');
   if (!allowed) {
     return {
       error:
@@ -240,10 +183,9 @@ export async function runLabsSettingAction() {
     };
   }
 
+  // Same parity rationale as theme_changed above.
   await createServerAuditLog({
-    userId: session.user.id,
     action: 'labs_toggled',
-    session,
   });
 
   return {
@@ -276,7 +218,8 @@ export async function deleteAccountAction(formData: FormData) {
   // must provide password confirmation.
   const requiresPassword = hasCredentialAccount;
 
-  const password = ((formData.get('password') as string) ?? '').trim();
+  // Verbatim - trimming would break credentials containing whitespace.
+  const password = (formData.get('password') as string) ?? '';
 
   if (requiresPassword && !password) {
     return { error: 'Password is required to confirm account deletion.' };

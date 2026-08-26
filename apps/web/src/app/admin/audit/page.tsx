@@ -4,6 +4,27 @@ import { formatDistanceToNow } from 'date-fns';
 import { THEME_GRANT_NAME, LABS_GRANT_NAME } from '@repo/auth/permissions';
 import { parseRoles } from '@repo/auth/roles';
 import { callInternalApi } from '../../../lib/server/internal-api';
+import { isAPIError } from 'better-auth/api';
+
+type AuditListingResponse = {
+  logs: Array<{
+    id: string;
+    userId: string | null;
+    action: string;
+    actor: string | null;
+    ipAddress: string | null;
+    userAgent: string | null;
+    metadata: unknown;
+    createdAt: string;
+  }>;
+  total: number;
+  page: number;
+  totalPages: number;
+  usersById: Record<
+    string,
+    { id: string; name: string | null; email: string }
+  >;
+};
 import { AuditFilters } from './_components/AuditFilters';
 
 export const dynamic = 'force-dynamic';
@@ -248,39 +269,41 @@ export default async function AuditLogPage(props: Props) {
 
   // Architecture B: the listing (user search, OR clauses, pagination and
   // identity resolution) is computed by the API tier in one call.
-  const {
-    logs,
-    total,
-    page: currentPage,
-    totalPages,
-    usersById,
-  } = await callInternalApi<{
-    logs: Array<{
-      id: string;
-      userId: string | null;
-      action: string;
-      actor: string | null;
-      ipAddress: string | null;
-      userAgent: string | null;
-      metadata: unknown;
-      createdAt: string;
-    }>;
-    total: number;
-    page: number;
-    totalPages: number;
-    usersById: Record<
-      string,
-      { id: string; name: string | null; email: string }
-    >;
-  }>('/api/admin/audit-logs', {
-    requestHeaders: await headers(),
-    query: {
-      q: q || undefined,
-      action: filterAction,
-      page,
-    },
-    timeoutMs: 10_000,
-  });
+  // Rate limiting is per-IP, so heavy multi-tab use shares one bucket - a
+  // 429 here is transient and must render guidance, not a crash boundary.
+  let listing: Awaited<
+    ReturnType<typeof callInternalApi<AuditListingResponse>>
+  >;
+  try {
+    listing = await callInternalApi<AuditListingResponse>('/api/admin/audit-logs', {
+      requestHeaders: await headers(),
+      query: {
+        q: q || undefined,
+        action: filterAction,
+        page,
+      },
+      timeoutMs: 10_000,
+    });
+  } catch (error) {
+    if (isAPIError(error) && error.status === 429) {
+      return (
+        <div className="min-h-[60vh] flex items-center justify-center px-4">
+          <div className="max-w-md w-full rounded-2xl border border-border/70 bg-card/70 p-6 shadow-sm text-center">
+            <h2 className="text-lg font-semibold tracking-tight">
+              Slow down a little
+            </h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Too many requests from your connection right now. Wait a few
+              seconds and reload.
+            </p>
+          </div>
+        </div>
+      );
+    }
+    throw error;
+  }
+
+  const { logs, total, page: currentPage, totalPages, usersById } = listing;
 
   const userMap = new Map(Object.entries(usersById));
 

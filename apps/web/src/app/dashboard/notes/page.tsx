@@ -2,8 +2,8 @@ import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { hasAdminRole } from '@repo/auth/roles';
-import { getSessionFromApi, userHasPermissionFromApi } from '../../../lib/server/auth-http';
-import { callInternalApi } from '../../../lib/server/internal-api';
+import { getSessionFromApi } from '../../../lib/server/auth-http';
+import { callInternalApi, getMyPermissionsFromApi } from '../../../lib/server/internal-api';
 import { NotesClient } from './_components/NotesClient';
 
 export const dynamic = 'force-dynamic';
@@ -13,24 +13,16 @@ export default async function NotesPage() {
   const session = await getSessionFromApi(h);
   if (!session) redirect('/auth');
 
-  const impersonatedBy =
-    (session as { session?: { impersonatedBy?: string | null } }).session
-      ?.impersonatedBy ?? null;
-  const effectivePermissionUserId = impersonatedBy ?? session.user.id;
-
-  // Resolve permissions server-side via the API tier (Architecture B)
-  const [canCreate, canUpdate, canDelete, canListAll] = await Promise.all([
-    userHasPermissionFromApi({ userId: effectivePermissionUserId, permissions: { notes: ['create'] } }),
-    userHasPermissionFromApi({ userId: effectivePermissionUserId, permissions: { notes: ['update'] } }),
-    userHasPermissionFromApi({ userId: effectivePermissionUserId, permissions: { notes: ['delete'] } }),
-    userHasPermissionFromApi({ userId: effectivePermissionUserId, permissions: { notes: ['list'] } }),
-  ]);
+  // Effective-user permission verdicts resolved by the API tier
+  // (impersonation-aware, fresh role). Single call replaces the previous
+  // four /admin/has-permission round trips.
+  const { permissions } = await getMyPermissionsFromApi(h);
 
   const perms = {
-    canCreate: canCreate?.success === true,
-    canUpdate: canUpdate?.success === true,
-    canDelete: canDelete?.success === true,
-    canListAll: canListAll?.success === true,
+    canCreate: permissions.notes.includes('create'),
+    canUpdate: permissions.notes.includes('update'),
+    canDelete: permissions.notes.includes('delete'),
+    canListAll: permissions.notes.includes('list'),
   };
 
   // The API returns the effective viewer's FRESH role alongside the

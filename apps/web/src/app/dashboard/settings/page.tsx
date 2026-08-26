@@ -4,9 +4,9 @@ import Link from 'next/link';
 import { getPrimaryRole } from '@repo/auth/roles';
 import {
   getSessionFromApi,
-  userHasPermissionFromApi,
   listAccountsFromApi,
 } from '../../../lib/server/auth-http';
+import { getMyPermissionsFromApi } from '../../../lib/server/internal-api';
 import { SettingsClient } from './_components/SettingsClient';
 
 export const dynamic = 'force-dynamic';
@@ -16,30 +16,19 @@ export default async function SettingsPage() {
   const session = await getSessionFromApi(h);
   if (!session) redirect('/auth');
 
-  const impersonatedBy =
-    (session as { session?: { impersonatedBy?: string | null } }).session
-      ?.impersonatedBy ?? null;
-  const effectiveSettingsPermissionUserId = impersonatedBy ?? session.user.id;
-
   const roleRaw = (session.user as { role?: string }).role ?? 'user';
   const role = getPrimaryRole(roleRaw);
 
-  const [canManageProfile, canManageTheme, canManageLabs, accounts] =
-    await Promise.all([
-      userHasPermissionFromApi({
-        userId: session.user.id,
-        permissions: { settings: ['profile'] },
-      }),
-      userHasPermissionFromApi({
-        userId: effectiveSettingsPermissionUserId,
-        permissions: { settings: ['theme'] },
-      }),
-      userHasPermissionFromApi({
-        userId: effectiveSettingsPermissionUserId,
-        permissions: { settings: ['labs'] },
-      }),
-      listAccountsFromApi(h),
-    ]);
+  // Effective-user permission verdicts (impersonation aware) + linked
+  // accounts, both resolved by the API tier in a single round trip each.
+  const [{ permissions: perms }, accounts] = await Promise.all([
+    getMyPermissionsFromApi(h),
+    listAccountsFromApi(h),
+  ]);
+
+  const canManageProfile = perms.settings.includes('profile');
+  const canManageTheme = perms.settings.includes('theme');
+  const canManageLabs = perms.settings.includes('labs');
 
   const hasOAuthAccount = accounts.some(
     (acc) => acc.providerId !== 'credential',
@@ -84,9 +73,9 @@ export default async function SettingsPage() {
             role,
           }}
           perms={{
-            canManageProfile: canManageProfile?.success === true,
-            canManageTheme: canManageTheme?.success === true,
-            canManageLabs: canManageLabs?.success === true,
+            canManageProfile,
+            canManageTheme,
+            canManageLabs,
           }}
           requiresDeletePassword={requiresDeletePassword}
         />

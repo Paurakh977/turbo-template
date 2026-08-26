@@ -129,9 +129,23 @@ API surface required for phase 1.
 
 | # | Change | File(s) |
 |---|--------|---------|
-| 0.1 | Add typed HTTP auth gateway: cookie-forwarding wrappers `getSessionFromApi()`, `userHasPermissionFromApi()`, `listUsersFromApi()`, `sendVerificationEmailFromApi()` using `INTERNAL_API_URL`; 5 s timeout; maps JSON error codes (`EMAIL_NOT_VERIFIED`, etc.) to the same shapes call sites expect | `apps/web/src/lib/server/auth-http.ts` (new) |
+| 0.1 | Add typed HTTP auth gateway: cookie-forwarding wrappers `getSessionFromApi()`, `listUsersFromApi()`, `sendVerificationEmailFromApi()` using `INTERNAL_API_URL`; 5 s timeout; maps JSON error codes (`EMAIL_NOT_VERIFIED`, etc.) to the same shapes call sites expect | `apps/web/src/lib/server/auth-http.ts` (new) |
 | 0.2 | Propagate client IP on internal hops (`X-Forwarded-For`) so API-side Better Auth rate limiting keeps working for server-initiated calls; set `Origin` header to the public app URL to satisfy CSRF/trusted-origin checks | same file |
 | 0.3 | Verify `@repo/auth` subpath exports used by web (`/roles`, `/permissions`, `/password-policy`) are **pure modules** (no `db`/`auth` import) — they stay | `packages/auth/package.json` |
+
+> **Permission checks (post-migration correction):** web must NOT call
+> `/api/auth/admin/has-permission`. With forwarded cookies that endpoint
+> always evaluates the SESSION user's permissions and ignores `body.userId`,
+> which silently breaks impersonation semantics (an admin impersonating a
+> plain user would lose their own powers in the UI, or worse, UI verdicts
+> would diverge from API enforcement). Web instead calls
+> `GET /api/users/me/permissions` (`apps/api/src/users/users.controller.ts`),
+> which evaluates the EFFECTIVE user's fresh DB role against the same
+> access-control roles the admin plugin registers. Cookie forwarding is
+> MANDATORY on every internal call: the domain gateway (`internal-api.ts`)
+> auto-pulls `next/headers` when a caller doesn't pass headers explicitly;
+> the auth gateway (`auth-http.ts`) requires headers to be passed explicitly
+> by the caller.
 
 ### Phase 1 — migrate call sites (one PR per group, deployable independently)
 

@@ -148,7 +148,7 @@ export function AdminUserTable({
             : u,
         ),
       );
-      pushToast('success', 'AdminTableUser banned.');
+      pushToast('success', `${banDialog.name || 'User'} banned.`);
       setBanDialog({
         open: false,
         userId: '',
@@ -159,18 +159,18 @@ export function AdminUserTable({
     setLoading(null);
   };
 
-  const unban = async (userId: string) => {
-    setLoading(userId);
-    const { error } = await authClient.admin.unbanUser({ userId });
+  const unban = async (user: AdminTableUser) => {
+    setLoading(user.id);
+    const { error } = await authClient.admin.unbanUser({ userId: user.id });
     if (error) {
       handleError(error.message);
     } else {
       setList((prev) =>
         prev.map((u) =>
-          u.id === userId ? { ...u, banned: false, banReason: null } : u,
+          u.id === user.id ? { ...u, banned: false, banReason: null } : u,
         ),
       );
-      pushToast('success', 'AdminTableUser unbanned.');
+      pushToast('success', `${user.name || 'User'} unbanned.`);
     }
     setLoading(null);
   };
@@ -220,7 +220,7 @@ export function AdminUserTable({
       handleError(error.message);
     } else {
       setList((prev) => prev.filter((u) => u.id !== confirmDialog.userId));
-      pushToast('success', 'AdminTableUser removed.');
+      pushToast('success', `${confirmDialog.name || 'User'} removed.`);
       router.refresh();
       setConfirmDialog({
         open: false,
@@ -285,7 +285,7 @@ export function AdminUserTable({
               <thead>
                 <tr className="border-b border-border/40 bg-muted/20">
                   <th className="px-5 py-4 text-left text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-                    AdminTableUser
+                    User
                   </th>
                   <th className="px-5 py-4 text-left text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
                     Role
@@ -379,7 +379,12 @@ export function AdminUserTable({
                           )}
                         </td>
 
-                        <td className="px-5 py-4 text-[13px] text-muted-foreground">
+                        <td
+                          className="px-5 py-4 text-[13px] text-muted-foreground"
+                          // Server locale/TZ vs browser locale/TZ differ;
+                          // same hydration guard as NotesClient timestamps.
+                          suppressHydrationWarning
+                        >
                           {new Date(user.createdAt).toLocaleDateString()}
                         </td>
 
@@ -465,7 +470,7 @@ export function AdminUserTable({
                                 {user.banned ? (
                                   <button
                                     type="button"
-                                    onClick={() => unban(user.id)}
+                                    onClick={() => unban(user)}
                                     className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 transition-colors"
                                   >
                                     Unban
