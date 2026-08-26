@@ -22,13 +22,15 @@ RUN --mount=type=cache,id=api-pnpm-store,target=/pnpm/store \
   pnpm install --frozen-lockfile
 
 FROM installer AS builder
-ARG DATABASE_URL
 ARG TURBO_TEAM
 ARG TURBO_TOKEN
 ENV NODE_ENV=production
-ENV DATABASE_URL=$DATABASE_URL
 ENV TURBO_TEAM=$TURBO_TEAM
 ENV TURBO_TOKEN=$TURBO_TOKEN
+# prisma.config.ts resolves DATABASE_URL via env() at generate time (it never
+# opens a connection), so a placeholder keeps REAL credentials out of build
+# args and therefore out of build cache/provenance metadata.
+ENV DATABASE_URL=postgresql://placeholder:placeholder@127.0.0.1:5432/placeholder?schema=public
 COPY --from=pruner /repo/out/full/ .
 RUN pnpm --filter @repo/database db:generate
 RUN pnpm turbo run build --filter=api...
@@ -123,8 +125,15 @@ RUN rm -rf /opt/yarn* /usr/local/lib/node_modules/npm /usr/local/lib/node_module
 USER node
 EXPOSE 3001
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD wget -qO- "http://127.0.0.1:${PORT}/" > /dev/null || exit 1
+# Liveness only: busybox wget exits non-zero on HTTP 5xx, so a strict
+# readiness probe (/api/health/ready) would mark the container unhealthy
+# whenever Redis/Postgres are still warming up and block every
+# depends_on: service_healthy consumer (web, proxy). Use /api/health/live,
+# which always answers 200 once the process is listening. Shell form so the
+# runtime PORT env is honored (compose overrides this healthcheck anyway -
+# keep both in sync if you change one).
+HEALTHCHECK --interval=10s --timeout=5s --start-period=15s --retries=12 \
+  CMD wget -qO- "http://127.0.0.1:${PORT:-3001}/api/health/live" > /dev/null || exit 1
 
 ENTRYPOINT ["dumb-init", "--"]
 CMD ["node", "dist/main"]

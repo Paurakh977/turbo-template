@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Link, CreateLinkDto, UpdateLinkDto } from '@repo/api';
+import type { Link } from '@repo/api';
 
 @Injectable()
 export class LinksService {
@@ -25,21 +25,6 @@ export class LinksService {
     },
   ];
 
-  private nextId = 3;
-
-  create(dto: CreateLinkDto): Link {
-    const link: Link = {
-      id: this.nextId++,
-      title: dto.title,
-      url: dto.url,
-      description: dto.description ?? '',
-    };
-
-    this.links.push(link);
-
-    return link;
-  }
-
   findAll(): Link[] {
     return this.links;
   }
@@ -52,35 +37,5 @@ export class LinksService {
     }
 
     return link;
-  }
-
-  update(id: number, dto: UpdateLinkDto): Link {
-    const link = this.findOne(id);
-
-    if (dto.title !== undefined) {
-      link.title = dto.title;
-    }
-
-    if (dto.url !== undefined) {
-      link.url = dto.url;
-    }
-
-    if (dto.description !== undefined) {
-      link.description = dto.description;
-    }
-
-    return link;
-  }
-
-  remove(id: number): { deleted: true; id: number } {
-    const index = this.links.findIndex((link) => link.id === id);
-
-    if (index === -1) {
-      throw new NotFoundException(`Link #${id} not found`);
-    }
-
-    this.links.splice(index, 1);
-
-    return { deleted: true, id };
   }
 }

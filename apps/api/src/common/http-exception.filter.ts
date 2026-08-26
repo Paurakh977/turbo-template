@@ -32,10 +32,12 @@ export class HttpExceptionFilter implements ExceptionFilter {
     }
 
     response.status(status).json({
+      // Envelope fields are applied AFTER the exception body so a crafted
+      // HttpException response can never spoof statusCode/timestamp/path.
+      ...responseBody,
       statusCode: status,
       timestamp: new Date().toISOString(),
       path: request.url,
-      ...responseBody,
     });
   }
 

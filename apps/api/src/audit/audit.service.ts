@@ -2,7 +2,8 @@ import { Injectable, ForbiddenException } from '@nestjs/common';
 import { db } from '@repo/database';
 
 import type { ServerSession } from '../common/session.utils';
-import { getEffectiveUserId, getSessionRoleRaw, hasAdminRole } from '../common/session.utils';
+import { getEffectiveUserId, hasAdminRole } from '../common/session.utils';
+import { writeAuditRow } from '../common/audit-writer';
 
 const PAGE_SIZE = 50;
 const USER_SEARCH_TAKE = 300;
@@ -62,34 +63,7 @@ export class AuditService {
     input: { action: string; metadata?: Record<string, unknown> },
     meta: { ip: string | null; userAgent: string | null },
   ): Promise<void> {
-    const impersonatedBy = getImpersonatedBy(session);
-
-    type AuditCreateData = NonNullable<
-      Parameters<typeof db.auditLog.create>[0]
-    >['data'];
-
-    try {
-      await db.auditLog.create({
-        data: {
-          userId: session.user.id,
-          action: input.action,
-          actor: impersonatedBy ?? undefined,
-          ipAddress: meta.ip,
-          userAgent: meta.userAgent,
-          metadata: (impersonatedBy
-            ? {
-                ...(input.metadata ?? {}),
-                performedViaImpersonation: true,
-                impersonatedBy,
-              }
-            : input.metadata) as AuditCreateData extends { metadata?: infer M }
-            ? M
-            : never,
-        },
-      });
-    } catch (error) {
-      console.error(`[AuditLog] ${input.action} failed:`, error);
-    }
+    await writeAuditRow(session, input, meta);
   }
 
   /**
@@ -185,19 +159,11 @@ export class AuditService {
       where: { id: effectiveId },
       select: { role: true },
     });
-    const roleRaw = getSessionRoleRaw({
-      ...session,
-      user: { ...session.user, role: (user?.role as string) ?? getSessionRoleRaw(session) },
-    } as ServerSession);
-    if (!hasAdminRole(roleRaw)) {
+    // Deny-by-default: a missing row (user hard-deleted while a Redis-backed
+    // session is still live) must NEVER degrade to the possibly-elevated role
+    // snapshot carried inside the session token.
+    if (!user || !hasAdminRole((user.role as string | null | undefined) ?? '')) {
       throw new ForbiddenException('Admin role required.');
     }
   }
-}
-
-function getImpersonatedBy(session: ServerSession): string | null {
-  return (
-    (session as { session?: { impersonatedBy?: string | null } }).session
-      ?.impersonatedBy ?? null
-  );
 }

@@ -29,7 +29,6 @@
     "class-validator": "catalog:",
     "compression": "^1.8.1",
     "dotenv": "catalog:",
-    "escape-html": "^1.0.3",
     "helmet": "^8.1.0",
     "ioredis": "catalog:",
     "joi": "^18.1.2",

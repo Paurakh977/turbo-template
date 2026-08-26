@@ -1,55 +1,19 @@
-packages/*/package-lock.json
-sample/**/package-lock.json
-
-# dependencies
+# Dependencies
 node_modules/
 
-# IDE
-/.idea
-/.awcache
-/.vscode
-/.devcontainer
-/.classpath
-/.project
-/.settings
-*.code-workspace
+# Build output
+dist/
+tsconfig.tsbuildinfo
 
-# Vim
-[._]*.s[a-v][a-z]
-[._]*.sw[a-p]
-[._]s[a-rt-v][a-z]
-[._]ss[a-gi-z]
-[._]sw[a-p]
+# Test coverage
+coverage/
 
-# bundle
-packages/**/*.d.ts
-packages/**/*.js
+# Environment
+.env
+.env.local
+.env.*.local
 
-# misc
-.DS_Store
-lerna-debug.log
-npm-debug.log
-yarn-error.log
-/**/npm-debug.log
-/packages/**/.npmignore
-/packages/**/LICENSE
-*.tsbuildinfo
-/.nx/workspace-data
-
-# example
-/quick-start
-/example_dist
-/example
-
-# tests
-/test
-/benchmarks/memory
-/coverage
-/.nyc_output
-/packages/graphql
-/benchmarks/memory
-build/config\.gypi
-
-.npmrc
-pnpm-lock.yaml
-/.history
+# NOTE: never ignore ./test here - it holds the jest e2e suite that IS
+# tracked in git (`pnpm --filter api test:e2e`). A previous copy-pasted
+# starter gitignore contained `/test`, which silently untracked the whole
+# suite from any fresh commit.

@@ -20,8 +20,4 @@ export function getEffectiveUserId(session: ServerSession): string {
   return getImpersonatedBy(session) ?? session.user.id;
 }
 
-export function getSessionRoleRaw(session: ServerSession): string {
-  return (session.user as { role?: string }).role ?? 'user';
-}
-
 export { hasAdminRole, hasOperatorRole, getPrimaryRole };

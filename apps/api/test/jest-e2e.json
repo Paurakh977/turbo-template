@@ -1,0 +1,14 @@
+{
+  "moduleFileExtensions": ["js", "json", "ts"],
+  "rootDir": ".",
+  "testEnvironment": "node",
+  "testRegex": ".e2e-spec.ts$",
+  "transform": {
+    "^.+\\.(t|j)s$": "ts-jest"
+  },
+  "setupFiles": ["<rootDir>/e2e-env.ts"],
+  "moduleNameMapper": {
+    "^@thallesp/nestjs-better-auth$": "<rootDir>/stubs/thallesp-better-auth.stub.ts",
+    "^@repo/auth$": "<rootDir>/stubs/repo-auth.stub.ts"
+  }
+}

@@ -1,16 +1,51 @@
-import { Body, Controller, Get, Post, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Post,
+  Query,
+  Req,
+} from '@nestjs/common';
 import type { Request } from 'express';
-import { AuthGuard, Session } from '@thallesp/nestjs-better-auth';
-import { IsIn, IsObject, IsOptional, IsString, Matches } from 'class-validator';
+import { Session } from '@thallesp/nestjs-better-auth';
+import {
+  IsIn,
+  IsInt,
+  IsObject,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+} from 'class-validator';
+import { Transform, Type } from 'class-transformer';
 
 import { AuditService } from './audit.service';
+import { extractClientMeta } from '../common/client-meta';
 import type { ServerSession } from '../common/session.utils';
 
+/**
+ * Only actions the web tier legitimately writes through this endpoint.
+ * System rows (auth events, note mutations) are written inside the API
+ * process via database hooks / services and never arrive over HTTP. Without
+ * this allowlist any authenticated user could forge arbitrary audit rows
+ * ("super_admin_action", etc.) into the admin trail.
+ */
+const CLIENT_AUDIT_ACTIONS = [
+  'profile_updated',
+  'theme_changed',
+  'labs_toggled',
+] as const;
+
+/**
+ * Metadata cap in JSON characters (UTF-16 code units, not bytes). Keeps one
+ * request from bloating a row; the request body itself is capped at 2 MB
+ * upstream.
+ */
+const MAX_METADATA_CHARS = 4096;
+
 export class RecordAuditDto {
-  @IsString()
-  @Matches(/^[a-z0-9_]{1,64}$/i, {
-    message: 'action must be 1-64 chars: letters, digits, underscore',
-  })
+  @IsIn(CLIENT_AUDIT_ACTIONS)
   action!: string;
 
   @IsOptional()
@@ -19,40 +54,39 @@ export class RecordAuditDto {
 }
 
 export class ListAuditQuery {
+  /** Truncated, never rejected - long bookmarks degrade to a shorter search. */
   @IsOptional()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.slice(0, 100) : value,
+  )
   @IsString()
   q?: string;
 
+  /** Truncated, never rejected - filtering is a parameterized equality. */
   @IsOptional()
-  @IsIn(['all']) // extended by service; arbitrary actions allowed via passthrough
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.slice(0, 64) : value,
+  )
+  @IsString()
   action?: string;
 
   @IsOptional()
-  page?: string | number;
-}
-
-function extractClientMeta(req: Request): {
-  ip: string | null;
-  userAgent: string | null;
-} {
-  const forwarded = req.headers['x-forwarded-for'];
-  const ip =
-    (typeof forwarded === 'string' ? forwarded.split(',')[0]?.trim() : undefined) ||
-    (typeof req.headers['x-real-ip'] === 'string'
-      ? (req.headers['x-real-ip'] as string)
-      : null) ||
-    req.ip ||
-    null;
-  return { ip: ip ?? null, userAgent: req.headers['user-agent'] ?? null };
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(10_000)
+  page?: number;
 }
 
 /**
  * Audit log API.
  * - POST /api/audit-logs        session-attributed write (web actions)
  * - GET  /api/admin/audit-logs  admin-only listing for the audit screen
+ *
+ * NOTE: no @UseGuards(AuthGuard) - the global APP_GUARD already resolves the
+ * session for every non-public route.
  */
 @Controller()
-@UseGuards(AuthGuard)
 export class AuditController {
   constructor(private readonly audit: AuditService) {}
 
@@ -62,6 +96,12 @@ export class AuditController {
     @Body() dto: RecordAuditDto,
     @Req() req: Request,
   ) {
+    if (
+      dto.metadata &&
+      JSON.stringify(dto.metadata).length > MAX_METADATA_CHARS
+    ) {
+      throw new BadRequestException('metadata too large');
+    }
     return this.audit.recordFromSession(
       session,
       { action: dto.action, metadata: dto.metadata },
@@ -72,15 +112,12 @@ export class AuditController {
   @Get('admin/audit-logs')
   list(
     @Session() session: ServerSession,
-    @Query('q') q?: string,
-    @Query('action') action?: string,
-    @Query('page') page?: string,
+    @Query() query: ListAuditQuery,
   ) {
-    const parsedPage = page ? Number.parseInt(page, 10) : 1;
     return this.audit.listForAdmin(session, {
-      q: q?.trim() || undefined,
-      action: action || 'all',
-      page: Number.isFinite(parsedPage) ? parsedPage : 1,
+      q: query.q?.trim() || undefined,
+      action: query.action || 'all',
+      page: query.page ?? 1,
     });
   }
 }
