@@ -72,11 +72,17 @@ async function seed() {
     `[Seed] Creating super admin user via Better Auth API at ${BETTER_AUTH_URL}`,
   );
 
+  // Origin must pass Better Auth's trustedOrigins CSRF check. trustedOrigins
+  // contains appURL (NEXT_PUBLIC_APP_URL) but only contains BETTER_AUTH_URL
+  // when it happens to equal it - so prefer the public app URL here.
+  const origin =
+    process.env.NEXT_PUBLIC_APP_URL?.trim() || BETTER_AUTH_URL;
+
   const res = await fetch(`${BETTER_AUTH_URL}/api/auth/sign-up/email`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Origin: BETTER_AUTH_URL,
+      Origin: origin,
     },
     body: JSON.stringify({
       email: adminEmail,

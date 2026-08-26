@@ -32,7 +32,6 @@
     "@prisma/adapter-pg": "catalog:",
     "@prisma/client": "catalog:",
     "@repo/roles": "workspace:^",
-    "crypto-js": "^4.2.0",
     "dotenv": "catalog:",
     "pg": "catalog:"
   },
