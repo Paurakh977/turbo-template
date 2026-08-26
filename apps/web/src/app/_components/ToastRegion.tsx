@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 export type ToastKind = 'success' | 'error' | 'info';
 
 export type ToastItem = {
-  id: number;
+  id: string;
   kind: ToastKind;
   message: string;
 };
@@ -45,7 +45,7 @@ export function ToastRegion({
   onDismiss,
 }: {
   toasts: ToastItem[];
-  onDismiss: (id: number) => void;
+  onDismiss: (id: string) => void;
 }) {
   return (
     <div

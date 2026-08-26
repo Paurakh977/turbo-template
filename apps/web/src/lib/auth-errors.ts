@@ -4,6 +4,20 @@ export type AuthClientErrorLike = {
   message?: string;
 };
 
+/**
+ * URLSearchParams.get() already percent-decodes and leaves malformed
+ * sequences literal - calling decodeURIComponent() again on attacker-controlled
+ * query values (e.g. ?error_description=100%) throws URIError and crashes the
+ * page. Decode defensively or fall back to the raw value.
+ */
+export function safeDecodeParam(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 function normalizeCode(error: AuthClientErrorLike | null | undefined): string {
   return (error?.code ?? '').toUpperCase();
 }

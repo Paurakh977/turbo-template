@@ -8,11 +8,11 @@ const TOAST_DURATION_MS = 3500;
 export function useToastRegion() {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   // Per-id timers so adding a new toast does not reset existing toast timers.
-  const timersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(
+  const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
     new Map(),
   );
 
-  const dismissToast = useCallback((id: number) => {
+  const dismissToast = useCallback((id: string) => {
     const timers = timersRef.current;
     const handle = timers.get(id);
     if (handle) {
@@ -24,7 +24,15 @@ export function useToastRegion() {
 
   const pushToast = useCallback(
     (kind: ToastKind, message: string) => {
-      const id = Date.now() + Math.floor(Math.random() * 1000);
+      // Full-length randomUUID avoids same-millisecond collisions that
+      // Date.now()+random could produce (duplicate React keys / dismissing
+      // the wrong toast). No truncation: an int32 hash of 8 hex chars would
+      // reintroduce birthday-collision risk. The template fallback covers
+      // non-secure contexts where randomUUID is undefined.
+      const id =
+        typeof crypto !== 'undefined' && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       setToasts((prev) => [...prev, { id, kind, message }]);
       const handle = setTimeout(() => {
         dismissToast(id);

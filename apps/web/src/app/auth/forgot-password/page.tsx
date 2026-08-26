@@ -33,19 +33,32 @@ export default function ForgotPasswordPage() {
     setLoading(true);
     setError('');
     setFieldError('');
-    const { error } = await authClient.requestPasswordReset({
-      email: normalizedEmail,
-      redirectTo: buildAbsoluteUrl(appUrl, '/auth/reset-password'),
-    });
+    try {
+      const { error } = await authClient.requestPasswordReset({
+        email: normalizedEmail,
+        redirectTo: buildAbsoluteUrl(appUrl, '/auth/reset-password'),
+      });
 
-    if (error && isRateLimitedAuthError(error)) {
-      setError(getForgotPasswordPublicMessage(error));
+      if (error) {
+        // Enumeration-safe: better-auth answers success for unknown emails,
+        // so an error here means throttling or an availability problem -
+        // never surface "account not found" style detail.
+        setError(
+          isRateLimitedAuthError(error)
+            ? getForgotPasswordPublicMessage(error)
+            : 'Could not send the reset link right now. Please try again.',
+        );
+        return;
+      }
+
+      setSent(true);
+    } catch {
+      // The client layer itself rejected (network failure, offline) - the
+      // "Check your email" screen would be a lie.
+      setError('Could not send the reset link right now. Please try again.');
+    } finally {
       setLoading(false);
-      return;
     }
-
-    setSent(true);
-    setLoading(false);
   };
 
   if (sent) {

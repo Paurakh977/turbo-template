@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -89,7 +89,17 @@ function clearChallengeSnapshot() {
   }
 }
 
+// useSearchParams requires a Suspense boundary for any future static
+// prerender (same pattern as reset-password/verify-email pages).
 export default function TwoFactorPage() {
+  return (
+    <Suspense fallback={null}>
+      <TwoFactorPageInner />
+    </Suspense>
+  );
+}
+
+function TwoFactorPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { data: session, isPending: sessionPending } = authClient.useSession();
@@ -192,51 +202,53 @@ export default function TwoFactorPage() {
     setError('');
     setInfo('');
 
-    let result;
+    try {
+      let result;
 
-    if (method === 'totp') {
-      result = await authClient.twoFactor.verifyTotp({
-        code: nextCode,
-        trustDevice,
-      });
-    } else if (method === 'otp') {
-      result = await authClient.twoFactor.verifyOtp({
-        code: nextCode,
-        trustDevice,
-      });
-    } else {
-      result = await authClient.twoFactor.verifyBackupCode({
-        code: nextCode,
-        trustDevice,
-      });
-    }
+      if (method === 'totp') {
+        result = await authClient.twoFactor.verifyTotp({
+          code: nextCode,
+          trustDevice,
+        });
+      } else if (method === 'otp') {
+        result = await authClient.twoFactor.verifyOtp({
+          code: nextCode,
+          trustDevice,
+        });
+      } else {
+        result = await authClient.twoFactor.verifyBackupCode({
+          code: nextCode,
+          trustDevice,
+        });
+      }
 
-    if (result.error) {
-      if (isMissingChallengeError(result.error as TwoFactorError)) {
+      if (result.error) {
+        if (isMissingChallengeError(result.error as TwoFactorError)) {
+          clearChallengeSnapshot();
+          setSnapshotMethods(new Set());
+          setError(
+            'Your verification session has expired. Please sign in again.',
+          );
+          window.setTimeout(() => {
+            router.replace('/auth');
+          }, 1100);
+          return;
+        }
+        if (isRateLimitedError(result.error as TwoFactorError)) {
+          setError(getRateLimitedMessage());
+          return;
+        }
+        setError(result.error.message ?? 'Invalid code. Please try again.');
+      } else {
         clearChallengeSnapshot();
         setSnapshotMethods(new Set());
-        setError(
-          'Your verification session has expired. Please sign in again.',
-        );
-        window.setTimeout(() => {
-          router.replace('/auth');
-        }, 1100);
-        setLoading(false);
-        return;
+        router.push('/dashboard');
       }
-      if (isRateLimitedError(result.error as TwoFactorError)) {
-        setError(getRateLimitedMessage());
-        setLoading(false);
-        return;
-      }
-      setError(result.error.message ?? 'Invalid code. Please try again.');
-    } else {
-      clearChallengeSnapshot();
-      setSnapshotMethods(new Set());
-      router.push('/dashboard');
+    } finally {
+      // A rejected request (network failure, client upgrade changing
+      // throw-vs-error semantics) must never leave the submit button stuck.
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   const sendOtp = async () => {
@@ -254,31 +266,31 @@ export default function TwoFactorPage() {
     setError('');
     setInfo('');
 
-    const { error } = await authClient.twoFactor.sendOtp();
-    if (error) {
-      if (isMissingChallengeError(error as TwoFactorError)) {
-        clearChallengeSnapshot();
-        setSnapshotMethods(new Set());
-        setError(
-          'Your verification session has expired. Please sign in again.',
-        );
-        window.setTimeout(() => {
-          router.replace('/auth');
-        }, 1100);
-        setOtpSending(false);
+    try {
+      const { error } = await authClient.twoFactor.sendOtp();
+      if (error) {
+        if (isMissingChallengeError(error as TwoFactorError)) {
+          clearChallengeSnapshot();
+          setSnapshotMethods(new Set());
+          setError(
+            'Your verification session has expired. Please sign in again.',
+          );
+          window.setTimeout(() => {
+            router.replace('/auth');
+          }, 1100);
+          return;
+        }
+        if (isRateLimitedError(error as TwoFactorError)) {
+          setError(getRateLimitedMessage());
+          return;
+        }
+        setError(error.message ?? 'Failed to send OTP.');
         return;
       }
-      if (isRateLimitedError(error as TwoFactorError)) {
-        setError(getRateLimitedMessage());
-        setOtpSending(false);
-        return;
-      }
-      setError(error.message ?? 'Failed to send OTP.');
+      setInfo('OTP sent to your email.');
+    } finally {
       setOtpSending(false);
-      return;
     }
-    setInfo('OTP sent to your email.');
-    setOtpSending(false);
   };
 
   if (sessionPending || !guardReady) {

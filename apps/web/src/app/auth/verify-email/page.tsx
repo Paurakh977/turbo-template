@@ -19,12 +19,33 @@ function VerifyEmailContent() {
   const [message, setMessage] = useState('');
 
   useEffect(() => {
-    let isMounted = true;
+    let cancelled = false;
+    const timers: number[] = [];
+    const redirectAfterDelay = (path: string) => {
+      timers.push(
+        window.setTimeout(() => {
+          if (!cancelled) router.push(path);
+        }, 1200),
+      );
+    };
+
     const token = searchParams.get('token');
     const callbackError = getVerifyEmailCallbackError(
       searchParams.get('error'),
     );
 
+    // Better Auth's /api/auth/verify-email consumes the token SERVER-SIDE
+    // and then redirects to the callbackURL: bare on SUCCESS, with
+    // `?error=CODE` on failure. So arriving here WITHOUT an error param
+    // means the email is already verified - show success. The token branch
+    // below only matters for hand-crafted links pointing at this page.
+    //
+    // NOTE: verification does NOT create a session
+    // (`emailVerification.autoSignInAfterVerification` is intentionally left
+    // off - possessing the email link must not equal an authenticated
+    // session). Both success paths therefore route to /auth to sign in;
+    // redirecting to /dashboard would bounce straight back to /auth via the
+    // layout guard.
     if (callbackError) {
       setStatus('error');
       setMessage(callbackError);
@@ -32,36 +53,35 @@ function VerifyEmailContent() {
     }
 
     if (!token) {
-      setStatus('error');
-      setMessage('Invalid verification link. Please request a new one.');
-      return;
+      setStatus('success');
+      redirectAfterDelay('/auth');
+    } else {
+      authClient
+        .verifyEmail({
+          query: { token },
+        })
+        .then(({ error }) => {
+          if (cancelled) return;
+          if (error) {
+            setStatus('error');
+            setMessage(getVerifyEmailPublicError(error));
+            return;
+          }
+
+          setStatus('success');
+          redirectAfterDelay('/auth');
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setStatus('error');
+            setMessage('Unable to verify email right now. Please try again.');
+          }
+        });
     }
 
-    authClient
-      .verifyEmail({
-        query: { token },
-      })
-      .then(({ error }) => {
-        if (!isMounted) return;
-        if (error) {
-          setStatus('error');
-          setMessage(getVerifyEmailPublicError(error));
-          return;
-        }
-
-        setStatus('success');
-        window.setTimeout(() => {
-          router.push('/dashboard');
-        }, 1200);
-      })
-      .catch(() => {
-        if (!isMounted) return;
-        setStatus('error');
-        setMessage('Unable to verify email right now. Please try again.');
-      });
-
     return () => {
-      isMounted = false;
+      cancelled = true;
+      for (const handle of timers) window.clearTimeout(handle);
     };
   }, [router, searchParams]);
 
@@ -111,7 +131,7 @@ function VerifyEmailContent() {
                 Email verified!
               </h2>
               <p className="text-muted-foreground text-sm mt-2">
-                Redirecting you to the dashboard...
+                You can now sign in to your account.
               </p>
             </motion.div>
           )}

@@ -91,6 +91,7 @@ export function AuditFilters({
         <input
           type="text"
           name="q"
+          aria-label="Search audit events by user email, name, or ID"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Search by user email, name, or ID..."
@@ -101,6 +102,7 @@ export function AuditFilters({
       <div className="w-full sm:w-auto flex items-center gap-3">
         <select
           name="action"
+          aria-label="Filter audit events by action"
           value={action}
           onChange={(event) => setAction(event.target.value)}
           className="w-full sm:w-auto px-4 py-2.5 bg-background border border-border/60 rounded-xl text-[14px] outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all appearance-none cursor-pointer"

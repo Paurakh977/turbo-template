@@ -14,6 +14,7 @@ import {
 import {
   getResendVerificationPublicMessage,
   isRateLimitedAuthError,
+  safeDecodeParam,
 } from '../../lib/auth-errors';
 import { getClientAppBaseUrl } from '../../lib/app-url';
 
@@ -55,7 +56,7 @@ export default function AuthPage() {
     const err = params.get('error');
     const desc = params.get('error_description');
     if (err && desc) {
-      setError(decodeURIComponent(desc));
+      setError(safeDecodeParam(desc));
       window.history.replaceState(null, '', window.location.pathname);
     }
   }, []);

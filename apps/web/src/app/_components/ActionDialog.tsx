@@ -33,38 +33,43 @@ export function ActionDialog({
   const containerRef = useRef<HTMLDivElement>(null);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
   const previousBodyOverflowRef = useRef('');
-  const wasOpenRef = useRef(false);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
+  // Lifecycle effect: capture/restore focus and body scroll-lock ONLY on
+  // open/close transitions. It must NOT depend on `pending` - otherwise the
+  // cleanup would fire on every pending flip mid-request, releasing the
+  // scroll lock and yanking focus back to the page behind an open dialog.
   useEffect(() => {
-    if (!open) {
-      wasOpenRef.current = false;
-      return;
-    }
+    if (!open) return;
 
-    if (!wasOpenRef.current) {
-      wasOpenRef.current = true;
+    previouslyFocusedRef.current = document.activeElement as HTMLElement;
+    previousBodyOverflowRef.current = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
 
-      if (typeof document !== 'undefined') {
-        previouslyFocusedRef.current = document.activeElement as HTMLElement;
-        // Lock body scroll while the modal is open so background content
-        // can't scroll behind the dialog. Restored in the cleanup below.
-        previousBodyOverflowRef.current = document.body.style.overflow;
-        document.body.style.overflow = 'hidden';
-      }
-
-      const container = containerRef.current;
-      if (container) {
-        const focusables =
-          container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
-        if (focusables.length > 0) {
-          focusables[0]!.focus();
-        } else {
-          container.focus();
-        }
+    const container = containerRef.current;
+    if (container) {
+      const focusables =
+        container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
+      if (focusables.length > 0) {
+        focusables[0]!.focus();
+      } else {
+        container.focus();
       }
     }
+
+    return () => {
+      if (previouslyFocusedRef.current) {
+        previouslyFocusedRef.current.focus();
+      }
+      document.body.style.overflow = previousBodyOverflowRef.current;
+    };
+  }, [open]);
+
+  // Keyboard handling: re-armed when `pending` changes so Escape stays
+  // blocked while a request is in flight.
+  useEffect(() => {
+    if (!open) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && !pending) {
@@ -101,15 +106,7 @@ export function ActionDialog({
     };
 
     window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      if (previouslyFocusedRef.current) {
-        previouslyFocusedRef.current.focus();
-      }
-      if (typeof document !== 'undefined') {
-        document.body.style.overflow = previousBodyOverflowRef.current;
-      }
-    };
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, [open, pending]);
 
   if (!open) return null;

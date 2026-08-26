@@ -40,7 +40,6 @@ const PASSIVE_ENDPOINT_PATTERNS = [
   '/list-accounts',
   '/admin/list-users',
   '/admin/list-user-sessions',
-  '/admin/has-permission',
 ];
 
 const AUTH_CHALLENGE_ENDPOINT_PATTERNS = [
@@ -150,10 +149,17 @@ function resolveRequestUrl(context: RateLimitErrorContext): string {
 
 // ── Auth client instance ─────────────────────────────────────────────────
 
+// Server-side fallback chain: NEXT_PUBLIC_APP_URL is the public origin the
+// API's trustedOrigins already accepts (BETTER_AUTH_URL is NOT injected into
+// this container under Architecture B). Nothing fetches through authClient
+// during SSR today; the fallback only exists so a future accidental
+// server-side call hits a real origin instead of localhost:3000.
 const baseURL =
   typeof window !== 'undefined'
     ? window.location.origin
-    : process.env.BETTER_AUTH_URL || 'http://localhost:3000';
+    : process.env.NEXT_PUBLIC_APP_URL ||
+      process.env.BETTER_AUTH_URL ||
+      'http://localhost:3000';
 
 const client = createAuthClient({
   baseURL,

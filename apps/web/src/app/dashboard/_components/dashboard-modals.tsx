@@ -24,6 +24,10 @@ type SetupDialogProps = {
   onEnable: () => void;
   onVerify: () => void;
   onClose: () => void;
+  /** Blocks double-submits while the enable request is in flight. */
+  enabling?: boolean;
+  /** Blocks double-submits while the TOTP verification is in flight. */
+  verifying?: boolean;
 };
 
 export function TwoFactorSetupDialog({
@@ -42,6 +46,8 @@ export function TwoFactorSetupDialog({
   onEnable,
   onVerify,
   onClose,
+  enabling = false,
+  verifying = false,
 }: SetupDialogProps) {
   return (
     <>
@@ -50,6 +56,7 @@ export function TwoFactorSetupDialog({
         title="Set up Two-Factor Auth"
         description="Enter your password to verify your identity."
         confirmLabel="Continue"
+        pending={enabling}
         onConfirm={onEnable}
         onClose={onClose}
       >
@@ -76,6 +83,7 @@ export function TwoFactorSetupDialog({
         description="Open your authenticator app, scan the code, then enter the 6-digit code below."
         confirmLabel="Verify & Enable"
         cancelLabel="Cancel"
+        pending={verifying}
         onConfirm={onVerify}
         onClose={onClose}
       >

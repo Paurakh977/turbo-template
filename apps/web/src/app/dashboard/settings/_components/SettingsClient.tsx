@@ -138,6 +138,7 @@ function ProfileSection({
               alt={user.name}
               loading="lazy"
               decoding="async"
+              referrerPolicy="no-referrer"
               className="h-full w-full object-cover"
             />
           ) : (
@@ -237,8 +238,9 @@ function DangerSection({
 
   const submitDelete = () => {
     if (requiresDeletePassword) {
-      const trimmed = password.trim();
-      if (!trimmed) {
+      // Verbatim, matching the server action contract - trimming would break
+      // credentials containing whitespace (they authenticate verbatim).
+      if (!password) {
         setInlineError('Password is required.');
         return;
       }
@@ -247,7 +249,7 @@ function DangerSection({
     start(async () => {
       const fd = new FormData();
       if (requiresDeletePassword) {
-        fd.append('password', password.trim());
+        fd.append('password', password);
       }
       try {
         const res = await deleteAccountAction(fd);

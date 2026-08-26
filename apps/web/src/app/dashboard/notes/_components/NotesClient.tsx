@@ -226,7 +226,12 @@ function NoteCard({
               by <span className="text-foreground/80">{note.author.name}</span>
             </span>
             <span className="text-muted-foreground/40">-</span>
-            <span className="text-[11px] text-muted-foreground">
+            {/* Relative time depends on the client clock - suppress the
+                inevitable server/client hydration mismatch warning. */}
+            <span
+              className="text-[11px] text-muted-foreground"
+              suppressHydrationWarning
+            >
               {timeAgo(note.createdAt)}
             </span>
           </div>
