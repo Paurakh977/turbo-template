@@ -31,6 +31,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Enforces the @repo/auth import fence. eslint cannot enforce it:
+      # eslint-plugin-only-warn downgrades every error to a warning at the
+      # Linter level, so a fenced rule can never fail `turbo lint`. Needs no
+      # build — run right after install so violations fail fastest.
+      - name: Guard - web imports no @repo/auth runtime root
+        run: pnpm guard:web-auth-imports
+
       # The generated Prisma client is gitignored; builds depend on it.
       - name: Generate Prisma client
         run: pnpm --filter @repo/database db:generate

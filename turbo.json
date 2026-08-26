@@ -40,6 +40,18 @@
         "SEED_ADMIN_EMAIL",
         "SEED_ADMIN_PASSWORD",
         "SEED_ADMIN_NAME",
+        "RATE_LIMIT_WINDOW",
+        "RATE_LIMIT_MAX",
+        "SESSION_EXPIRES_IN",
+        "SESSION_UPDATE_AGE",
+        "SESSION_FRESH_AGE",
+        "TWO_FACTOR_TOTP_PERIOD",
+        "TWO_FACTOR_OTP_PERIOD",
+        "TWO_FACTOR_OTP_ATTEMPTS",
+        "TWO_FACTOR_BACKUP_AMOUNT",
+        "TWO_FACTOR_BACKUP_LENGTH",
+        "TWO_FACTOR_COOKIE_MAX_AGE",
+        "TRUST_DEVICE_MAX_AGE",
         "CHOKIDAR_USEPOLLING",
         "CHOKIDAR_INTERVAL",
         "WATCHPACK_POLLING",
@@ -56,12 +68,22 @@
         "REDIS_URL",
         "BETTER_AUTH_SECRET",
         "BETTER_AUTH_URL",
-        "NEXT_PUBLIC_APP_URL"
+        "TRUSTED_ORIGINS",
+        "NEXT_PUBLIC_APP_URL",
+        "INTERNAL_API_URL",
+        "APP_NAME",
+        "EMAIL_FROM"
       ]
     },
     "build": {
       "dependsOn": ["^build"],
-      "outputs": [".next/**", "!.next/cache/**", "dist/**"]
+      "outputs": [".next/**", "!.next/cache/**", "dist/**"],
+      "env": [
+        "NEXT_PUBLIC_API_URL",
+        "NEXT_PUBLIC_APP_URL",
+        "NEXT_ALLOWED_DEV_ORIGINS"
+      ],
+      "passThroughEnv": ["INTERNAL_API_URL"]
     },
     "typecheck": {
       "dependsOn": ["^build"]

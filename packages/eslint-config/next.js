@@ -47,6 +47,27 @@ export const nextJsConfig = [
     },
   },
   {
+    //  the root @repo/auth entry instantiates the full
+    // BetterAuth runtime (pg pool, signing secret). Web must only import the
+    // pure subpaths (/roles, /permissions, /password-policy) or use type-only
+    // imports. Regression here silently recreates a second auth instance.
+    rules: {
+      "@typescript-eslint/no-restricted-imports": [
+        "warn",
+        {
+          paths: [
+            {
+              name: "@repo/auth",
+              allowTypeImports: true,
+              message:
+                "Use '@repo/auth/roles' | '@repo/auth/permissions' | '@repo/auth/password-policy' (or `import type`). The root entry boots BetterAuth + a DB pool.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     ignores: [".next/**", "dist/**", "node_modules/**", "next-env.d.ts"],
   },
 ];
