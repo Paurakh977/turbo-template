@@ -10,6 +10,7 @@ import {
   type SessionData,
   type UserData,
 } from './pending-storage';
+import { resolveClientIp } from './client-ip';
 
 type HeaderSource = {
   headers?: { get: (key: string) => string | null };
@@ -20,9 +21,11 @@ function extractIpAndUserAgent(context: HeaderSource | undefined): {
   ipAddress: string | undefined;
   userAgent: string | undefined;
 } {
+  // resolveClientIp walks XFF right-to-left past the proxies we control;
+  // a raw leftmost read here would record attacker-chosen IPs.
   const ipAddress =
-    context?.headers?.get('x-forwarded-for') ??
-    context?.request?.headers?.get('x-forwarded-for') ??
+    resolveClientIp(context?.headers) ??
+    resolveClientIp(context?.request?.headers) ??
     undefined;
   const userAgent =
     context?.headers?.get('user-agent') ??
@@ -246,18 +249,23 @@ export const databaseHooks = {
           return;
         }
 
+        // Same dual shape extractIpAndUserAgent handles: hook contexts carry
+        // either fetch-style headers or a full request.
         const context = ctx as
           | {
               headers?: {
                 get: (key: string) => string | null;
+              };
+              request?: {
+                headers: { get: (key: string) => string | null };
               };
             }
           | undefined;
 
         const ipAddress =
           s.ipAddress ??
-          context?.headers?.get('x-forwarded-for') ??
-          context?.headers?.get('x-real-ip') ??
+          resolveClientIp(context?.headers) ??
+          resolveClientIp(context?.request?.headers) ??
           undefined;
         const userAgent =
           s.userAgent ?? context?.headers?.get('user-agent') ?? undefined;

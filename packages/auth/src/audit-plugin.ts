@@ -10,6 +10,7 @@ import {
   storePendingDeletion,
   storePendingStopImpersonation,
 } from './pending-storage';
+import { resolveClientIp } from './client-ip';
 
 // ---------------------------------------------------------------------------
 // Audit-log plugin
@@ -68,7 +69,7 @@ export const auditLogPlugin = (): BetterAuthPlugin => ({
 
           if (oldRole === nextRoleJoined) return;
 
-          const ipAddress = ctx.headers?.get('x-forwarded-for') ?? undefined;
+          const ipAddress = resolveClientIp(ctx.headers);
           const userAgent = ctx.headers?.get('user-agent') ?? undefined;
 
           await db.auditLog
@@ -104,7 +105,7 @@ export const auditLogPlugin = (): BetterAuthPlugin => ({
 
           const session = await getSessionFromCtx(ctx);
           const actorId = session?.user?.id;
-          const ipAddress = ctx.headers?.get('x-forwarded-for') ?? undefined;
+          const ipAddress = resolveClientIp(ctx.headers);
           const userAgent = ctx.headers?.get('user-agent') ?? undefined;
 
           if (actorId === userId) {
@@ -141,7 +142,7 @@ export const auditLogPlugin = (): BetterAuthPlugin => ({
           await enforceRoleHierarchy(ctx, userId);
 
           const session = await getSessionFromCtx(ctx);
-          const ipAddress = ctx.headers?.get('x-forwarded-for') ?? undefined;
+          const ipAddress = resolveClientIp(ctx.headers);
           const userAgent = ctx.headers?.get('user-agent') ?? undefined;
 
           await db.auditLog
@@ -173,7 +174,7 @@ export const auditLogPlugin = (): BetterAuthPlugin => ({
           await enforceRoleHierarchy(ctx, userId);
 
           const session = await getSessionFromCtx(ctx);
-          const ipAddress = ctx.headers?.get('x-forwarded-for') ?? undefined;
+          const ipAddress = resolveClientIp(ctx.headers);
           const userAgent = ctx.headers?.get('user-agent') ?? undefined;
 
           await db.auditLog
@@ -206,7 +207,7 @@ export const auditLogPlugin = (): BetterAuthPlugin => ({
 
           const session = await getSessionFromCtx(ctx);
           const actorId = session?.user?.id;
-          const ipAddress = ctx.headers?.get('x-forwarded-for') ?? undefined;
+          const ipAddress = resolveClientIp(ctx.headers);
           const userAgent = ctx.headers?.get('user-agent') ?? undefined;
 
           if (actorId === targetUserId) {
@@ -269,7 +270,7 @@ export const auditLogPlugin = (): BetterAuthPlugin => ({
           await enforceRoleHierarchy(ctx, targetUserId);
 
           const actorId = session?.user?.id;
-          const ipAddress = ctx.headers?.get('x-forwarded-for') ?? undefined;
+          const ipAddress = resolveClientIp(ctx.headers);
           const userAgent = ctx.headers?.get('user-agent') ?? undefined;
 
           const targetUser = await db.user
@@ -306,7 +307,7 @@ export const auditLogPlugin = (): BetterAuthPlugin => ({
           )?.session?.impersonatedBy;
           if (!actorId) return;
 
-          const ipAddress = ctx.headers?.get('x-forwarded-for') ?? undefined;
+          const ipAddress = resolveClientIp(ctx.headers);
           const userAgent = ctx.headers?.get('user-agent') ?? undefined;
 
           await db.auditLog
@@ -379,7 +380,7 @@ export const auditLogPlugin = (): BetterAuthPlugin => ({
             .catch(() => null);
 
           await storePendingDeletion(userId, {
-            ipAddress: ctx.headers?.get('x-forwarded-for') ?? null,
+            ipAddress: resolveClientIp(ctx.headers) ?? null,
             userAgent: ctx.headers?.get('user-agent') ?? null,
             email: targetUser?.email ?? null,
             sessionToken: currentSession?.token ?? null,

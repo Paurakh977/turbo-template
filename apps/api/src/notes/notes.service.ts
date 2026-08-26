@@ -1,14 +1,15 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { db } from '@repo/database';
 import { auth } from '@repo/auth';
 
 import type { ServerSession } from '../common/session.utils';
 import {
   getEffectiveUserId,
-  getSessionRoleRaw,
   hasAdminRole,
+  hasOperatorRole,
 } from '../common/session.utils';
-import { CreateNoteDto, UpdateNoteDto } from './dto/note.dto';
+import { writeAuditRow } from '../common/audit-writer';
+import { CreateNoteDto, UpdateNoteDto, DEFAULT_LIMIT } from './dto/note.dto';
 
 export type SerializedNote = {
   id: string;
@@ -72,16 +73,34 @@ export class NotesService {
 
   async listForSession(
     session: ServerSession,
-  ): Promise<{ notes: SerializedNote[]; viewerRole: string }> {
+    limit = DEFAULT_LIMIT,
+    offset = 0,
+  ): Promise<{
+    notes: SerializedNote[];
+    viewerRole: string;
+    total: number;
+    limit: number;
+    offset: number;
+  }> {
     const viewerRole = await this.getFreshRoleRaw(getEffectiveUserId(session));
-    const canListAll = hasAdminRole(viewerRole);
+    // Visibility parity with the pre-migration implementation: the
+    // `notes.list` permission (operator and above) grants the full note
+    // list; plain users only ever see their own. Admin (and above) is a
+    // STRICTER bar reserved for the edit-others bypass below.
+    const canListAll = hasOperatorRole(viewerRole);
 
-    const notes = await db.note.findMany({
-      where: canListAll ? undefined : { authorId: session.user.id },
-      orderBy: { createdAt: 'desc' },
-      include: NOTE_INCLUDE,
-    });
-    return { notes: notes.map(serialize), viewerRole };
+    const where = canListAll ? undefined : { authorId: session.user.id };
+    const [notes, total] = await Promise.all([
+      db.note.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        include: NOTE_INCLUDE,
+        take: limit,
+        skip: offset,
+      }),
+      db.note.count({ where }),
+    ]);
+    return { notes: notes.map(serialize), viewerRole, total, limit, offset };
   }
 
   async create(
@@ -112,29 +131,61 @@ export class NotesService {
   ): Promise<SerializedNote> {
     await this.assertPermission(session, 'update');
 
-    const note = await db.note.findUnique({ where: { id: noteId } });
-    if (!note) throw new NotFoundException('Note not found.');
+    // An empty (or whitespace-only) patch would bump updatedAt - and write an
+    // audit row - while changing nothing. Emptiness is decided on trimmed
+    // values; what gets persisted stays verbatim.
+    if (!dto.title?.trim() && !dto.content?.trim()) {
+      throw new BadRequestException('Nothing to update.');
+    }
 
     const roleRaw = await this.getFreshRoleRaw(getEffectiveUserId(session));
-    if (!hasAdminRole(roleRaw) && note.authorId !== session.user.id) {
+    const isAdmin = hasAdminRole(roleRaw);
+
+    // Full row up front: doubles as the ownership check AND the fallback
+    // payload if a concurrent delete wins right after our write commits.
+    const note = await db.note.findUnique({
+      where: { id: noteId },
+      include: NOTE_INCLUDE,
+    });
+    if (!note) throw new NotFoundException('Note not found.');
+    if (!isAdmin && note.authorId !== session.user.id) {
       throw new ForbiddenException('You can only edit your own notes.');
     }
 
-    const updated = await db.note.update({
+    // Conditional bulk write instead of findUnique -> update: a concurrent
+    // delete BEFORE our write deterministically yields count 0 (mapped to a
+    // clean 404 below) instead of raw Prisma P2025 surfacing as a 500.
+    const updated = await db.note.updateMany({
       where: { id: noteId },
       data: {
         ...(dto.title ? { title: dto.title } : {}),
         ...(dto.content ? { content: dto.content } : {}),
       },
-      include: NOTE_INCLUDE,
     });
+    if (updated.count === 0) {
+      throw new NotFoundException('Note not found.');
+    }
 
     await this.writeAudit(session, 'note_updated', meta, {
       noteId,
       title: dto.title || note.title,
     });
 
-    return serialize(updated);
+    // Refetch for authoritative post-update values. If a concurrent delete
+    // lands between the committed write and this read, the UPDATE still
+    // happened — answer with a best-effort payload instead of lying with a
+    // 404 or skipping the audit row.
+    const fresh = await db.note.findUnique({
+      where: { id: noteId },
+      include: NOTE_INCLUDE,
+    });
+    if (fresh) return serialize(fresh);
+    return serialize({
+      ...note,
+      ...(dto.title ? { title: dto.title } : {}),
+      ...(dto.content ? { content: dto.content } : {}),
+      updatedAt: new Date(),
+    });
   }
 
   async remove(
@@ -144,14 +195,18 @@ export class NotesService {
   ): Promise<void> {
     await this.assertPermission(session, 'delete');
 
-    const note = await db.note.findUnique({ where: { id: noteId } });
-    if (!note) throw new NotFoundException('Note not found.');
+    const existing = await db.note.findUnique({
+      where: { id: noteId },
+      select: { title: true },
+    });
+    if (!existing) throw new NotFoundException('Note not found.');
 
-    await db.note.delete({ where: { id: noteId } });
+    const deleted = await db.note.deleteMany({ where: { id: noteId } });
+    if (deleted.count === 0) throw new NotFoundException('Note not found.');
 
     await this.writeAudit(session, 'note_deleted', meta, {
       noteId,
-      title: note.title,
+      title: existing.title,
     });
   }
 
@@ -180,35 +235,7 @@ export class NotesService {
     meta: { ip: string | null; userAgent: string | null },
     metadata?: Record<string, unknown>,
   ): Promise<void> {
-    const impersonatedBy =
-      (session as { session?: { impersonatedBy?: string | null } }).session
-        ?.impersonatedBy ?? null;
-
-    // Prisma's generated JSON input type is stricter than our metadata shape;
-    // the payload is plain JSON-safe values by construction.
-    type AuditCreateData = NonNullable<
-      Parameters<typeof db.auditLog.create>[0]
-    >['data'];
-    const data = {
-      userId: session.user.id,
-      action,
-      actor: impersonatedBy ?? undefined,
-      ipAddress: meta.ip,
-      userAgent: meta.userAgent,
-      metadata: (impersonatedBy
-        ? { ...metadata, performedViaImpersonation: true, impersonatedBy }
-        : metadata) as AuditCreateData extends { metadata?: infer M }
-        ? M
-        : never,
-    };
-
-    try {
-      await db.auditLog.create({ data });
-    } catch (error) {
-      console.error(`[AuditLog] ${action} failed:`, error);
-    }
+    await writeAuditRow(session, { action, metadata }, meta);
   }
 }
-
-// Re-exported for controller-level reuse without leaking Prisma types.
 
