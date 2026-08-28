@@ -9,7 +9,9 @@
     "start": "next start",
     "lint": "eslint .",
     "check-types": "tsc --noEmit",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "jest",
+    "test:watch": "jest --watch"
   },
   "dependencies": {
     "@repo/auth": "workspace:^",
@@ -27,15 +29,19 @@
   "devDependencies": {
     "@repo/api": "workspace:*",
     "@repo/eslint-config": "workspace:*",
+    "@repo/jest-config": "workspace:*",
     "@repo/tailwind-config": "workspace:*",
     "@repo/typescript-config": "workspace:*",
+    "@types/jest": "^30.0.0",
     "@types/node": "^22.15.3",
     "@types/react": "19.1.0",
     "@types/react-dom": "19.1.1",
     "autoprefixer": "^10.5.0",
     "eslint": "^9.31.0",
+    "jest": "^30.2.0",
     "postcss": "^8.5.12",
     "tailwindcss": "3",
+    "ts-jest": "^29.4.0",
     "typescript": "catalog:"
   }
 }

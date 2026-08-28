@@ -35,6 +35,8 @@
     "dev": "pnpm build --watch",
     "build": "tsc -b -v",
     "lint": "eslint \"src/**/*.ts\"",
+    "test": "jest",
+    "test:watch": "jest --watch",
     "auth:generate": "pnpm dlx @better-auth/cli@latest generate --config ./src/auth.ts --output ../database/prisma/models/betterAuth.prisma --yes && node scripts/post-generate.mjs ../database/prisma/models/betterAuth.prisma && echo \"\" && echo \"NOTE: betterAuth.prisma changed? The DB has NOT been touched.\" && echo \"NEXT: run 'pnpm db:migrate:dev' to capture the drift as a migration,\" && echo \"then 'pnpm db:generate' if the Prisma client needs rebuilding.\""
   },
   "dependencies": {
@@ -47,9 +49,12 @@
   },
   "devDependencies": {
     "@repo/eslint-config": "workspace:^",
+    "@repo/jest-config": "workspace:^",
     "@repo/typescript-config": "workspace:^",
     "@types/node": "^22.19.3",
     "eslint": "^9.39.2",
+    "jest": "^30.2.0",
+    "ts-jest": "^29.4.0",
     "typescript": "catalog:"
   }
 }

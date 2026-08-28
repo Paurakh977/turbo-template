@@ -19,13 +19,18 @@
   "scripts": {
     "dev": "pnpm build --watch",
     "build": "tsc -b -v",
-    "lint": "eslint \"src/**/*.ts\""
+    "lint": "eslint \"src/**/*.ts\"",
+    "test": "jest",
+    "test:watch": "jest --watch"
   },
   "devDependencies": {
     "@repo/eslint-config": "workspace:^",
+    "@repo/jest-config": "workspace:^",
     "@repo/typescript-config": "workspace:^",
     "@types/node": "^22.19.3",
     "eslint": "^9.39.2",
+    "jest": "^30.2.0",
+    "ts-jest": "^29.4.0",
     "typescript": "catalog:"
   }
 }
