@@ -508,6 +508,141 @@ services:
       WEB_UPSTREAM_HOST: host.docker.internal
       WEB_UPSTREAM_PORT: ${WEB_PORT:?WEB_PORT is required}
 
+  # ───────────────────────────────────────────────────────────────────────────
+  # TEST PROFILE — isolated PostgreSQL + Redis + migration + API runner.
+  # Uses tmpfs for Postgres (RAM-backed, disposable, fast).
+  # Run: docker compose --profile test up --build --abort-on-container-exit
+  # ───────────────────────────────────────────────────────────────────────────
+
+  postgres-test:
+    profiles: ['test']
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${TEST_POSTGRES_USER:-test_user}
+      POSTGRES_PASSWORD: ${TEST_POSTGRES_PASSWORD:-test_password}
+      POSTGRES_DB: ${TEST_POSTGRES_DB:-test_db}
+    tmpfs:
+      - /var/lib/postgresql/data
+    ports:
+      - '127.0.0.1:${TEST_POSTGRES_PORT:-5433}:5432'
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'pg_isready -h 127.0.0.1 -U $${TEST_POSTGRES_USER} -d $${TEST_POSTGRES_DB} || exit 1',
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks:
+      app-network:
+        aliases:
+          - postgres-test
+
+  redis-test:
+    profiles: ['test']
+    image: redis:7-alpine
+    command: redis-server --maxmemory 64mb --maxmemory-policy allkeys-lru
+    ports:
+      - '127.0.0.1:${TEST_REDIS_PORT:-6380}:6379'
+    healthcheck:
+      test:
+        ['CMD-SHELL', 'redis-cli ping | grep -q PONG']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      app-network:
+        aliases:
+          - redis-test
+
+  migrate-test:
+    profiles: ['test']
+    image: template-turbo-migrate:test
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile.dev
+    init: true
+    command: >
+      sh -c "pnpm --filter @repo/database db:generate &&
+             pnpm --filter @repo/database db:migrate:deploy"
+    restart: 'no'
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+    environment:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://${TEST_POSTGRES_USER:-test_user}:${TEST_POSTGRES_PASSWORD:-test_password}@postgres-test:5432/${TEST_POSTGRES_DB:-test_db}?schema=public
+    volumes:
+      - .:/app
+      - root-node_modules:/app/node_modules
+      - apps-api-node_modules:/app/apps/api/node_modules
+      - apps-web-node_modules:/app/apps/web/node_modules
+      - packages-api-node_modules:/app/packages/api/node_modules
+      - packages-auth-node_modules:/app/packages/auth/node_modules
+      - packages-database-node_modules:/app/packages/database/node_modules
+      - packages-eslint-config-node_modules:/app/packages/eslint-config/node_modules
+      - packages-tailwind-config-node_modules:/app/packages/tailwind-config/node_modules
+      - packages-ui-node_modules:/app/packages/ui/node_modules
+    networks:
+      app-network:
+        aliases:
+          - migrate-test
+
+  api-test:
+    profiles: ['test']
+    image: template-turbo-api:dev
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile.dev
+    init: true
+    command: ['sh', '-c', 'pnpm turbo run test:integration:all --filter=api --no-daemon']
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+      migrate-test:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: test
+      HOST: 0.0.0.0
+      PORT: 3001
+      DATABASE_URL: postgresql://${TEST_POSTGRES_USER:-test_user}:${TEST_POSTGRES_PASSWORD:-test_password}@postgres-test:5432/${TEST_POSTGRES_DB:-test_db}?schema=public
+      REDIS_URL: redis://redis-test:6379
+      REDIS_PREFIX: 'int-test:'
+      BETTER_AUTH_SECRET: ${TEST_BETTER_AUTH_SECRET:-test-secret-minimum-32-characters-long!!}
+      BETTER_AUTH_URL: http://localhost:3001
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      APP_NAME: ${TEST_APP_NAME:-Integration Test}
+      EMAIL_FROM: ${TEST_EMAIL_FROM:-test@example.com}
+      EMAIL_VERIFICATION: relaxed
+      TRUSTED_ORIGINS: http://localhost:3000
+      GOOGLE_CLIENT_ID: ''
+      GOOGLE_CLIENT_SECRET: ''
+      GITHUB_CLIENT_ID: ''
+      GITHUB_CLIENT_SECRET: ''
+      RESEND_API_KEY: ''
+      DEV_EMAIL_OVERRIDE: ''
+    volumes:
+      - .:/app
+      - root-node_modules:/app/node_modules
+      - apps-api-node_modules:/app/apps/api/node_modules
+      - apps-web-node_modules:/app/apps/web/node_modules
+      - packages-api-node_modules:/app/packages/api/node_modules
+      - packages-auth-node_modules:/app/packages/auth/node_modules
+      - packages-database-node_modules:/app/packages/database/node_modules
+      - packages-eslint-config-node_modules:/app/packages/eslint-config/node_modules
+      - packages-tailwind-config-node_modules:/app/packages/tailwind-config/node_modules
+      - packages-ui-node_modules:/app/packages/ui/node_modules
+      - api-turbo:/app/.turbo
+    networks:
+      app-network:
+        aliases:
+          - api-test
+
 networks:
   app-network:
     driver: bridge

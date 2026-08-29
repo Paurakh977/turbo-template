@@ -107,6 +107,54 @@
         "APP_NAME"
       ]
     },
+    "test:integration": {
+      "cache": false,
+      "passThroughEnv": [
+        "NODE_ENV",
+        "NODE_OPTIONS",
+        "DATABASE_URL",
+        "REDIS_URL",
+        "REDIS_PREFIX",
+        "BETTER_AUTH_SECRET",
+        "BETTER_AUTH_URL",
+        "NEXT_PUBLIC_APP_URL",
+        "APP_NAME",
+        "EMAIL_FROM",
+        "EMAIL_VERIFICATION",
+        "TRUSTED_ORIGINS",
+        "RESEND_API_KEY",
+        "DEV_EMAIL_OVERRIDE",
+        "HOST",
+        "PORT",
+        "RATE_LIMIT_MAX",
+        "RATE_LIMIT_WINDOW",
+        "OAUTH_TEST_PROVIDER"
+      ]
+    },
+    "test:integration:all": {
+      "cache": false,
+      "passThroughEnv": [
+        "NODE_ENV",
+        "NODE_OPTIONS",
+        "DATABASE_URL",
+        "REDIS_URL",
+        "REDIS_PREFIX",
+        "BETTER_AUTH_SECRET",
+        "BETTER_AUTH_URL",
+        "NEXT_PUBLIC_APP_URL",
+        "APP_NAME",
+        "EMAIL_FROM",
+        "EMAIL_VERIFICATION",
+        "TRUSTED_ORIGINS",
+        "RESEND_API_KEY",
+        "DEV_EMAIL_OVERRIDE",
+        "HOST",
+        "PORT",
+        "RATE_LIMIT_MAX",
+        "RATE_LIMIT_WINDOW",
+        "OAUTH_TEST_PROVIDER"
+      ]
+    },
     "db:seed": {
       "cache": false,
       "passThroughEnv": [

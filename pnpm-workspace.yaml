@@ -40,6 +40,7 @@ allowBuilds:
   "@nestjs/core": true
   "@prisma/client": true
   "@prisma/engines": true
+  '@swc/core': true
   better-auth: true
   esbuild: true
   prisma: true

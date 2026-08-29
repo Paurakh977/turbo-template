@@ -4,6 +4,7 @@ import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { twoFactor } from 'better-auth/plugins/two-factor';
 import { admin } from 'better-auth/plugins/admin';
 import { jwt } from 'better-auth/plugins';
+import { genericOAuth } from 'better-auth/plugins';
 import { nextCookies } from 'better-auth/next-js';
 import { createAuthMiddleware, APIError } from 'better-auth/api';
 import { AUTH_BASE_PATH, ADMIN_PLUGIN_ROLES, ac } from './permissions';
@@ -31,6 +32,13 @@ import { TRUSTED_PROXY_CIDRS } from './client-ip';
 
 export const ADMIN_ROLES = ['admin', 'superAdmin'] as const;
 export type AdminRole = (typeof ADMIN_ROLES)[number];
+
+// Test-only generic OAuth provider. Activated solely when OAUTH_TEST_PROVIDER=1
+// (set by the integration-test OAuth setup). It points at localhost endpoints
+// mocked with nock so the OAuth + account-linking flow can be exercised fully
+// offline without real Google/GitHub credentials or OIDC discovery. Never set
+// in any real environment.
+const DUMMY_OAUTH = process.env.OAUTH_TEST_PROVIDER === '1';
 
 // Fail-fast guard (H2): the build-time placeholder exists only so module
 // evaluation during `next build` never throws. A SERVER boot in production
@@ -113,6 +121,7 @@ export const auth = betterAuth({
         'email-password',
         ...(hasGoogle ? ['google'] : []),
         ...(hasGithub ? ['github'] : []),
+        ...(DUMMY_OAUTH ? ['dummy'] : []),
       ],
     },
   },
@@ -552,6 +561,30 @@ return v`,
     }),
 
     auditLogPlugin(),
+
+    ...(DUMMY_OAUTH
+      ? [
+          genericOAuth({
+            config: [
+              {
+                providerId: 'dummy',
+                clientId: 'dummy-test-client',
+                clientSecret: 'dummy-test-secret',
+                // In tests these point back at the test app itself (a small
+                // test-only controller mocks the token/userinfo exchange). The
+                // desired account email is carried in the `code` the test sends
+                // to /callback/dummy, echoed through as the access_token, and
+                // read back by the userinfo endpoint.
+                authorizationUrl: 'http://127.0.0.1:3001/api/dummy/authorize',
+                tokenUrl: 'http://127.0.0.1:3001/api/dummy/token',
+                userInfoUrl: 'http://127.0.0.1:3001/api/dummy/userinfo',
+                scopes: ['email'],
+                pkce: false,
+              },
+            ],
+          }),
+        ]
+      : []),
 
     // Must be last for Next.js Server Actions so Set-Cookie headers from
     // auth.api.* calls (e.g. deleteUser/signOut) are applied to the response.
