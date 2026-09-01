@@ -10,6 +10,7 @@ export const THEME_INIT_SCRIPT = `
     var d = window.matchMedia('${THEME_QUERY}').matches;
     var r = t === 'dark' || t === 'light' ? t : (d ? 'dark' : 'light');
     document.documentElement.classList.toggle('dark', r === 'dark');
+    document.documentElement.setAttribute('data-theme', r);
     var isHttps = window.location.protocol === 'https:';
     document.cookie = '${THEME_STORAGE_KEY}=' + encodeURIComponent(r) + '; path=/; max-age=31536000; SameSite=Lax' + (isHttps ? '; Secure' : '');
   } catch (_) {}
@@ -28,4 +29,5 @@ export function applyTheme(theme: ThemeMode): void {
   window.localStorage.setItem(THEME_STORAGE_KEY, theme);
   document.cookie = `${THEME_STORAGE_KEY}=${encodeURIComponent(theme)}; path=/; max-age=31536000; SameSite=Lax${isHttps ? '; Secure' : ''}`;
   document.documentElement.classList.toggle('dark', theme === 'dark');
+  document.documentElement.setAttribute('data-theme', theme);
 }

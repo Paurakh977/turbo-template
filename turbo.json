@@ -104,7 +104,21 @@
         "REDIS_URL",
         "BETTER_AUTH_SECRET",
         "BETTER_AUTH_URL",
-        "APP_NAME"
+        "APP_NAME",
+        "TRUSTED_ORIGINS",
+        "NEXT_PUBLIC_APP_URL",
+        "E2E_DATABASE_URL",
+        "E2E_REDIS_URL",
+        "SEED_ADMIN_EMAIL",
+        "SEED_ADMIN_PASSWORD",
+        "SEED_ADMIN_NAME",
+        "NODE_TLS_REJECT_UNAUTHORIZED",
+        "NODE_ENV",
+        "CI",
+        "PLAYWRIGHT_BASE_URL",
+        "RATE_LIMIT_WINDOW",
+        "RATE_LIMIT_MAX",
+        "RATE_LIMIT_SIGNUP_MAX"
       ]
     },
     "test:integration": {

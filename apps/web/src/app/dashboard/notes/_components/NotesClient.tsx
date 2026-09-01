@@ -131,6 +131,7 @@ function NoteCard({
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: deleting ? 0 : 1, y: 0 }}
       exit={{ opacity: 0, y: -8 }}
+      data-testid="note-item"
       className="rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm sm:p-5"
     >
       {editing ? (
@@ -143,6 +144,7 @@ function NoteCard({
           </label>
           <input
             id={`${EDIT_TITLE_INPUT_ID}-${note.id}`}
+            data-testid="note-edit-title"
             ref={titleRef}
             defaultValue={note.title}
             className="w-full rounded-lg border border-border/70 bg-background px-3 py-2 text-sm font-medium outline-none transition-colors focus:border-primary/50"
@@ -157,6 +159,7 @@ function NoteCard({
           </label>
           <textarea
             id={`${EDIT_CONTENT_INPUT_ID}-${note.id}`}
+            data-testid="note-edit-content"
             ref={contentRef}
             defaultValue={note.content}
             rows={5}
@@ -174,6 +177,7 @@ function NoteCard({
               type="button"
               onClick={handleUpdate}
               disabled={isPending}
+              data-testid="note-save"
               className="rounded-lg bg-foreground px-3 py-1.5 text-xs font-semibold text-background transition-colors hover:bg-foreground/90 disabled:opacity-60"
             >
               {isPending ? 'Saving...' : 'Save'}
@@ -307,6 +311,7 @@ function CreateNoteForm({
         <button
           type="button"
           onClick={() => setOpen(true)}
+          data-testid="note-create-open"
           className="inline-flex items-center gap-2 rounded-xl bg-foreground px-4 py-2 text-sm font-semibold text-background transition-colors hover:bg-foreground/90"
         >
           <svg

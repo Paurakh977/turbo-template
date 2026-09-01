@@ -44,10 +44,18 @@ if (
   );
 }
 
-const allowedDevOrigins = rawAllowedDevOrigins
-  ?.split(',')
-  .map((origin) => origin.trim())
-  .filter(Boolean);
+const allowedDevOrigins = Array.from(
+  new Set(
+    rawAllowedDevOrigins
+      ?.split(',')
+      .map((origin) => origin.trim())
+      .flatMap((origin) => {
+        const withoutProto = origin.replace(/^https?:\/\//, '');
+        return [origin, withoutProto];
+      })
+      .filter(Boolean) || [],
+  ),
+);
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -61,6 +69,17 @@ const nextConfig = {
   // Type errors must fail the build; CI runs `turbo run typecheck` too, but a
   // local `next build` should never be able to ship type-broken code.
   typescript: { ignoreBuildErrors: false },
+  experimental: {
+    serverActions: {
+      allowedOrigins: [
+        'localhost:8443',
+        'localhost',
+        '127.0.0.1:8443',
+        '127.0.0.1',
+        ...allowedDevOrigins,
+      ],
+    },
+  },
   webpack(config, { dev, isServer }) {
     if (dev) {
       config.watchOptions = {

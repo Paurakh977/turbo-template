@@ -413,7 +413,9 @@ return v`,
 
       // ── Auth challenge endpoints (strict — per-page inline errors) ─────
       '/sign-in/email': { window: 60, max: 5 },
-      '/sign-up/email': { window: 60, max: 3 },
+      // Sign-up is bumped in the E2E profile (RATE_LIMIT_SIGNUP_MAX) so the
+      // deterministic seed can create all four accounts in one burst.
+      '/sign-up/email': { window: 60, max: parseIntEnv('RATE_LIMIT_SIGNUP_MAX', 3) },
       '/request-password-reset': { window: 60, max: 3 },
       '/send-verification-email': { window: 60, max: 3 },
       '/two-factor/send-otp': { window: 60, max: 3 },

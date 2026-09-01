@@ -51,6 +51,7 @@ export function ToastRegion({
     <div
       role="region"
       aria-label="Notifications"
+      data-testid="toast-region"
       className="pointer-events-none fixed top-6 left-1/2 -translate-x-1/2 z-[100] flex w-max max-w-[90vw] flex-col items-center gap-2"
     >
       <AnimatePresence mode="popLayout">
@@ -59,6 +60,8 @@ export function ToastRegion({
             key={toast.id}
             layout
             role={toast.kind === 'error' ? 'alert' : 'status'}
+            data-testid="toast"
+            data-toast-kind={toast.kind}
             initial={{ opacity: 0, y: -20, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.15 } }}

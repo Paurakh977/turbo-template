@@ -123,7 +123,7 @@ importers:
         version: 30.4.1
       '@nestjs/cli':
         specifier: ^11.0.14
-        version: 11.0.24(@swc/core@1.16.1)(@types/node@22.20.1)(esbuild@0.28.2)(postcss@8.5.26)(prettier@3.9.6)(uglify-js@3.19.3)
+        version: 11.0.24(@swc/core@1.16.1)(@types/node@22.20.1)(postcss@8.5.26)(prettier@3.9.6)(uglify-js@3.19.3)
       '@nestjs/schematics':
         specifier: ^11.0.9
         version: 11.1.0(chokidar@4.0.3)(prettier@3.9.6)(typescript@5.9.3)
@@ -189,7 +189,7 @@ importers:
         version: 7.2.2
       ts-jest:
         specifier: ^29.4.6
-        version: 29.4.12(@jest/types@30.4.1)(esbuild@0.28.2)(jest@30.4.2(@types/node@22.20.1)(ts-node@10.9.2(@swc/core@1.16.1)(@types/node@22.20.1)(typescript@5.9.3)))(typescript@5.9.3)
+        version: 29.4.12(@jest/types@30.4.1)(jest@30.4.2(@types/node@22.20.1)(ts-node@10.9.2(@swc/core@1.16.1)(@types/node@22.20.1)(typescript@5.9.3)))(typescript@5.9.3)
       ts-loader:
         specifier: ^9.5.4
         version: 9.6.2(typescript@5.9.3)
@@ -225,19 +225,16 @@ importers:
         version: link:../../packages/ui
       better-auth:
         specifier: 'catalog:'
-        version: 1.6.29(patch_hash=3a59e4cd609fd34d345cb1b8b5f019955850e8c803ef8c88649f9763187c438c)(mysql2@3.15.3)(next@16.2.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(pg@8.23.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        version: 1.6.29(patch_hash=3a59e4cd609fd34d345cb1b8b5f019955850e8c803ef8c88649f9763187c438c)(mysql2@3.15.3)(next@16.2.0(@playwright/test@1.62.1)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(pg@8.23.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       date-fns:
         specifier: ^4.1.0
         version: 4.4.0
-      dotenv:
-        specifier: 'catalog:'
-        version: 16.6.1
       framer-motion:
         specifier: ^12.38.0
         version: 12.43.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       next:
         specifier: 16.2.0
-        version: 16.2.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        version: 16.2.0(@playwright/test@1.62.1)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       react:
         specifier: ^19.1.0
         version: 19.2.8
@@ -248,6 +245,12 @@ importers:
         specifier: ^2.0.21
         version: 2.2.0(react@19.2.8)
     devDependencies:
+      '@axe-core/playwright':
+        specifier: ^4.10.1
+        version: 4.13.0
+      '@playwright/test':
+        specifier: ^1.49.1
+        version: 1.62.1
       '@repo/api':
         specifier: workspace:*
         version: link:../../packages/api
@@ -263,12 +266,18 @@ importers:
       '@repo/typescript-config':
         specifier: workspace:*
         version: link:../../packages/typescript-config
+      '@types/ioredis':
+        specifier: ^4.28.10
+        version: 4.28.10
       '@types/jest':
         specifier: ^30.0.0
         version: 30.0.0
       '@types/node':
         specifier: ^22.15.3
         version: 22.20.1
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.23.1
       '@types/react':
         specifier: 19.1.0
         version: 19.1.0
@@ -278,12 +287,24 @@ importers:
       autoprefixer:
         specifier: ^10.5.0
         version: 10.5.4(postcss@8.5.26)
+      dotenv:
+        specifier: 'catalog:'
+        version: 16.6.1
       eslint:
         specifier: ^9.31.0
         version: 9.39.5(jiti@2.7.0)
+      ioredis:
+        specifier: ^5.4.1
+        version: 5.11.1
       jest:
         specifier: ^30.2.0
         version: 30.4.2(@types/node@22.20.1)
+      otplib:
+        specifier: ^12.0.1
+        version: 12.0.1
+      pg:
+        specifier: ^8.13.1
+        version: 8.23.0
       postcss:
         specifier: ^8.5.12
         version: 8.5.26
@@ -293,6 +314,9 @@ importers:
       ts-jest:
         specifier: ^29.4.0
         version: 29.4.12(jest@30.4.2(@types/node@22.20.1))(typescript@5.9.3)
+      tsx:
+        specifier: ^4.19.2
+        version: 4.23.12
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
@@ -606,6 +630,11 @@ packages:
 
   '@asamuzakjp/css-color@3.2.0':
     resolution: {integrity: sha512-K1A6z8tS3XsmCMM86xoWdn7Fkdn9m6RSVtocUrJYIwZnFVkng/PvkEoWtOWmP+Scc6saYWHWZYbndEEXxl24jw==}
+
+  '@axe-core/playwright@4.13.0':
+    resolution: {integrity: sha512-6YLx+kxXu5GJceG4ozFg+33a2EMTdjYwWGloJ3sb9Kta5pp+ZNS53uxGVog5JetIY8s++P5UrtX+cri+u0VAVg==}
+    peerDependencies:
+      playwright-core: '>= 1.0.0'
 
   '@babel/code-frame@7.29.7':
     resolution: {integrity: sha512-Aup7aUOfpbAUg2ROOJN6Iw5f9DMBlzu0mIkm/malLQFN/YQgO48wCj0Kxa3sEHJvPVFg7siR+qRInwXd2qhQKw==}
@@ -1806,6 +1835,11 @@ packages:
     resolution: {integrity: sha512-SEeaJLb3qBNF/OaXnaR1NmmBbFYk1zC0ZH/52fATcRPLFg/p791YrcyFFy44Bo9sLaGuSuLp5Q6axbb/O+v/RA==}
     engines: {node: ^14.18.0 || >=16.0.0}
 
+  '@playwright/test@1.62.1':
+    resolution: {integrity: sha512-DTcUc8qii+cpHvtOwggMtBRMjKZHXYWdw8syRYu2vtzuq4Wxphqq4NfCs5Zt44L6mA8rfDfj+PHnxFc/FeK6mQ==}
+    engines: {node: '>=20'}
+    hasBin: true
+
   '@prisma/adapter-pg@7.9.1':
     resolution: {integrity: sha512-Ho2RK1KanQxLNSC0sR5bpiiVep10sWPLXCcxK+KXfI/Q69TMRbiafSvLPv3V9snimX72rMCqGlyJ4sBO4lKTAw==}
 
@@ -2240,6 +2274,9 @@ packages:
 
   '@types/http-errors@2.0.5':
     resolution: {integrity: sha512-r8Tayk8HJnX0FztbZN7oVqGccWgw98T/0neJphO91KkmOzug1KkofZURD4UaD5uH8AqcFLfdPErnBod0u71/qg==}
+
+  '@types/ioredis@4.28.10':
+    resolution: {integrity: sha512-69LyhUgrXdgcNDv7ogs1qXZomnfOEnSmrmMFqKgt1XMJxmoOSG/u3wYy13yACIfKuMJ8IhKgHafDO3sx19zVQQ==}
 
   '@types/ioredis@5.0.0':
     resolution: {integrity: sha512-zJbJ3FVE17CNl5KXzdeSPtdltc4tMT3TzC6fxQS0sQngkbFZ6h+0uTafsRqu+eSLIugf6Yb0Ea0SUuRr42Nk9g==}
@@ -2767,6 +2804,10 @@ packages:
   aws-ssl-profiles@1.1.2:
     resolution: {integrity: sha512-NZKeq9AfyQvEeNlN0zSYAaWrmBffJh3IELMZfRpJVWgrpEbtEpnjvzqBPf+mxoI287JohRDoa+/nsfqqiZmF6g==}
     engines: {node: '>= 6.0.0'}
+
+  axe-core@4.13.0:
+    resolution: {integrity: sha512-UzGt8zg7Ny8djbYMhxl2zuEevVa7r2gJjYY5Lwr1xM7+XU2nd6CkIWFTVcCIbAP63vSz71NaVyyuSk9lHKcy0A==}
+    engines: {node: '>=4'}
 
   babel-jest@30.4.1:
     resolution: {integrity: sha512-fATAbM8piYxkiXQp3RBXmZHxZVNJZAVXXfyeyCN2Tida3+qJ8ea9UxhiJ2y4fLO90ZImKt6k9FlcH2+rLkJGhw==}
@@ -3722,6 +3763,11 @@ packages:
 
   fs.realpath@1.0.0:
     resolution: {integrity: sha512-OO0pH2lK6a0hZnAdau5ItzHPI6pUlvI7jMVnxUQRtw4owF2wk8lOSabtGDCTP4Ggrg2MbGnWO9X8K1t4+fGMDw==}
+
+  fsevents@2.3.2:
+    resolution: {integrity: sha512-xiqMQR4xAeHTuB9uWm+fFRcIOgKBMiOBP+eXiyT7jsgVCq1bkVygt00oASowB7EdtpOHaaPgKt812P9ab+DDKA==}
+    engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
+    os: [darwin]
 
   fsevents@2.3.3:
     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
@@ -4825,6 +4871,16 @@ packages:
 
   pkg-types@2.3.1:
     resolution: {integrity: sha512-y+ichcgc2LrADuhLNAx8DFjVfgz91pRxfZdI3UDhxHvcVEZsenLO+7XaU5vOp0u/7V/wZ+plyuQxtrDlZJ+yeg==}
+
+  playwright-core@1.62.1:
+    resolution: {integrity: sha512-wPYSwEBJY9GHraISXqyqtx0na0LpO3XEX7jNDhntbex7tzUS7kLnZsOlFruFJB4Hi/rhDMjXGqHewDZ68nYZVw==}
+    engines: {node: '>=20'}
+    hasBin: true
+
+  playwright@1.62.1:
+    resolution: {integrity: sha512-0M+L3LAD8/nm554LOla9Ayx0j0tmFZ0FBcoQ7F1VuVHpM/XpiC8RcDzBQB8W5+hA8L22THxELzeF+2WcUzvcLg==}
+    engines: {node: '>=20'}
+    hasBin: true
 
   pluralize@8.0.0:
     resolution: {integrity: sha512-Nc3IT5yHzflTfbjgqWcCPpo7DaKy4FnpB0l/zCAW0Tc7jxAiuqSxHasntB3D7887LSrA93kDJ9IXovxJYxyLCA==}
@@ -5950,6 +6006,10 @@ snapshots:
       '@csstools/css-tokenizer': 3.0.4
       lru-cache: 10.4.3
 
+  '@axe-core/playwright@4.13.0':
+    dependencies:
+      axe-core: 4.13.0
+
   '@babel/code-frame@7.29.7':
     dependencies:
       '@babel/helper-validator-identifier': 7.29.7
@@ -6944,7 +7004,7 @@ snapshots:
       '@tybys/wasm-util': 0.10.3
     optional: true
 
-  '@nestjs/cli@11.0.24(@swc/core@1.16.1)(@types/node@22.20.1)(esbuild@0.28.2)(postcss@8.5.26)(prettier@3.9.6)(uglify-js@3.19.3)':
+  '@nestjs/cli@11.0.24(@swc/core@1.16.1)(@types/node@22.20.1)(postcss@8.5.26)(prettier@3.9.6)(uglify-js@3.19.3)':
     dependencies:
       '@angular-devkit/core': 19.2.27(chokidar@4.0.3)
       '@angular-devkit/schematics': 19.2.27(chokidar@4.0.3)
@@ -6955,14 +7015,14 @@ snapshots:
       chokidar: 4.0.3
       cli-table3: 0.6.5
       commander: 4.1.1
-      fork-ts-checker-webpack-plugin: 9.1.0(typescript@5.9.3)(webpack@5.106.2(@swc/core@1.16.1)(esbuild@0.28.2)(postcss@8.5.26)(uglify-js@3.19.3))
+      fork-ts-checker-webpack-plugin: 9.1.0(typescript@5.9.3)(webpack@5.106.2(@swc/core@1.16.1)(postcss@8.5.26)(uglify-js@3.19.3))
       glob: 13.0.6
       node-emoji: 1.11.0
       ora: 5.4.1
       tsconfig-paths: 4.2.0
       tsconfig-paths-webpack-plugin: 4.2.0
       typescript: 5.9.3
-      webpack: 5.106.2(@swc/core@1.16.1)(esbuild@0.28.2)(postcss@8.5.26)(uglify-js@3.19.3)
+      webpack: 5.106.2(@swc/core@1.16.1)(postcss@8.5.26)(uglify-js@3.19.3)
       webpack-node-externals: 3.0.0
     optionalDependencies:
       '@swc/core': 1.16.1
@@ -7141,6 +7201,10 @@ snapshots:
     optional: true
 
   '@pkgr/core@0.3.6': {}
+
+  '@playwright/test@1.62.1':
+    dependencies:
+      playwright: 1.62.1
 
   '@prisma/adapter-pg@7.9.1':
     dependencies:
@@ -7599,6 +7663,10 @@ snapshots:
   '@types/geojson@7946.0.16': {}
 
   '@types/http-errors@2.0.5': {}
+
+  '@types/ioredis@4.28.10':
+    dependencies:
+      '@types/node': 22.20.1
 
   '@types/ioredis@5.0.0':
     dependencies:
@@ -8242,6 +8310,8 @@ snapshots:
 
   aws-ssl-profiles@1.1.2: {}
 
+  axe-core@4.13.0: {}
+
   babel-jest@30.4.1(@babel/core@7.29.7):
     dependencies:
       '@babel/core': 7.29.7
@@ -8302,7 +8372,7 @@ snapshots:
 
   baseline-browser-mapping@2.11.18: {}
 
-  better-auth@1.6.29(patch_hash=3a59e4cd609fd34d345cb1b8b5f019955850e8c803ef8c88649f9763187c438c)(mysql2@3.15.3)(next@16.2.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(pg@8.23.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
+  better-auth@1.6.29(patch_hash=3a59e4cd609fd34d345cb1b8b5f019955850e8c803ef8c88649f9763187c438c)(mysql2@3.15.3)(next@16.2.0(@playwright/test@1.62.1)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(pg@8.23.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
     dependencies:
       '@better-auth/core': 1.6.29(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(better-call@1.4.0(zod@4.4.3))(jose@6.2.10)(kysely@0.29.5)(nanostores@1.5.2)
       '@better-auth/drizzle-adapter': 1.6.29(@better-auth/core@1.6.29(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(better-call@1.4.0(zod@4.4.3))(jose@6.2.10)(kysely@0.29.5)(nanostores@1.5.2))(@better-auth/utils@0.4.2)
@@ -8323,7 +8393,7 @@ snapshots:
       zod: 4.4.3
     optionalDependencies:
       mysql2: 3.15.3
-      next: 16.2.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      next: 16.2.0(@playwright/test@1.62.1)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       pg: 8.23.0
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
@@ -9292,7 +9362,7 @@ snapshots:
       cross-spawn: 7.0.6
       signal-exit: 4.1.0
 
-  fork-ts-checker-webpack-plugin@9.1.0(typescript@5.9.3)(webpack@5.106.2(@swc/core@1.16.1)(esbuild@0.28.2)(postcss@8.5.26)(uglify-js@3.19.3)):
+  fork-ts-checker-webpack-plugin@9.1.0(typescript@5.9.3)(webpack@5.106.2(@swc/core@1.16.1)(postcss@8.5.26)(uglify-js@3.19.3)):
     dependencies:
       '@babel/code-frame': 7.29.7
       chalk: 4.1.2
@@ -9307,7 +9377,7 @@ snapshots:
       semver: 7.8.5
       tapable: 2.3.3
       typescript: 5.9.3
-      webpack: 5.106.2(@swc/core@1.16.1)(esbuild@0.28.2)(postcss@8.5.26)(uglify-js@3.19.3)
+      webpack: 5.106.2(@swc/core@1.16.1)(postcss@8.5.26)(uglify-js@3.19.3)
 
   form-data@4.0.6:
     dependencies:
@@ -9347,6 +9417,9 @@ snapshots:
   fs-monkey@1.1.0: {}
 
   fs.realpath@1.0.0: {}
+
+  fsevents@2.3.2:
+    optional: true
 
   fsevents@2.3.3:
     optional: true
@@ -10432,7 +10505,7 @@ snapshots:
 
   neo-async@2.6.2: {}
 
-  next@16.2.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
+  next@16.2.0(@playwright/test@1.62.1)(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
     dependencies:
       '@next/env': 16.2.0
       '@swc/helpers': 0.5.15
@@ -10451,6 +10524,7 @@ snapshots:
       '@next/swc-linux-x64-musl': 16.2.0
       '@next/swc-win32-arm64-msvc': 16.2.0
       '@next/swc-win32-x64-msvc': 16.2.0
+      '@playwright/test': 1.62.1
       sharp: 0.34.5
     transitivePeerDependencies:
       - '@babel/core'
@@ -10717,6 +10791,14 @@ snapshots:
       confbox: 0.2.4
       exsolve: 1.1.1
       pathe: 2.0.3
+
+  playwright-core@1.62.1: {}
+
+  playwright@1.62.1:
+    dependencies:
+      playwright-core: 1.62.1
+    optionalDependencies:
+      fsevents: 2.3.2
 
   pluralize@8.0.0: {}
 
@@ -11421,16 +11503,15 @@ snapshots:
 
   tapable@2.3.3: {}
 
-  terser-webpack-plugin@5.6.1(@swc/core@1.16.1)(esbuild@0.28.2)(postcss@8.5.26)(uglify-js@3.19.3)(webpack@5.106.2(@swc/core@1.16.1)(esbuild@0.28.2)(postcss@8.5.26)(uglify-js@3.19.3)):
+  terser-webpack-plugin@5.6.1(@swc/core@1.16.1)(postcss@8.5.26)(uglify-js@3.19.3)(webpack@5.106.2(@swc/core@1.16.1)(postcss@8.5.26)(uglify-js@3.19.3)):
     dependencies:
       '@jridgewell/trace-mapping': 0.3.31
       jest-worker: 27.5.1
       schema-utils: 4.3.3
       terser: 5.50.0
-      webpack: 5.106.2(@swc/core@1.16.1)(esbuild@0.28.2)(postcss@8.5.26)(uglify-js@3.19.3)
+      webpack: 5.106.2(@swc/core@1.16.1)(postcss@8.5.26)(uglify-js@3.19.3)
     optionalDependencies:
       '@swc/core': 1.16.1
-      esbuild: 0.28.2
       postcss: 8.5.26
       uglify-js: 3.19.3
 
@@ -11496,7 +11577,7 @@ snapshots:
 
   ts-interface-checker@0.1.13: {}
 
-  ts-jest@29.4.12(@jest/types@30.4.1)(esbuild@0.28.2)(jest@30.4.2(@types/node@22.20.1)(ts-node@10.9.2(@swc/core@1.16.1)(@types/node@22.20.1)(typescript@5.9.3)))(typescript@5.9.3):
+  ts-jest@29.4.12(@jest/types@30.4.1)(jest@30.4.2(@types/node@22.20.1)(ts-node@10.9.2(@swc/core@1.16.1)(@types/node@22.20.1)(typescript@5.9.3)))(typescript@5.9.3):
     dependencies:
       bs-logger: 0.2.6
       fast-json-stable-stringify: 2.1.0
@@ -11511,7 +11592,6 @@ snapshots:
       yargs-parser: 21.1.1
     optionalDependencies:
       '@jest/types': 30.4.1
-      esbuild: 0.28.2
 
   ts-jest@29.4.12(jest@30.4.2(@types/node@22.20.1))(typescript@5.9.3):
     dependencies:
@@ -11770,7 +11850,7 @@ snapshots:
 
   webpack-sources@3.5.1: {}
 
-  webpack@5.106.2(@swc/core@1.16.1)(esbuild@0.28.2)(postcss@8.5.26)(uglify-js@3.19.3):
+  webpack@5.106.2(@swc/core@1.16.1)(postcss@8.5.26)(uglify-js@3.19.3):
     dependencies:
       '@types/eslint-scope': 3.7.7
       '@types/estree': 1.0.9
@@ -11793,7 +11873,7 @@ snapshots:
       neo-async: 2.6.2
       schema-utils: 4.3.3
       tapable: 2.3.3
-      terser-webpack-plugin: 5.6.1(@swc/core@1.16.1)(esbuild@0.28.2)(postcss@8.5.26)(uglify-js@3.19.3)(webpack@5.106.2(@swc/core@1.16.1)(esbuild@0.28.2)(postcss@8.5.26)(uglify-js@3.19.3))
+      terser-webpack-plugin: 5.6.1(@swc/core@1.16.1)(postcss@8.5.26)(uglify-js@3.19.3)(webpack@5.106.2(@swc/core@1.16.1)(postcss@8.5.26)(uglify-js@3.19.3))
       watchpack: 2.5.2
       webpack-sources: 3.5.1
     transitivePeerDependencies:

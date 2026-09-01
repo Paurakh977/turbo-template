@@ -90,6 +90,7 @@ function ResetPasswordForm() {
             onChange={(e) => setPassword(e.target.value)}
             minLength={8}
             required
+            data-testid="reset-password-input"
           />
           {password ? (
             <p className="text-xs text-muted-foreground">
@@ -103,6 +104,7 @@ function ResetPasswordForm() {
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
             required
+            data-testid="reset-password-confirm"
           />
 
           {error && (

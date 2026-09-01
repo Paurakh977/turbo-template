@@ -110,9 +110,10 @@ export function DashboardShell({
     setSigningOut(true);
     try {
       await authClient.signOut();
-      router.push('/auth');
+    } catch {
+      /* ignore */
     } finally {
-      setSigningOut(false);
+      window.location.href = '/auth';
     }
   };
 

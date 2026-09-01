@@ -44,6 +44,7 @@ async function enforceActionRateLimit(
 }
 
 export async function createNoteAction(formData: FormData) {
+  const h = await headers();
   const session = await getSessionOrRedirect();
   const rateLimitError = await enforceActionRateLimit(
     session.user.id,
@@ -55,7 +56,7 @@ export async function createNoteAction(formData: FormData) {
 
   // Verdicts are computed by the API for the EFFECTIVE user (impersonation
   // aware) - no client-supplied user id involved.
-  const { permissions } = await getMyPermissionsFromApi();
+  const { permissions } = await getMyPermissionsFromApi(h);
   if (!permissions.notes.includes('create')) {
     return { error: 'Only operators and above can create notes.' };
   }
@@ -77,7 +78,7 @@ export async function createNoteAction(formData: FormData) {
     }>('/api/notes', {
       method: 'POST',
       body: { title, content },
-      requestHeaders: await headers(),
+      requestHeaders: h,
     });
 
     // Audit row is written by the API tier alongside the mutation.
@@ -96,6 +97,7 @@ export async function createNoteAction(formData: FormData) {
 }
 
 export async function updateNoteAction(noteId: string, formData: FormData) {
+  const h = await headers();
   const session = await getSessionOrRedirect();
   const rateLimitError = await enforceActionRateLimit(
     session.user.id,
@@ -105,7 +107,7 @@ export async function updateNoteAction(noteId: string, formData: FormData) {
   );
   if (rateLimitError) return rateLimitError;
 
-  const { permissions } = await getMyPermissionsFromApi();
+  const { permissions } = await getMyPermissionsFromApi(h);
   if (!permissions.notes.includes('update')) {
     return { error: 'You do not have permission to update notes.' };
   }
@@ -125,7 +127,7 @@ export async function updateNoteAction(noteId: string, formData: FormData) {
         ...(title ? { title } : {}),
         ...(content ? { content } : {}),
       },
-      requestHeaders: await headers(),
+      requestHeaders: h,
     });
   } catch (error) {
     return toActionError(error, 'Could not update the note.');
@@ -136,6 +138,7 @@ export async function updateNoteAction(noteId: string, formData: FormData) {
 }
 
 export async function deleteNoteAction(noteId: string) {
+  const h = await headers();
   const session = await getSessionOrRedirect();
   const rateLimitError = await enforceActionRateLimit(
     session.user.id,
@@ -145,7 +148,7 @@ export async function deleteNoteAction(noteId: string) {
   );
   if (rateLimitError) return rateLimitError;
 
-  const { permissions } = await getMyPermissionsFromApi();
+  const { permissions } = await getMyPermissionsFromApi(h);
   if (!permissions.notes.includes('delete')) {
     return { error: 'You do not have permission to delete notes.' };
   }
@@ -153,7 +156,7 @@ export async function deleteNoteAction(noteId: string) {
   try {
     await callInternalApi(`/api/notes/${encodeURIComponent(noteId)}`, {
       method: 'DELETE',
-      requestHeaders: await headers(),
+      requestHeaders: h,
     });
   } catch (error) {
     return toActionError(error, 'Could not delete the note.');

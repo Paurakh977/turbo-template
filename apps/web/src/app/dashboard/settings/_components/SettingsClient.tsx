@@ -166,8 +166,11 @@ function ProfileSection({
             editing ? (
               <input
                 ref={nameRef}
+                id="settings-name-input"
+                aria-label="Display Name"
                 defaultValue={user.name}
                 maxLength={80}
+                data-testid="settings-name-input"
                 className="w-full rounded-xl border border-border/60 bg-background px-4 py-2.5 text-[14px] outline-none transition-colors focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
               />
             ) : (
@@ -182,6 +185,7 @@ function ProfileSection({
                     type="button"
                     onClick={handleSave}
                     disabled={isPending}
+                    data-testid="settings-save-profile"
                     className="rounded-lg bg-foreground px-3 py-1.5 text-xs font-semibold text-background transition-colors hover:bg-foreground/90 disabled:opacity-60"
                   >
                     {isPending ? 'Saving...' : 'Save'}
@@ -198,9 +202,10 @@ function ProfileSection({
                   </button>
                 </div>
               ) : (
-                <button
+                 <button
                   type="button"
                   onClick={() => setEditing(true)}
+                  data-testid="settings-edit-profile"
                   className="rounded-lg border border-border/60 bg-background px-4 py-2 text-[13px] font-medium text-foreground transition-colors hover:bg-muted hover:text-foreground"
                 >
                   Edit
@@ -263,7 +268,7 @@ function DangerSection({
         // Drive navigation from the client instead.
         toastApi.pushToast('success', 'Account deleted.');
         setDeleteOpen(false);
-        router.replace('/');
+        window.location.href = '/auth';
       } catch {
         const message = 'Could not delete your account. Please try again.';
         setInlineError(message);
@@ -287,6 +292,7 @@ function DangerSection({
               setInlineError('');
               setDeleteOpen(true);
             }}
+            data-testid="settings-delete-account"
             className="rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-2 text-[13px] font-medium text-destructive transition-colors hover:bg-destructive/20 disabled:opacity-50"
           >
             Delete
@@ -391,6 +397,7 @@ function ThemeSection({
             type="button"
             onClick={handleToggleTheme}
             disabled={isPending || !canManageTheme}
+            data-testid="settings-theme-toggle"
             className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-50"
           >
             {isPending
@@ -454,6 +461,7 @@ function LabsSection({
             type="button"
             onClick={handleLabsAction}
             disabled={isPending || !canManageLabs}
+            data-testid="settings-labs-run"
             className="rounded-lg bg-foreground px-3 py-1.5 text-xs font-medium text-background transition-colors hover:bg-foreground/90 disabled:opacity-50"
           >
             {isPending ? 'Running...' : 'Run'}

@@ -53,9 +53,19 @@ async function enforceActionRateLimit(
  */
 async function hasSettingsPermission(
   action: 'profile' | 'security' | 'theme' | 'labs',
+  sessionRole?: string,
 ): Promise<boolean> {
-  const { permissions } = await getMyPermissionsFromApi();
-  return permissions.settings.includes(action);
+  const normRole = sessionRole?.toLowerCase() ?? '';
+  if (normRole === 'superadmin' || normRole === 'admin') {
+    return true;
+  }
+  try {
+    const h = await headers();
+    const { permissions } = await getMyPermissionsFromApi(h);
+    return permissions?.settings?.includes(action) ?? false;
+  } catch {
+    return normRole === 'superadmin' || normRole === 'admin';
+  }
 }
 
 function getActionErrorMessage(
@@ -104,7 +114,10 @@ export async function updateDisplayNameAction(formData: FormData) {
   );
   if (rateLimitError) return rateLimitError;
 
-  const allowed = await hasSettingsPermission('profile');
+  const allowed = await hasSettingsPermission(
+    'profile',
+    (session.user as { role?: string }).role,
+  );
   if (!allowed)
     return { error: 'You are not allowed to edit profile settings.' };
 
@@ -144,7 +157,10 @@ export async function toggleThemePreferenceAction() {
   );
   if (rateLimitError) return rateLimitError;
 
-  const allowed = await hasSettingsPermission('theme');
+  const allowed = await hasSettingsPermission(
+    'theme',
+    (session.user as { role?: string }).role,
+  );
   if (!allowed) {
     return {
       error:
@@ -175,7 +191,10 @@ export async function runLabsSettingAction() {
   );
   if (rateLimitError) return rateLimitError;
 
-  const allowed = await hasSettingsPermission('labs');
+  const allowed = await hasSettingsPermission(
+    'labs',
+    (session.user as { role?: string }).role,
+  );
   if (!allowed) {
     return {
       error:

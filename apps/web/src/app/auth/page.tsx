@@ -152,7 +152,7 @@ export default function AuthPage() {
         {
           onSuccess(ctx) {
             if (ctx.data?.twoFactorRedirect) return;
-            router.push('/dashboard');
+            window.location.href = '/dashboard';
           },
         },
       );
@@ -342,6 +342,7 @@ export default function AuthPage() {
           <button
             onClick={handleGoogleSignIn}
             disabled={loading || oauthLoadingProvider !== null}
+            data-testid="auth-google"
             className="w-full flex items-center justify-center gap-3 py-2.5 px-4 bg-background border border-border/60 rounded-xl text-[13px] font-medium hover:bg-muted/50 transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {oauthLoadingProvider === 'google' ? (
@@ -356,6 +357,7 @@ export default function AuthPage() {
           <button
             onClick={handleGithubSignIn}
             disabled={loading || oauthLoadingProvider !== null}
+            data-testid="auth-github"
             className="w-full flex items-center justify-center gap-3 py-2.5 px-4 bg-foreground text-background rounded-xl text-[13px] font-medium hover:opacity-90 transition-opacity shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {oauthLoadingProvider === 'github' ? (
@@ -377,7 +379,7 @@ export default function AuthPage() {
           <div className="flex-grow border-t border-border/60"></div>
         </div>
 
-        <form onSubmit={handleEmailAuth} className="space-y-3.5">
+        <form noValidate onSubmit={handleEmailAuth} className="space-y-3.5" data-testid="auth-form">
           <AnimatePresence initial={false}>
             {mode === 'signup' && (
               <motion.div
@@ -547,7 +549,7 @@ export default function AuthPage() {
                 exit={{ opacity: 0, height: 0 }}
                 className="overflow-hidden"
               >
-                <p className="text-red-500 text-xs mt-1 bg-red-500/10 p-2 rounded-lg border border-red-500/20">
+                <p className="text-red-500 text-xs mt-1 bg-red-500/10 p-2 rounded-lg border border-red-500/20" data-testid="auth-error">
                   {error}
                 </p>
               </motion.div>
@@ -557,6 +559,7 @@ export default function AuthPage() {
           <button
             type="submit"
             disabled={loading}
+            data-testid="auth-submit"
             className="w-full py-3 mt-2 bg-primary text-primary-foreground rounded-xl text-[14px] font-semibold hover:bg-primary/90 transition-all disabled:opacity-70 flex justify-center items-center shadow-sm"
           >
             {loading ? (
@@ -574,15 +577,16 @@ export default function AuthPage() {
             {mode === 'signin'
               ? "Don't have an account? "
               : 'Already have an account? '}
-            <button
-              onClick={() => {
-                setMode(mode === 'signin' ? 'signup' : 'signin');
-                setError('');
-                setConfirmPassword('');
-                setFieldErrors({});
-              }}
-              className="text-foreground font-medium hover:underline"
-            >
+              <button
+                onClick={() => {
+                  setMode(mode === 'signin' ? 'signup' : 'signin');
+                  setError('');
+                  setConfirmPassword('');
+                  setFieldErrors({});
+                }}
+                data-testid="auth-toggle-mode"
+                className="text-foreground font-medium hover:underline"
+              >
               {mode === 'signin' ? 'Sign up' : 'Sign in'}
             </button>
           </p>

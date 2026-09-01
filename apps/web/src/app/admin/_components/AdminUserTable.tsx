@@ -275,13 +275,14 @@ export function AdminUserTable({
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Search users"
             aria-label="Search users"
+            data-testid="admin-search"
             className="w-full rounded-lg border border-border/70 bg-card px-3 py-2 text-xs text-foreground outline-none transition-colors focus:border-primary/50 sm:w-56"
           />
         </div>
 
         <div className="overflow-hidden rounded-2xl border border-border/60 bg-card shadow-sm dark:bg-white/[0.01] dark:shadow-[0_4px_24px_rgba(0,0,0,0.2)]">
           <div className="overflow-x-auto">
-            <table className="min-w-[980px] w-full text-sm">
+            <table className="min-w-[980px] w-full text-sm" data-testid="admin-table">
               <thead>
                 <tr className="border-b border-border/40 bg-muted/20">
                   <th className="px-5 py-4 text-left text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
