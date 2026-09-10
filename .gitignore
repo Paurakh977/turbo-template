@@ -6,9 +6,13 @@ node_modules
 .pnp.js
 .pnpm-store*
 
-# Local env files
+# Local env files — only the *.example templates are committed (single source
+# of truth per consumer: prod, e2e, k6-overlay, integration-test).
 .env*
 !.env.example
+!.env.e2e.example
+!.env.k6.example
+!.env.test.example
 
 # Testing
 .nyc_output
