@@ -1,0 +1,412 @@
+# docker-compose.observability.yml
+#
+# Observability stack for Grafana Alloy, Prometheus, Loki, Tempo, Pyroscope, Grafana and Exporters
+#
+# Usage (pick ONE app profile; it enables the observability services too):
+#   docker compose -f docker-compose.yml -f docker-compose.observability.yml --profile local up -d
+#   docker compose -f docker-compose.yml -f docker-compose.observability.yml --profile prod up -d
+# Do NOT combine `--profile prod --profile monitoring`: `monitoring` alone starts
+# the stack without postgres/redis, so postgres-exporter/redis-exporter have
+# nothing to scrape. `monitoring` is only for infra-only runs
+# (node-exporter/cadvisor/prometheus/grafana without the app DBs).
+
+services:
+  # ─── Telemetry Pipeline ────────────────────────────────────────────────────
+  alloy:
+    profiles: ['prod', 'dev', 'local', 'monitoring']
+    image: grafana/alloy:latest
+    restart: unless-stopped
+    environment:
+      FARO_CORS_ORIGINS: ${FARO_CORS_ORIGINS:?FARO_CORS_ORIGINS is required}
+    volumes:
+      - ./observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - nginx-logs:/var/log/nginx:ro
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --stability.level=generally-available
+    expose:
+      - '4317' # OTLP gRPC receiver (internal: apps → Alloy)
+      - '4318' # OTLP HTTP receiver (internal: apps → Alloy)
+      - '12345' # Alloy web UI / self-metrics
+      - '12347' # Faro HTTP receiver (internal: Nginx → Alloy)
+    ports:
+      - '127.0.0.1:4317:4317' # Host access for local OTel SDK (outside Docker)
+      - '127.0.0.1:4318:4318' # Host access for local OTel SDK (outside Docker)
+      - '127.0.0.1:12345:12345' # Alloy web UI
+      - '127.0.0.1:12347:12347' # Faro receiver for browser telemetry
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - |
+          bash -c '
+          exec 42<>/dev/tcp/127.0.0.1/12345;
+          echo -e "GET /-/healthy HTTP/1.1\nHost: localhost\nConnection: close\n\n" >&42;
+          head -1 <&42 | cut -d" " -f2 | grep -q "^200$" || exit 1;
+          exec 42<&-;
+          exec 42>&-'
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      app-network:
+        aliases:
+          - alloy
+
+  # ─── App-tier ordering (merge augmentation) ────────────────────────────────
+  # The proxy/nginx stack lives in docker-compose.yml, which must ALSO boot
+  # standalone (e2e/test profiles define no alloy — and nginx resolves /collect
+  # at request time now, so the proxy boots regardless). This block only exists
+  # in the merged config when this file is included via `-f`, making proxy
+  # wait for a healthy alloy in prod/dev without breaking alloy-less profiles.
+  # It MUST stay here: putting `depends_on: alloy` in docker-compose.yml would
+  # fail compose validation (`service "alloy" not found`) whenever this file
+  # is excluded.
+  proxy:
+    depends_on:
+      alloy:
+        condition: service_healthy
+
+  proxy-dev:
+    depends_on:
+      alloy:
+        condition: service_healthy
+
+  # ─── Metrics ───────────────────────────────────────────────────────────────
+  prometheus:
+    profiles: ['prod', 'dev', 'local', 'monitoring']
+    image: prom/prometheus:v2.54.1
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle
+      - --web.enable-remote-write-receiver
+      - --enable-feature=exemplar-storage
+      - --enable-feature=native-histograms
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/prometheus/recording-rules.yml:/etc/prometheus/recording-rules.yml:ro
+      - ./observability/prometheus/alerts:/etc/prometheus/alerts:ro
+      - prometheus-data:/prometheus
+    expose:
+      - '9090'
+    ports:
+      - '127.0.0.1:${PROMETHEUS_PORT:?PROMETHEUS_PORT is required}:9090'
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'wget -qO- http://127.0.0.1:9090/-/healthy > /dev/null || exit 1',
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      app-network:
+        aliases:
+          - prometheus
+
+  # ─── Logs ──────────────────────────────────────────────────────────────────
+  loki:
+    profiles: ['prod', 'dev', 'local', 'monitoring']
+    image: grafana/loki:3.2.0
+    restart: unless-stopped
+    command: -config.file=/etc/loki/config.yml
+    volumes:
+      - ./observability/loki/config.yml:/etc/loki/config.yml:ro
+      - loki-data:/loki
+    expose:
+      - '3100'
+    ports:
+      - '127.0.0.1:3100:3100'
+    healthcheck:
+      test:
+        ['CMD-SHELL', 'wget -qO- http://127.0.0.1:3100/ready > /dev/null || exit 1']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      app-network:
+        aliases:
+          - loki
+
+  # ─── Traces ────────────────────────────────────────────────────────────────
+  tempo:
+    profiles: ['prod', 'dev', 'local', 'monitoring']
+    image: grafana/tempo:2.6.1
+    restart: unless-stopped
+    command: -config.file=/etc/tempo/config.yml
+    volumes:
+      - ./observability/tempo/config.yml:/etc/tempo/config.yml:ro
+      - tempo-data:/var/tempo
+    expose:
+      - '3200'   # HTTP API (queries, ready) — exposed to Grafana on app-network
+      - '4317'   # OTLP gRPC receiver — internal only (Alloy sends traces here)
+      - '4318'   # OTLP HTTP receiver — internal only
+      - '9095'   # Native gRPC API (TraceQL streaming) — internal only
+    ports:
+      - '127.0.0.1:3200:3200'  # Tempo HTTP API for local Grafana access
+    healthcheck:
+      test:
+        ['CMD-SHELL', 'wget -qO- http://127.0.0.1:3200/ready > /dev/null || exit 1']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      app-network:
+        aliases:
+          - tempo
+
+  # ─── Continuous Profiling ──────────────────────────────────────────────────
+  pyroscope:
+    profiles: ['prod', 'dev', 'local', 'monitoring']
+    image: grafana/pyroscope:1.10.0
+    restart: unless-stopped
+    volumes:
+      - ./observability/pyroscope/config.yml:/etc/pyroscope/config.yml:ro
+      - pyroscope-data:/data
+    expose:
+      - '4040'
+    ports:
+      - '127.0.0.1:4040:4040'
+    # NO healthcheck by design: the image is shell-less (no sh/wget/curl —
+    # verified: `docker run --entrypoint sh` fails "executable not found"), so
+    # no CMD-SHELL probe can run. The server does expose GET /ready on :4040
+    # (official docs); profiler outages surface via the Grafana Pyroscope
+    # datasource going red + the api `[Pyroscope] Failed to initialize`
+    # startup warning. Do NOT add a healthcheck here without first switching
+    # to an image variant that ships a shell.
+    networks:
+      app-network:
+        aliases:
+          - pyroscope
+
+  # ─── Visualization ────────────────────────────────────────────────────────
+  grafana:
+    profiles: ['prod', 'dev', 'local', 'monitoring']
+    image: grafana/grafana:11.3.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GF_SECURITY_ADMIN_USER:?GF_SECURITY_ADMIN_USER is required}
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:?GF_SECURITY_ADMIN_PASSWORD is required}
+      GF_SERVER_HTTP_PORT: ${GF_SERVER_HTTP_PORT:?GF_SERVER_HTTP_PORT is required}
+      GF_FEATURE_TOGGLES_ENABLE: traceqlEditor correlations
+      GF_INSTALL_PLUGINS: grafana-pyroscope-app
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    expose:
+      - '${GF_SERVER_HTTP_PORT:?GF_SERVER_HTTP_PORT is required}'
+    ports:
+      - '127.0.0.1:${GRAFANA_PORT:?GRAFANA_PORT is required}:${GF_SERVER_HTTP_PORT:?GF_SERVER_HTTP_PORT is required}'
+    depends_on:
+      prometheus:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+      tempo:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'wget -qO- http://127.0.0.1:$${GF_SERVER_HTTP_PORT}/api/health > /dev/null || exit 1',
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      app-network:
+        aliases:
+          - grafana
+
+  # ─── Infrastructure Exporters ──────────────────────────────────────────────
+  node-exporter:
+    profiles: ['prod', 'dev', 'local', 'monitoring']
+    image: prom/node-exporter:v1.8.2
+    restart: unless-stopped
+    command:
+      - --path.procfs=/host/proc
+      - --path.rootfs=/rootfs
+      - --path.sysfs=/host/sys
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    expose:
+      - '9100'
+    # Safe: prom/* images are busybox-based (sh + wget present) and
+    # node-exporter serves the standard /-/healthy endpoint.
+    healthcheck:
+      test:
+        ['CMD-SHELL', 'wget -qO- http://127.0.0.1:9100/-/healthy > /dev/null || exit 1']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      app-network:
+        aliases:
+          - node-exporter
+
+  cadvisor:
+    profiles: ['prod', 'dev', 'local', 'monitoring']
+    # FIX: gcr.io/cadvisor/cadvisor:v0.49.1 is broken on modern Docker.
+    # - It speaks Docker API v1.41 (Docker 28/29 require >= v1.44).
+    # - It assumes the classic /var/lib/docker/image/<driver>/layerdb layout.
+    #   Docker Desktop >= 4.34 and Docker Engine >= 29 default to the
+    #   containerd image store (Storage Driver: overlayfs,
+    #   driver-type: io.containerd.snapshotter.v1), where layerdb does not
+    #   exist -> "failed to identify the read-write layer ID ...
+    #   mount-id: no such file or directory" (google/cadvisor#3643/#3749/#3860).
+    # ghcr.io/google/cadvisor:0.55.1 includes PR #3709 (containerd-snapshotter
+    # support) and Docker API v1.44+. gcr.io is deprecated for new releases.
+    # NOTE: GHCR tags have NO `v` prefix (google/cadvisor#3856):
+    # `0.55.1` works, `v0.55.1` does not resolve.
+    # Pinned by digest (prod gap #2): tags are mutable pointers — without the
+    # digest a fresh pull can silently run different bytes with zero repo diff.
+    # Keep tag + digest together; bump both via Renovate/Dependabot.
+    # Verified 2026-09-05 against the locally pulled upstream 0.55.1.
+    image: ghcr.io/google/cadvisor:0.55.1@sha256:e02855207ec07bb45ee41f720645945251f093f24c28f8c29cf718490f784922
+    restart: unless-stopped
+    privileged: true
+    # Prod gap #1: bounded resources, env-driven so each host tunes via .env
+    # without touching compose. A hogged exporter must die alone, never
+    # OOM-kill postgres/tempo next to it. See .env.example (cAdvisor budget).
+    mem_limit: ${CADVISOR_MEM_LIMIT:-512m}
+    mem_reservation: ${CADVISOR_MEM_RESERVATION:-256m}
+    cpus: ${CADVISOR_CPUS:-1.0}
+    # Prod gap #6: read-only rootfs — every volume below is already :ro.
+    # tmpfs covers cAdvisor's /tmp scratch. Rollback (delete both lines) if
+    # the container ever crash-loops on writes.
+    read_only: true
+    tmpfs:
+      - /tmp
+    devices:
+      - /dev/kmsg:/dev/kmsg
+    command:
+      - --housekeeping_interval=15s
+      - --docker_only=true
+      # Prod gap #3 decision: KEEP store_container_labels=false. Dropping the
+      # compose labels (com.docker.compose.service=api, ...) saves index
+      # footprint on every cAdvisor series. Cost: per-service PromQL must use
+      # the `name` label (e.g. {name="template-turbo-repo-api-1"}) — which is
+      # exactly what 01-system-overview.json already does
+      # (container_memory_usage_bytes{name!=""}). Revisit only if per-service
+      # alerting ever needs label selectors.
+      - --store_container_labels=false
+      # Workaround for google/cadvisor#3860: with the containerd image store,
+      # per-container filesystem stats cannot be resolved from layerdb.
+      # Disabling the disk collector restores CPU/memory/network metrics;
+      # host disk coverage stays with node-exporter. Re-enable (remove this
+      # line) once upstream fully supports containerd fs stats on your driver.
+      # referenced_memory is disabled because cAdvisor cannot read
+      # /proc/<pid>/smaps from inside its own PID namespace (no `pid: host`),
+      # which spams "Cannot read smaps files for any PID" warnings
+      # (google/cadvisor#3139). Nothing in our dashboards/alerts consumes
+      # container_referenced_bytes, and upstream documents that collector as
+      # intrusive, so dropping it is strictly safer for prod/VPS deploys.
+      - --disable_metrics=disk,referenced_memory
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+      # Prod gap #4: stable machine ID across recreates keeps machine-level
+      # series continuous in Prometheus. Verified present on the host.
+      - /etc/machine-id:/etc/machine-id:ro
+    # Prod gap #5 decision: NO published port — intentional, not an omission.
+    # Prometheus scrapes :8080 over app-network; this is the most privileged
+    # container in the stack (host /, /sys, docker socket dir), so every open
+    # port is attack surface for zero benefit. For local debugging add a
+    # loopback-only mapping (127.0.0.1:18080:8080), never a wide publish.
+    expose:
+      - '8080'
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:8080/healthz > /dev/null || exit 1']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+    networks:
+      app-network:
+        aliases:
+          - cadvisor
+
+  postgres-exporter:
+    profiles: ['prod', 'dev', 'local', 'monitoring']
+    image: prometheuscommunity/postgres-exporter:v0.16.0
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_NAME: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?sslmode=disable
+    expose:
+      - '9187'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Safe: busybox-based image (sh + wget present). Probes the landing page
+    # (process liveness only — v0.16.0 serves NO /-/healthy, verified 404 in
+    # prod; /metrics would work but triggers a full PG scrape per probe).
+    # DB connectivity still surfaces via the ExporterDown alert + `up` metric.
+    healthcheck:
+      test:
+        ['CMD-SHELL', 'wget -qO- http://127.0.0.1:9187/ > /dev/null || exit 1']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      app-network:
+        aliases:
+          - postgres-exporter
+
+  redis-exporter:
+    profiles: ['prod', 'dev', 'local', 'monitoring']
+    image: oliver006/redis_exporter:v1.66.0
+    restart: unless-stopped
+    environment:
+      REDIS_ADDR: redis://redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    expose:
+      - '9121'
+    depends_on:
+      redis:
+        condition: service_healthy
+    # NO healthcheck by decision (alert-only): the default image ships ONLY the
+    # binary (upstream README: use the :alpine variant for a shell), so no
+    # CMD-SHELL probe can run, and the exporter exposes no /health endpoint
+    # (only /metrics, /scrape). Outages surface via the ExporterDown alert.
+    # To get a probe instead, switch to oliver006/redis_exporter:v1.66.0-alpine
+    # + `wget -qO- http://127.0.0.1:9121/metrics` (process liveness only).
+    networks:
+      app-network:
+        aliases:
+          - redis-exporter
+
+volumes:
+  prometheus-data:
+  loki-data:
+  tempo-data:
+  pyroscope-data:
+  grafana-data:
+  nginx-logs:
+
+networks:
+  app-network:
+    driver: bridge

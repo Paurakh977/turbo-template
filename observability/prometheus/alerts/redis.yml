@@ -1,0 +1,26 @@
+groups:
+  - name: redis
+    rules:
+      - alert: RedisMemoryExhaustion
+        expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.9
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis memory above 90% of max"
+
+      - alert: RedisHighEvictionRate
+        expr: rate(redis_evicted_keys_total[5m]) > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis evicting keys at high rate"
+
+      - alert: RedisTooManyClients
+        expr: redis_connected_clients > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis has {{ $value }} connected clients"

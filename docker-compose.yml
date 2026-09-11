@@ -15,6 +15,7 @@ x-proxy-base: &proxy-base
     # set NGINX_TRUSTED_PROXIES to your LB/CDN CIDRs when one is added later.
     NGINX_TRUSTED_PROXIES: ${NGINX_TRUSTED_PROXIES:-127.0.0.0/8}
     NGINX_REAL_IP_HEADER: ${NGINX_REAL_IP_HEADER:-X-Forwarded-For}
+    NGINX_CONN_LIMIT: ${NGINX_CONN_LIMIT:-20}
   ports:
     - '${PROXY_HTTP_PORT:?PROXY_HTTP_PORT is required}:80'
     - '${PROXY_HTTPS_PORT:?PROXY_HTTPS_PORT is required}:443'
@@ -22,6 +23,7 @@ x-proxy-base: &proxy-base
     - ./nginx/nginx.conf:/opt/nginx/nginx.conf.template:ro
     - ./nginx/entrypoint.sh:/opt/nginx/entrypoint.sh:ro
     - ./nginx/certs:/etc/nginx/certs:ro
+    - nginx-logs:/var/log/nginx
   healthcheck:
     test:
       ['CMD-SHELL', 'wget -qO- http://127.0.0.1/healthz > /dev/null || exit 1']
@@ -172,7 +174,12 @@ services:
       APP_NAME: ${APP_NAME:?APP_NAME is required}
       EMAIL_FROM: ${EMAIL_FROM:?EMAIL_FROM is required}
       REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379
-      # Fail-fast opt-out read by packages/auth (auth.ts production mail guard).  
+      # pg pool tuning (packages/database parsePositiveInt; empty = code
+      # fallbacks 10 / 5000 / 30000, so unsetting is always safe).
+      DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-}
+      DATABASE_CONNECTION_TIMEOUT_MS: ${DATABASE_CONNECTION_TIMEOUT_MS:-}
+      DATABASE_IDLE_TIMEOUT_MS: ${DATABASE_IDLE_TIMEOUT_MS:-}
+      # Fail-fast opt-out read by packages/auth (auth.ts production mail guard).
       # Containers receive ONLY injected env - the host .env is never copied
       # into images - so this documented escape hatch must be listed here.
       EMAIL_VERIFICATION: ${EMAIL_VERIFICATION:-}
@@ -196,6 +203,22 @@ services:
       TWO_FACTOR_BACKUP_LENGTH: ${TWO_FACTOR_BACKUP_LENGTH:-}
       TWO_FACTOR_COOKIE_MAX_AGE: ${TWO_FACTOR_COOKIE_MAX_AGE:-}
       TRUST_DEVICE_MAX_AGE: ${TRUST_DEVICE_MAX_AGE:-}
+      # NestJS throttler + signup cap (documented in .env.example; in-code
+      # defaults apply when unset).
+      THROTTLE_TTL_MS: ${THROTTLE_TTL_MS:-}
+      THROTTLE_LIMIT: ${THROTTLE_LIMIT:-}
+      RATE_LIMIT_SIGNUP_MAX: ${RATE_LIMIT_SIGNUP_MAX:-}
+      # Observability — every value comes from the root .env (fail-fast, no
+      # defaults). OTEL_ENVIRONMENT follows the compose profile (mirrors the
+      # NODE_ENV literal above); the .env OTEL_ENVIRONMENT is for host runs.
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:?OTEL_EXPORTER_OTLP_ENDPOINT is required}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME_API:?OTEL_SERVICE_NAME_API is required}
+      OTEL_SERVICE_NAMESPACE: ${OTEL_SERVICE_NAMESPACE:?OTEL_SERVICE_NAMESPACE is required}
+      OTEL_SERVICE_VERSION: ${GIT_SHA:?GIT_SHA is required}
+      OTEL_ENVIRONMENT: production
+      OTEL_LOG_LEVEL: ${OTEL_LOG_LEVEL:?OTEL_LOG_LEVEL is required}
+      PYROSCOPE_SERVER_ADDRESS: ${PYROSCOPE_SERVER_ADDRESS:?PYROSCOPE_SERVER_ADDRESS is required}
+      PYROSCOPE_APPLICATION_NAME: ${PYROSCOPE_APPLICATION_NAME:?PYROSCOPE_APPLICATION_NAME is required}
     expose:
       - '${PORT:?PORT is required}'
     healthcheck:
@@ -230,6 +253,10 @@ services:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
         NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?NEXT_PUBLIC_APP_URL is required}
         NEXT_ALLOWED_DEV_ORIGINS: ${NEXT_ALLOWED_DEV_ORIGINS:-}
+        NEXT_PUBLIC_FARO_COLLECTOR_URL: ${NEXT_PUBLIC_FARO_COLLECTOR_URL:?NEXT_PUBLIC_FARO_COLLECTOR_URL is required}
+        NEXT_PUBLIC_FARO_APP_NAME: ${NEXT_PUBLIC_FARO_APP_NAME:?NEXT_PUBLIC_FARO_APP_NAME is required}
+        NEXT_PUBLIC_FARO_APP_VERSION: ${GIT_SHA:?GIT_SHA is required}
+        NEXT_PUBLIC_FARO_ENVIRONMENT: production
     restart: unless-stopped
     depends_on:
       api:
@@ -246,6 +273,19 @@ services:
       # operations are performed over this internal URL with forwarded
       # cookies; the API tier owns Postgres and BETTER_AUTH_SECRET alone.
       INTERNAL_API_URL: http://api:${PORT:?PORT is required}
+      # Observability — every value comes from the root .env (fail-fast, no
+      # defaults). OTEL_ENVIRONMENT / FARO_ENVIRONMENT follow the compose
+      # profile (mirrors the NODE_ENV literal above).
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:?OTEL_EXPORTER_OTLP_ENDPOINT is required}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME_WEB:?OTEL_SERVICE_NAME_WEB is required}
+      OTEL_SERVICE_NAMESPACE: ${OTEL_SERVICE_NAMESPACE:?OTEL_SERVICE_NAMESPACE is required}
+      OTEL_SERVICE_VERSION: ${GIT_SHA:?GIT_SHA is required}
+      OTEL_ENVIRONMENT: production
+      OTEL_LOG_LEVEL: ${OTEL_LOG_LEVEL:?OTEL_LOG_LEVEL is required}
+      NEXT_PUBLIC_FARO_COLLECTOR_URL: ${NEXT_PUBLIC_FARO_COLLECTOR_URL:?NEXT_PUBLIC_FARO_COLLECTOR_URL is required}
+      NEXT_PUBLIC_FARO_APP_NAME: ${NEXT_PUBLIC_FARO_APP_NAME:?NEXT_PUBLIC_FARO_APP_NAME is required}
+      NEXT_PUBLIC_FARO_APP_VERSION: ${GIT_SHA:?GIT_SHA is required}
+      NEXT_PUBLIC_FARO_ENVIRONMENT: production
     expose:
       - '${WEB_PORT:?WEB_PORT is required}'
     healthcheck:
@@ -344,6 +384,11 @@ services:
       APP_NAME: ${APP_NAME:?APP_NAME is required}
       EMAIL_FROM: ${EMAIL_FROM:?EMAIL_FROM is required}
       REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379
+      # pg pool tuning (packages/database parsePositiveInt; empty = code
+      # fallbacks 10 / 5000 / 30000, so unsetting is always safe).
+      DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-}
+      DATABASE_CONNECTION_TIMEOUT_MS: ${DATABASE_CONNECTION_TIMEOUT_MS:-}
+      DATABASE_IDLE_TIMEOUT_MS: ${DATABASE_IDLE_TIMEOUT_MS:-}
       # Fail-fast opt-out read by packages/auth (auth.ts production mail guard).
       # Containers receive ONLY injected env - the host .env is never copied
       # into images - so this documented escape hatch must be listed here.
@@ -367,9 +412,24 @@ services:
       TWO_FACTOR_BACKUP_LENGTH: ${TWO_FACTOR_BACKUP_LENGTH:-}
       TWO_FACTOR_COOKIE_MAX_AGE: ${TWO_FACTOR_COOKIE_MAX_AGE:-}
       TRUST_DEVICE_MAX_AGE: ${TRUST_DEVICE_MAX_AGE:-}
+      # NestJS throttler + signup cap (documented in .env.example; in-code
+      # defaults apply when unset).
+      THROTTLE_TTL_MS: ${THROTTLE_TTL_MS:-}
+      THROTTLE_LIMIT: ${THROTTLE_LIMIT:-}
+      RATE_LIMIT_SIGNUP_MAX: ${RATE_LIMIT_SIGNUP_MAX:-}
       CHOKIDAR_USEPOLLING: 'true'
       CHOKIDAR_INTERVAL: '100'
       TSC_WATCHFILE: UseDynamicPolling
+      # Observability — every value comes from the root .env (fail-fast, no
+      # defaults). OTEL_ENVIRONMENT follows the compose profile (development).
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:?OTEL_EXPORTER_OTLP_ENDPOINT is required}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME_API:?OTEL_SERVICE_NAME_API is required}
+      OTEL_SERVICE_NAMESPACE: ${OTEL_SERVICE_NAMESPACE:?OTEL_SERVICE_NAMESPACE is required}
+      OTEL_SERVICE_VERSION: ${GIT_SHA:?GIT_SHA is required}
+      OTEL_ENVIRONMENT: development
+      OTEL_LOG_LEVEL: ${OTEL_LOG_LEVEL:?OTEL_LOG_LEVEL is required}
+      PYROSCOPE_SERVER_ADDRESS: ${PYROSCOPE_SERVER_ADDRESS:?PYROSCOPE_SERVER_ADDRESS is required}
+      PYROSCOPE_APPLICATION_NAME: ${PYROSCOPE_APPLICATION_NAME:?PYROSCOPE_APPLICATION_NAME is required}
     expose:
       - '${PORT:?PORT is required}'
     ports:
@@ -435,6 +495,19 @@ services:
       CHOKIDAR_USEPOLLING: 'true'
       CHOKIDAR_INTERVAL: '100'
       WATCHPACK_POLLING: 'true'
+      # Observability — every value comes from the root .env (fail-fast, no
+      # defaults). OTEL_ENVIRONMENT / FARO_ENVIRONMENT follow the compose
+      # profile (development).
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:?OTEL_EXPORTER_OTLP_ENDPOINT is required}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME_WEB:?OTEL_SERVICE_NAME_WEB is required}
+      OTEL_SERVICE_NAMESPACE: ${OTEL_SERVICE_NAMESPACE:?OTEL_SERVICE_NAMESPACE is required}
+      OTEL_SERVICE_VERSION: ${GIT_SHA:?GIT_SHA is required}
+      OTEL_ENVIRONMENT: development
+      OTEL_LOG_LEVEL: ${OTEL_LOG_LEVEL:?OTEL_LOG_LEVEL is required}
+      NEXT_PUBLIC_FARO_COLLECTOR_URL: ${NEXT_PUBLIC_FARO_COLLECTOR_URL:?NEXT_PUBLIC_FARO_COLLECTOR_URL is required}
+      NEXT_PUBLIC_FARO_APP_NAME: ${NEXT_PUBLIC_FARO_APP_NAME:?NEXT_PUBLIC_FARO_APP_NAME is required}
+      NEXT_PUBLIC_FARO_APP_VERSION: ${GIT_SHA:?GIT_SHA is required}
+      NEXT_PUBLIC_FARO_ENVIRONMENT: development
     expose:
       - '${WEB_PORT:?WEB_PORT is required}'
     ports:
@@ -511,7 +584,10 @@ services:
   # ───────────────────────────────────────────────────────────────────────────
   # TEST PROFILE — isolated PostgreSQL + Redis + migration + API runner.
   # Uses tmpfs for Postgres (RAM-backed, disposable, fast).
-  # Run: docker compose --profile test up --build --abort-on-container-exit
+  # Run (detached + wait — NOT --abort-on-container-exit: migrate-test's
+  # clean exit 0 would abort the suite before api-test finishes):
+  #   docker compose --profile test up --build -d
+  #   docker wait template-turbo-repo-api-test-1  # exit code = suite result
   # ───────────────────────────────────────────────────────────────────────────
 
   postgres-test:
@@ -526,10 +602,13 @@ services:
     ports:
       - '127.0.0.1:${TEST_POSTGRES_PORT:-5433}:5432'
     healthcheck:
+      # NOTE: probe the mapped POSTGRES_USER/POSTGRES_DB — the TEST_* names
+      # exist only on the host for interpolation and are NOT injected into
+      # this container (empty -U/-d would fail forever and block migrate-test).
       test:
         [
           'CMD-SHELL',
-          'pg_isready -h 127.0.0.1 -U $${TEST_POSTGRES_USER} -d $${TEST_POSTGRES_DB} || exit 1',
+          'pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB} || exit 1',
         ]
       interval: 5s
       timeout: 3s
@@ -612,7 +691,16 @@ services:
       PORT: 3001
       DATABASE_URL: postgresql://${TEST_POSTGRES_USER:-test_user}:${TEST_POSTGRES_PASSWORD:-test_password}@postgres-test:5432/${TEST_POSTGRES_DB:-test_db}?schema=public
       REDIS_URL: redis://redis-test:6379
-      REDIS_PREFIX: 'int-test:'
+      REDIS_PREFIX: ${REDIS_PREFIX:-int-test:}
+      # No collectors in the test profile: the OTel SDKs stay fail-open no-ops.
+      # Without this, AppModule's Joi schema requires the full OTel set and the
+      # test runner refuses to boot.
+      OTEL_SDK_DISABLED: 'true'
+      # Relaxed signup cap so suites creating several users per window don't
+      # 429-flake (matches the e2e profile rationale). Hardcoded literal (like
+      # the other test-fixed values below): root .env always defines
+      # RATE_LIMIT_SIGNUP_MAX for dev/prod, which would override a `:-` default.
+      RATE_LIMIT_SIGNUP_MAX: '100'
       BETTER_AUTH_SECRET: ${TEST_BETTER_AUTH_SECRET:-test-secret-minimum-32-characters-long!!}
       BETTER_AUTH_URL: http://localhost:3001
       NEXT_PUBLIC_APP_URL: http://localhost:3000
@@ -785,6 +873,9 @@ services:
       RATE_LIMIT_SIGNUP_MAX: ${RATE_LIMIT_SIGNUP_MAX:-100}
       CHOKIDAR_USEPOLLING: 'true'
       CHOKIDAR_INTERVAL: '100'
+      # Observability disabled in e2e: no Alloy/Pyroscope in this profile, so
+      # the OTel SDKs are fail-open no-ops (values still read from .env.e2e).
+      OTEL_SDK_DISABLED: ${OTEL_SDK_DISABLED:?OTEL_SDK_DISABLED is required}
     expose:
       - '3001'
     volumes:
@@ -838,6 +929,13 @@ services:
       CHOKIDAR_USEPOLLING: 'true'
       CHOKIDAR_INTERVAL: '100'
       WATCHPACK_POLLING: 'true'
+      # Observability disabled in e2e (OTEL_SDK_DISABLED, from .env.e2e).
+      # Faro RUM values come from .env.e2e (port-shifted collector).
+      OTEL_SDK_DISABLED: ${OTEL_SDK_DISABLED:?OTEL_SDK_DISABLED is required}
+      NEXT_PUBLIC_FARO_COLLECTOR_URL: ${NEXT_PUBLIC_FARO_COLLECTOR_URL:?NEXT_PUBLIC_FARO_COLLECTOR_URL is required}
+      NEXT_PUBLIC_FARO_APP_NAME: ${NEXT_PUBLIC_FARO_APP_NAME:?NEXT_PUBLIC_FARO_APP_NAME is required}
+      NEXT_PUBLIC_FARO_APP_VERSION: ${NEXT_PUBLIC_FARO_APP_VERSION:?NEXT_PUBLIC_FARO_APP_VERSION is required}
+      NEXT_PUBLIC_FARO_ENVIRONMENT: ${NEXT_PUBLIC_FARO_ENVIRONMENT:?NEXT_PUBLIC_FARO_ENVIRONMENT is required}
     expose:
       - '3000'
     volumes:
@@ -897,6 +995,7 @@ volumes:
   pgadmin-data:
   e2e-postgres-data:
   e2e-redis-data:
+  nginx-logs:
   root-node_modules:
   apps-api-node_modules:
   apps-web-node_modules:

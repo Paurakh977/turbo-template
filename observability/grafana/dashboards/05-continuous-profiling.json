@@ -1,0 +1,43 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "title": "Continuous Profiling (Pyroscope)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "grafana-pyroscope-datasource", "uid": "pyroscope" },
+      "gridPos": { "h": 14, "w": 24, "x": 0, "y": 1 },
+      "id": 1,
+      "options": {},
+      "targets": [
+        {
+          "datasource": { "type": "grafana-pyroscope-datasource", "uid": "pyroscope" },
+          "profileTypeId": "process_cpu:cpu:nanoseconds:cpu:nanoseconds",
+          "query": "api.cpu{}",
+          "refId": "A"
+        }
+      ],
+      "title": "API Service CPU Flamegraph",
+      "type": "flamegraph"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "tags": ["profiling", "pyroscope"],
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": { "refresh_intervals": ["5s", "10s", "30s", "1m"] },
+  "timezone": "browser",
+  "title": "05 - Continuous Profiling",
+  "uid": "continuous-profiling",
+  "version": 1
+}

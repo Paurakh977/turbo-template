@@ -1,0 +1,6 @@
+---
+# Pyroscope configuration for local storage
+storage:
+  backend: filesystem
+  filesystem:
+    dir: /data

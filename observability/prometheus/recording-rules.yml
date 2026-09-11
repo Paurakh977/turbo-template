@@ -1,0 +1,12 @@
+groups:
+  - name: api_red_metrics
+    interval: 30s
+    rules:
+      - record: api:http_request_rate:5m
+        expr: rate(http_server_request_duration_seconds_count[5m])
+      - record: api:http_error_rate:5m
+        expr: rate(http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[5m])
+      - record: api:http_request_duration_p95:5m
+        expr: histogram_quantile(0.95, rate(http_server_request_duration_seconds_bucket[5m]))
+      - record: api:http_request_duration_p99:5m
+        expr: histogram_quantile(0.99, rate(http_server_request_duration_seconds_bucket[5m]))

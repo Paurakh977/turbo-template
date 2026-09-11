@@ -1,0 +1,216 @@
+// ═══════════════════════════════════════════════════════════════════════
+// Grafana Alloy Configuration — Observability Pipeline
+// ═══════════════════════════════════════════════════════════════════════
+
+// ─── OTLP Receiver (gRPC + HTTP) ─────────────────────────────────────
+// Receives traces, metrics, and logs from application OTel SDKs
+otelcol.receiver.otlp "default" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+    // Raised from the 4MiB default: per-route metric series (e.g. one series
+    // per /api/notes/<id> under k6 load) push single exports past 10MiB.
+    // Without this, Alloy rejects every metrics export with RESOURCE_EXHAUSTED
+    // and Grafana API dashboards go blind mid-load-test.
+    max_recv_msg_size = "64MiB"
+  }
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+
+  output {
+    traces  = [otelcol.processor.batch.default.input]
+    metrics = [otelcol.processor.batch.default.input]
+    logs    = [otelcol.processor.batch.default.input]
+  }
+}
+
+// ─── Batch Processor ─────────────────────────────────────────────────
+// Batches telemetry to reduce export overhead
+otelcol.processor.batch "default" {
+  timeout = "200ms"
+  send_batch_size = 512
+  send_batch_max_size = 1024
+
+  output {
+    traces  = [otelcol.exporter.otlp.tempo.input]
+    metrics = [otelcol.exporter.prometheus.default.input]
+    logs    = [otelcol.processor.attributes.loki_labels.input]
+  }
+}
+
+// ─── OTel → Loki Label Mapping ──────────────────────────────────────
+// Maps OTel resource attributes to Loki labels via hint attributes.
+// service.name → service_name, service.namespace, deployment.environment.name
+otelcol.processor.attributes "loki_labels" {
+  action {
+    key    = "loki.resource.labels"
+    action = "insert"
+    value  = "service.name, service.namespace, deployment.environment.name"
+  }
+
+  action {
+    key    = "loki.attribute.labels"
+    action = "insert"
+    value  = "service.name, service, level"
+  }
+
+  output {
+    logs = [otelcol.exporter.loki.default.input]
+  }
+}
+
+// ─── Trace Exporter → Tempo ──────────────────────────────────────────
+otelcol.exporter.otlp "tempo" {
+  client {
+    endpoint = "tempo:4317"
+    tls {
+      insecure = true
+    }
+  }
+}
+
+// ─── Metrics Exporter → Prometheus ───────────────────────────────────
+// Converts OTel metrics to Prometheus format and exposes for remote write
+otelcol.exporter.prometheus "default" {
+  forward_to = [prometheus.remote_write.default.receiver]
+}
+
+prometheus.remote_write "default" {
+  endpoint {
+    url = "http://prometheus:9090/api/v1/write"
+  }
+}
+
+// ─── Log Exporter → Loki ────────────────────────────────────────────
+otelcol.exporter.loki "default" {
+  forward_to = [loki.relabel.standard_labels.receiver]
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+
+// ─── Faro Receiver (Frontend RUM) ────────────────────────────────────
+// Receives browser telemetry from Grafana Faro SDK
+faro.receiver "default" {
+  server {
+    listen_address = "0.0.0.0"
+    listen_port = 12347
+
+    // SECURITY: In production, restrict to your app domain(s).
+    // Wired to FARO_CORS_ORIGINS env var (comma-separated) via sys.env + string.split.
+    // Example: FARO_CORS_ORIGINS=https://yourdomain.com,https://www.yourdomain.com
+    // "*" (default) allows any origin — local-only open mode, restrict before prod.
+    // Note: string.split("*", ",") == ["*"], so wildcard and lists both work.
+    cors_allowed_origins = string.split(sys.env("FARO_CORS_ORIGINS"), ",")
+  }
+
+  output {
+    logs   = [loki.process.faro.receiver]
+    traces = [otelcol.exporter.otlp.tempo.input]
+  }
+}
+
+// ─── Faro Log Processing ────────────────────────────────────────────
+// Extracts app_name from Faro log entries and sets service_name label
+loki.process "faro" {
+  forward_to = [loki.relabel.standard_labels.receiver]
+
+  // Faro SDK logs contain app_name as a key=value field in the log line
+  stage.regex {
+    expression = "(?:^|\\s)app_name=[\"']?(?P<app_name>[^\\s\"']+)[\"']?"
+  }
+
+  stage.labels {
+    values = {
+      service_name = "app_name",
+      service      = "app_name",
+    }
+  }
+}
+
+// ─── Nginx Log Ingestion ─────────────────────────────────────────────
+// Discovers and reads structured JSON Nginx access logs
+local.file_match "nginx_logs" {
+  path_targets = [{
+    __path__ = "/var/log/nginx/access.log",
+    service  = "nginx",
+  }]
+}
+
+loki.source.file "nginx" {
+  targets    = local.file_match.nginx_logs.targets
+  forward_to = [loki.process.nginx.receiver]
+}
+
+loki.process "nginx" {
+  forward_to = [loki.relabel.standard_labels.receiver]
+
+  stage.json {
+    expressions = {
+      status         = "status",
+      request_method = "request_method",
+      traceparent    = "traceparent",
+      request_time   = "request_time",
+    }
+  }
+
+  // Set low-cardinality labels only to prevent index explosion.
+  // service_name is the standard Loki label for service identification.
+  stage.labels {
+    values = {
+      service_name   = "service",
+      service        = "service",
+      request_method = "request_method",
+    }
+  }
+}
+
+// ─── Standard Labels Relabeling ──────────────────────────────────────
+// Guarantees consistent service_name, service, and job labels across all log streams.
+// Eliminates "unknown_service" and ensures dashboards and Tempo trace-to-logs work seamlessly.
+loki.relabel "standard_labels" {
+  forward_to = [loki.write.default.receiver]
+
+  // Replace any residual "unknown_service" with "web"
+  rule {
+    source_labels = ["service_name"]
+    regex         = "unknown_service"
+    target_label  = "service_name"
+    replacement   = "web"
+  }
+
+  // Sync service from service_name if service is empty
+  rule {
+    source_labels = ["service", "service_name"]
+    regex         = ";(.*)"
+    target_label  = "service"
+    replacement   = "$1"
+  }
+
+  // Sync service_name from service if service_name is empty
+  rule {
+    source_labels = ["service_name", "service"]
+    regex         = ";(.*)"
+    target_label  = "service_name"
+    replacement   = "$1"
+  }
+
+  // Ensure job label is formatted as turbo-template/<service_name> if job is empty
+  rule {
+    source_labels = ["job", "service_name"]
+    regex         = ";(.*)"
+    target_label  = "job"
+    replacement   = "turbo-template/$1"
+  }
+
+  // Default service_namespace to turbo-template if empty
+  rule {
+    source_labels = ["service_namespace"]
+    regex         = "^$"
+    target_label  = "service_namespace"
+    replacement   = "turbo-template"
+  }
+}

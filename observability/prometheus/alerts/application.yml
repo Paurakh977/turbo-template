@@ -1,0 +1,58 @@
+groups:
+  - name: application
+    rules:
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(http_server_request_duration_seconds_count{job=~"turbo-template/api|api",http_response_status_code=~"5.."}[5m]))
+          / sum(rate(http_server_request_duration_seconds_count{job=~"turbo-template/api|api"}[5m]))
+          > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          service: api
+        annotations:
+          summary: "API error rate above 5%"
+          description: "{{ $value | humanizePercentage }} of requests are failing."
+          dashboard: "/d/api-performance"
+
+      - alert: HighLatencyP95
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{job=~"turbo-template/api|api"}[5m])))
+          > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          service: api
+        annotations:
+          summary: "API p95 latency above 500ms"
+
+      - alert: HighLatencyP99
+        expr: |
+          histogram_quantile(0.99, sum by (le) (rate(http_server_request_duration_seconds_bucket{job=~"turbo-template/api|api"}[5m])))
+          > 1
+        for: 5m
+        labels:
+          severity: critical
+          service: api
+        annotations:
+          summary: "API p99 latency above 1s"
+
+      - alert: ServiceDown
+        expr: up{job="alloy"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service {{ $labels.job }} is down"
+
+      # Exporters have no dependents (scrape failure is tolerated), so process
+      # health is informational -> warning, not critical. This is the coverage
+      # for redis-exporter, which is alert-only by decision (shell-less image,
+      # no healthcheck possible — see docker-compose.observability.yml).
+      - alert: ExporterDown
+        expr: up{job=~"postgres-exporter|redis-exporter|node-exporter|cadvisor"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Exporter {{ $labels.job }} is down"
