@@ -1,8 +1,11 @@
 import { db } from '@repo/database';
+import { createLogger } from '@repo/observability';
 
 import type { ServerSession } from './session.utils';
 import { getImpersonatedBy } from './session.utils';
 import { sanitizeAuditMetadata } from './audit-metadata';
+
+const logger = createLogger('api.audit');
 
 /**
  * The single audit-row writer for rows attributed to an HTTP session (web
@@ -50,6 +53,6 @@ export async function writeAuditRow(
       },
     });
   } catch (error) {
-    console.error(`[AuditLog] ${input.action} failed:`, error);
+    logger.error({ action: input.action, err: error }, 'Audit log write failed');
   }
 }

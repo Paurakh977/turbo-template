@@ -1,6 +1,12 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+} from '@nestjs/common';
 import { db } from '@repo/database';
 import { auth } from '@repo/auth';
+import { withSpan, AppAttributes } from '@repo/observability';
 
 import type { ServerSession } from '../common/session.utils';
 import {
@@ -9,6 +15,7 @@ import {
   hasOperatorRole,
 } from '../common/session.utils';
 import { writeAuditRow } from '../common/audit-writer';
+import { MetricsService } from '../common/observability/metrics.service';
 import { CreateNoteDto, UpdateNoteDto, DEFAULT_LIMIT } from './dto/note.dto';
 
 export type SerializedNote = {
@@ -42,6 +49,23 @@ function serialize(note: {
 }
 
 /**
+ * Prisma "record not found" (P2025) detector.
+ *
+ * update/delete are atomic single-statement writes: when the row vanishes
+ * between the ownership pre-read and the write, Prisma throws P2025 instead
+ * of returning a count. Duck-typed on `code` (rather than importing the
+ * generated client error class) so the API tier stays decoupled from the
+ * database package's generated-client path.
+ */
+function isRecordNotFoundError(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as { code?: unknown }).code === 'P2025'
+  );
+}
+
+/**
  * Domain rules mirrored 1:1 from the previous web-tier implementation so
  * Phase 3's RBAC-parity gate (doc 3.4) can compare verdicts exactly:
  * - create/update/delete gated by the EFFECTIVE user's live permission
@@ -52,6 +76,8 @@ function serialize(note: {
  */
 @Injectable()
 export class NotesService {
+  constructor(private readonly metricsService: MetricsService) {}
+
   async assertPermission(
     session: ServerSession,
     action: 'create' | 'update' | 'delete',
@@ -82,25 +108,42 @@ export class NotesService {
     limit: number;
     offset: number;
   }> {
-    const viewerRole = await this.getFreshRoleRaw(getEffectiveUserId(session));
-    // Visibility parity with the pre-migration implementation: the
-    // `notes.list` permission (operator and above) grants the full note
-    // list; plain users only ever see their own. Admin (and above) is a
-    // STRICTER bar reserved for the edit-others bypass below.
-    const canListAll = hasOperatorRole(viewerRole);
+    return withSpan('notes.list', async (span) => {
+      span.setAttribute(AppAttributes.OPERATION, 'notes.list');
+      span.setAttribute(AppAttributes.FEATURE, 'notes');
+      span.setAttribute(AppAttributes.ENTITY_TYPE, 'note');
 
-    const where = canListAll ? undefined : { authorId: session.user.id };
-    const [notes, total] = await Promise.all([
-      db.note.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        include: NOTE_INCLUDE,
-        take: limit,
-        skip: offset,
-      }),
-      db.note.count({ where }),
-    ]);
-    return { notes: notes.map(serialize), viewerRole, total, limit, offset };
+      try {
+        const viewerRole = await this.getFreshRoleRaw(
+          getEffectiveUserId(session),
+        );
+        const canListAll = hasOperatorRole(viewerRole);
+
+        const where = canListAll ? undefined : { authorId: session.user.id };
+        const [notes, total] = await Promise.all([
+          db.note.findMany({
+            where,
+            orderBy: { createdAt: 'desc' },
+            include: NOTE_INCLUDE,
+            take: limit,
+            skip: offset,
+          }),
+          db.note.count({ where }),
+        ]);
+
+        this.metricsService.recordNoteOperation('list', 'success');
+        return {
+          notes: notes.map(serialize),
+          viewerRole,
+          total,
+          limit,
+          offset,
+        };
+      } catch (err) {
+        this.metricsService.recordNoteOperation('list', 'failure');
+        throw err;
+      }
+    });
   }
 
   async create(
@@ -108,19 +151,37 @@ export class NotesService {
     dto: CreateNoteDto,
     meta: { ip: string | null; userAgent: string | null },
   ): Promise<SerializedNote> {
-    await this.assertPermission(session, 'create');
+    return withSpan('notes.create', async (span) => {
+      span.setAttribute(AppAttributes.OPERATION, 'notes.create');
+      span.setAttribute(AppAttributes.FEATURE, 'notes');
+      span.setAttribute(AppAttributes.ENTITY_TYPE, 'note');
 
-    const note = await db.note.create({
-      data: { title: dto.title, content: dto.content, authorId: session.user.id },
-      include: NOTE_INCLUDE,
+      try {
+        await this.assertPermission(session, 'create');
+
+        const note = await db.note.create({
+          data: {
+            title: dto.title,
+            content: dto.content,
+            authorId: session.user.id,
+          },
+          include: NOTE_INCLUDE,
+        });
+
+        span.setAttribute(AppAttributes.ENTITY_ID, note.id);
+
+        await this.writeAudit(session, 'note_created', meta, {
+          noteId: note.id,
+          title: note.title,
+        });
+
+        this.metricsService.recordNoteOperation('create', 'success');
+        return serialize(note);
+      } catch (err) {
+        this.metricsService.recordNoteOperation('create', 'failure');
+        throw err;
+      }
     });
-
-    await this.writeAudit(session, 'note_created', meta, {
-      noteId: note.id,
-      title: note.title,
-    });
-
-    return serialize(note);
   }
 
   async update(
@@ -129,62 +190,68 @@ export class NotesService {
     dto: UpdateNoteDto,
     meta: { ip: string | null; userAgent: string | null },
   ): Promise<SerializedNote> {
-    await this.assertPermission(session, 'update');
+    return withSpan('notes.update', async (span) => {
+      span.setAttribute(AppAttributes.OPERATION, 'notes.update');
+      span.setAttribute(AppAttributes.FEATURE, 'notes');
+      span.setAttribute(AppAttributes.ENTITY_TYPE, 'note');
+      span.setAttribute(AppAttributes.ENTITY_ID, noteId);
 
-    // An empty (or whitespace-only) patch would bump updatedAt - and write an
-    // audit row - while changing nothing. Emptiness is decided on trimmed
-    // values; what gets persisted stays verbatim.
-    if (!dto.title?.trim() && !dto.content?.trim()) {
-      throw new BadRequestException('Nothing to update.');
-    }
+      try {
+        await this.assertPermission(session, 'update');
 
-    const roleRaw = await this.getFreshRoleRaw(getEffectiveUserId(session));
-    const isAdmin = hasAdminRole(roleRaw);
+        if (!dto.title?.trim() && !dto.content?.trim()) {
+          throw new BadRequestException('Nothing to update.');
+        }
 
-    // Full row up front: doubles as the ownership check AND the fallback
-    // payload if a concurrent delete wins right after our write commits.
-    const note = await db.note.findUnique({
-      where: { id: noteId },
-      include: NOTE_INCLUDE,
-    });
-    if (!note) throw new NotFoundException('Note not found.');
-    if (!isAdmin && note.authorId !== session.user.id) {
-      throw new ForbiddenException('You can only edit your own notes.');
-    }
+        const roleRaw = await this.getFreshRoleRaw(
+          getEffectiveUserId(session),
+        );
+        const isAdmin = hasAdminRole(roleRaw);
 
-    // Conditional bulk write instead of findUnique -> update: a concurrent
-    // delete BEFORE our write deterministically yields count 0 (mapped to a
-    // clean 404 below) instead of raw Prisma P2025 surfacing as a 500.
-    const updated = await db.note.updateMany({
-      where: { id: noteId },
-      data: {
-        ...(dto.title ? { title: dto.title } : {}),
-        ...(dto.content ? { content: dto.content } : {}),
-      },
-    });
-    if (updated.count === 0) {
-      throw new NotFoundException('Note not found.');
-    }
+        const note = await db.note.findUnique({
+          where: { id: noteId },
+          include: NOTE_INCLUDE,
+        });
+        if (!note) throw new NotFoundException('Note not found.');
+        if (!isAdmin && note.authorId !== session.user.id) {
+          throw new ForbiddenException('You can only edit your own notes.');
+        }
 
-    await this.writeAudit(session, 'note_updated', meta, {
-      noteId,
-      title: dto.title || note.title,
-    });
+        // Single atomic write that also returns the updated row (1 query
+        // instead of updateMany + refetch). Ownership/admin stays in JS on
+        // purpose: folding `authorId` into the WHERE clause would conflate
+        // 404 (missing) with 403 (not yours) and silently break the admin
+        // override (admins may edit others' notes). authorId is immutable,
+        // so the pre-read cannot go stale; a delete winning the race throws
+        // P2025, mapped to 404 below.
+        let updated;
+        try {
+          updated = await db.note.update({
+            where: { id: noteId },
+            data: {
+              ...(dto.title ? { title: dto.title } : {}),
+              ...(dto.content ? { content: dto.content } : {}),
+            },
+            include: NOTE_INCLUDE,
+          });
+        } catch (err) {
+          if (isRecordNotFoundError(err)) {
+            throw new NotFoundException('Note not found.');
+          }
+          throw err;
+        }
 
-    // Refetch for authoritative post-update values. If a concurrent delete
-    // lands between the committed write and this read, the UPDATE still
-    // happened — answer with a best-effort payload instead of lying with a
-    // 404 or skipping the audit row.
-    const fresh = await db.note.findUnique({
-      where: { id: noteId },
-      include: NOTE_INCLUDE,
-    });
-    if (fresh) return serialize(fresh);
-    return serialize({
-      ...note,
-      ...(dto.title ? { title: dto.title } : {}),
-      ...(dto.content ? { content: dto.content } : {}),
-      updatedAt: new Date(),
+        await this.writeAudit(session, 'note_updated', meta, {
+          noteId,
+          title: dto.title || note.title,
+        });
+
+        this.metricsService.recordNoteOperation('update', 'success');
+        return serialize(updated);
+      } catch (err) {
+        this.metricsService.recordNoteOperation('update', 'failure');
+        throw err;
+      }
     });
   }
 
@@ -193,20 +260,41 @@ export class NotesService {
     noteId: string,
     meta: { ip: string | null; userAgent: string | null },
   ): Promise<void> {
-    await this.assertPermission(session, 'delete');
+    return withSpan('notes.delete', async (span) => {
+      span.setAttribute(AppAttributes.OPERATION, 'notes.delete');
+      span.setAttribute(AppAttributes.FEATURE, 'notes');
+      span.setAttribute(AppAttributes.ENTITY_TYPE, 'note');
+      span.setAttribute(AppAttributes.ENTITY_ID, noteId);
 
-    const existing = await db.note.findUnique({
-      where: { id: noteId },
-      select: { title: true },
-    });
-    if (!existing) throw new NotFoundException('Note not found.');
+      try {
+        await this.assertPermission(session, 'delete');
 
-    const deleted = await db.note.deleteMany({ where: { id: noteId } });
-    if (deleted.count === 0) throw new NotFoundException('Note not found.');
+        // Single atomic delete returning the title for the audit row (1 query
+        // instead of findUnique + deleteMany). A missing row throws P2025,
+        // mapped to 404 — no audit row for a deletion that never happened.
+        let existing;
+        try {
+          existing = await db.note.delete({
+            where: { id: noteId },
+            select: { title: true },
+          });
+        } catch (err) {
+          if (isRecordNotFoundError(err)) {
+            throw new NotFoundException('Note not found.');
+          }
+          throw err;
+        }
 
-    await this.writeAudit(session, 'note_deleted', meta, {
-      noteId,
-      title: existing.title,
+        await this.writeAudit(session, 'note_deleted', meta, {
+          noteId,
+          title: existing.title,
+        });
+
+        this.metricsService.recordNoteOperation('delete', 'success');
+      } catch (err) {
+        this.metricsService.recordNoteOperation('delete', 'failure');
+        throw err;
+      }
     });
   }
 
@@ -238,4 +326,3 @@ export class NotesService {
     await writeAuditRow(session, { action, metadata }, meta);
   }
 }
-

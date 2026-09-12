@@ -4,13 +4,14 @@ import {
   ExceptionFilter,
   HttpException,
   HttpStatus,
-  Logger,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
+import { trace, SpanStatusCode } from '@opentelemetry/api';
+import { createLogger } from '@repo/observability';
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
-  private readonly logger = new Logger(HttpExceptionFilter.name);
+  private readonly logger = createLogger('http-exception');
 
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
@@ -24,11 +25,35 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
     const responseBody = this.normalizeMessage(exception, status);
 
-    if (status >= 500) {
-      this.logger.error(
-        `${request.method} ${request.url} ${status}`,
-        exception instanceof Error ? exception.stack : undefined,
+    // Enrich the active OpenTelemetry span
+    const activeSpan = trace.getActiveSpan();
+    if (activeSpan) {
+      activeSpan.setAttribute('http.response.status_code', status);
+      activeSpan.setAttribute(
+        'error.type',
+        exception instanceof HttpException
+          ? exception.name
+          : exception instanceof Error
+            ? exception.constructor.name
+            : 'UnknownException',
       );
+      activeSpan.setStatus({
+        code: SpanStatusCode.ERROR,
+        message: exception instanceof Error ? exception.message : String(exception),
+      });
+      if (exception instanceof Error) {
+        activeSpan.recordException(exception);
+      }
+    }
+
+    if (status >= 500) {
+      this.logger.error({
+        method: request.method,
+        url: request.url,
+        status,
+        err: exception instanceof Error ? exception : undefined,
+        msg: `${request.method} ${request.url} ${status}`,
+      });
     }
 
     response.status(status).json({

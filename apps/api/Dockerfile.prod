@@ -55,13 +55,15 @@ COPY --from=builder /app/packages/auth/dist ./packages/auth/dist
 COPY --from=builder /app/packages/database/dist ./packages/database/dist
 COPY --from=builder /app/packages/roles/dist ./packages/roles/dist
 COPY --from=builder /app/packages/api/dist ./packages/api/dist
-# --prod frozen installs skip workspace link creation; restore the four
+COPY --from=builder /app/packages/observability/dist ./packages/observability/dist
+# --prod frozen installs skip workspace link creation; restore the
 # @repo/* links Node needs to resolve the imports above.
 RUN mkdir -p /rt/node_modules/@repo \
-  && ln -s ../../packages/auth       /rt/node_modules/@repo/auth \
-  && ln -s ../../packages/database   /rt/node_modules/@repo/database \
-  && ln -s ../../packages/roles      /rt/node_modules/@repo/roles \
-  && ln -s ../../packages/api        /rt/node_modules/@repo/api
+  && ln -s ../../packages/auth            /rt/node_modules/@repo/auth \
+  && ln -s ../../packages/database        /rt/node_modules/@repo/database \
+  && ln -s ../../packages/roles           /rt/node_modules/@repo/roles \
+  && ln -s ../../packages/api             /rt/node_modules/@repo/api \
+  && ln -s ../../packages/observability   /rt/node_modules/@repo/observability
 #
 # Dead-weight deletion, each entry tied to its origin chain (boot smoke test
 # guards the whole list - it already caught two wrong guesses):

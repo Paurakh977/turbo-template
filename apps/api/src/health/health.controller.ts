@@ -23,6 +23,17 @@ import { REDIS_CLIENT } from '../redis/redis.module';
 // route without @AllowAnonymous. The docker HEALTHCHECK hits these endpoints, so
 // they MUST be anonymous - otherwise the container is marked unhealthy and
 // every `depends_on: service_healthy` consumer (web, proxy) never starts.
+//
+// NOTE: health endpoints are DELIBERATELY throttled like any other route —
+// the integration suite contracts this (`security-regression`: 210 sequential
+// hits must yield a 429). No `@SkipThrottle()` here: docker liveness probes
+// originate in-container (127.0.0.1) while external floods arrive with
+// distinct source IPs (nginx gateway / X-Forwarded-For), so probes and floods
+// never share a throttler bucket and a flood cannot flap `unhealthy`.
+// (An earlier `@SkipThrottle({ global: true })` was reverted for exactly this
+// reason — it broke the contracted suite. Bare `@SkipThrottle()` wouldn't
+// even have matched: the throttler is named 'global', the default skips only
+// a throttler named 'default'.)
 @AllowAnonymous()
 export class HealthController {
   private readonly logger = new Logger(HealthController.name);

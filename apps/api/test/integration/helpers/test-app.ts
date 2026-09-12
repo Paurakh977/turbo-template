@@ -93,7 +93,7 @@ export async function createTestApp(): Promise<INestApplication> {
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'traceparent', 'tracestate', 'baggage'],
   });
 
   // The dummy OAuth provider (enabled only under the oauth config) makes

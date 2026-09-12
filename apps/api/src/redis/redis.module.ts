@@ -1,12 +1,15 @@
 import { Module, Global, OnModuleDestroy, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
+import { createLogger } from '@repo/observability';
 
 export const REDIS_CLIENT = 'REDIS_CLIENT';
 
 type GlobalRedisState = typeof globalThis & {
   __repoSharedRedisClient?: Redis;
 };
+
+const logger = createLogger('redis');
 
 @Global()
 @Module({
@@ -29,11 +32,11 @@ type GlobalRedisState = typeof globalThis & {
         });
 
         client.on('error', (err) =>
-          console.error('[Redis] Connection error:', err),
+          logger.error({ err, msg: '[Redis] Connection error' }),
         );
-        client.on('connect', () => console.log('[Redis] Connected'));
-        client.on('reconnecting', () => console.warn('[Redis] Reconnecting…'));
-        client.on('end', () => console.log('[Redis] Connection closed'));
+        client.on('connect', () => logger.info('[Redis] Connected'));
+        client.on('reconnecting', () => logger.warn('[Redis] Reconnecting…'));
+        client.on('end', () => logger.info('[Redis] Connection closed'));
 
         globalRedisState.__repoSharedRedisClient = client;
         return client;
