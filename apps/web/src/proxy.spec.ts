@@ -51,6 +51,17 @@ describe('buildCSP', () => {
 
     process.env.NODE_ENV = original;
   });
+
+  it('contains self in connect-src directive', () => {
+    const mockRequest = {
+      headers: new Headers(),
+      url: 'http://localhost:3000/',
+    } as unknown as import('next/server').NextRequest;
+
+    const response = proxy(mockRequest);
+    const csp = response.headers.get('Content-Security-Policy');
+    expect(csp).toMatch(/connect-src 'self'/);
+  });
 });
 
 describe('proxy function', () => {

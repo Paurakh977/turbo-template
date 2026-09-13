@@ -5,6 +5,11 @@ const hadPort = process.env.PORT !== undefined;
 
 config({ path: resolve(process.cwd(), '../../.env') });
 
+// k6 load-testing overrides: when K6_TESTING=true, layer .env.k6 on top.
+if (process.env.K6_TESTING === 'true') {
+  config({ path: resolve(process.cwd(), '../../.env.k6'), override: true });
+}
+
 // The root .env sets PORT=3001 for the API. The web dev/start server must
 // keep port 3000 locally, so drop the root value when nothing else (e.g.
 // Docker Compose) already injected it.
@@ -44,6 +49,19 @@ if (
   );
 }
 
+// Faro RUM identity (M3): the browser client silently no-ops when the
+// collector URL is missing, but a SET collector with MISSING identity throws
+// at runtime in every browser. These are NEXT_PUBLIC_* (build args, present
+// in the Docker builder), so validating here is build-safe. Server-side OTel
+// keys are deliberately NOT validated here — the Docker builder has no OTel
+// env; apps/web/src/instrumentation.ts requireEnv() owns them and fails fast
+// at server boot instead.
+if (process.env.NEXT_PUBLIC_FARO_COLLECTOR_URL?.trim()) {
+  getRequiredEnv('NEXT_PUBLIC_FARO_APP_NAME');
+  getRequiredEnv('NEXT_PUBLIC_FARO_APP_VERSION');
+  getRequiredEnv('NEXT_PUBLIC_FARO_ENVIRONMENT');
+}
+
 const allowedDevOrigins = Array.from(
   new Set(
     rawAllowedDevOrigins
@@ -60,11 +78,19 @@ const allowedDevOrigins = Array.from(
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'standalone',
-  // Architecture B: web holds NO database drivers and NO auth runtime.
-  // (serverExternalPackages previously listed pg/@prisma/ioredis to stop
-  // webpack duplicating the bundled driver copies that caused the 08P01
-  // wire-corruption incident; with the packages removed entirely the hazard
-  // class is eliminated by construction.)
+  serverExternalPackages: [
+    '@opentelemetry/sdk-node',
+    '@opentelemetry/sdk-trace-node',
+    '@opentelemetry/sdk-metrics',
+    '@opentelemetry/sdk-logs',
+    '@opentelemetry/exporter-trace-otlp-grpc',
+    '@opentelemetry/exporter-metrics-otlp-grpc',
+    '@opentelemetry/exporter-logs-otlp-grpc',
+    '@opentelemetry/instrumentation-http',
+    '@opentelemetry/instrumentation',
+    '@repo/observability',
+    'pino',
+  ],
   poweredByHeader: false,
   // Type errors must fail the build; CI runs `turbo run typecheck` too, but a
   // local `next build` should never be able to ship type-broken code.

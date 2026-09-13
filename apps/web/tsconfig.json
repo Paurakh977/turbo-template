@@ -17,5 +17,5 @@
     "next.config.js",
     ".next/types/**/*.ts"
   ],
-  "exclude": ["node_modules", "src/**/*.spec.ts"]
+  "exclude": ["node_modules", "src/**/*.spec.ts", "e2e"]
 }

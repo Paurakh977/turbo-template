@@ -4,6 +4,7 @@ import localFont from 'next/font/local';
 import '../styles/globals.css';
 import { THEME_INIT_SCRIPT, THEME_STORAGE_KEY } from '../lib/theme';
 import { ToastProvider } from '../lib/toast-context';
+import { FaroInit } from '../lib/faro-init';
 
 const geistSans = localFont({
   src: '../fonts/GeistVF.woff',
@@ -44,6 +45,7 @@ export default async function RootLayout({
         />
       </head>
       <body className={`${geistSans.variable} ${geistMono.variable}`}>
+        <FaroInit />
         <ToastProvider>{children}</ToastProvider>
       </body>
     </html>

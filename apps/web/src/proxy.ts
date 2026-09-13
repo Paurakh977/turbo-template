@@ -3,18 +3,32 @@ import { NextRequest, NextResponse } from 'next/server';
 const isDev = process.env.NODE_ENV === 'development';
 
 /**
- * Browser-side API origin. When NEXT_PUBLIC_API_URL is an absolute URL (the
- * documented non-nginx mode) it must be allow-listed, otherwise the landing
- * page's fetch(`${NEXT_PUBLIC_API_URL}/links`) is blocked by default-src.
+ * Browser-side allowed origins for connect-src.
+ * Includes NEXT_PUBLIC_API_URL and NEXT_PUBLIC_FARO_COLLECTOR_URL when configured
+ * as absolute URLs, allowing browser telemetry and API calls while maintaining CSP integrity.
  */
 const connectSrc = (() => {
-  const raw = process.env.NEXT_PUBLIC_API_URL?.trim();
-  if (!raw || raw.startsWith('/')) return "'self'";
-  try {
-    return `'self' ${new URL(raw).origin}`;
-  } catch {
-    return "'self'";
+  const sources = ["'self'"];
+
+  const rawApi = process.env.NEXT_PUBLIC_API_URL?.trim();
+  if (rawApi && !rawApi.startsWith('/')) {
+    try {
+      sources.push(new URL(rawApi).origin);
+    } catch {
+      /* ignore invalid URL */
+    }
   }
+
+  const rawFaro = process.env.NEXT_PUBLIC_FARO_COLLECTOR_URL?.trim();
+  if (rawFaro && !rawFaro.startsWith('/')) {
+    try {
+      sources.push(new URL(rawFaro).origin);
+    } catch {
+      /* ignore invalid URL */
+    }
+  }
+
+  return Array.from(new Set(sources)).join(' ');
 })();
 
 /**
