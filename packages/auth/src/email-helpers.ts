@@ -1,7 +1,9 @@
 import { Resend } from 'resend';
+import { createLogger } from '@repo/observability';
 import { devEmailOverride, emailFrom, resendApiKey } from './env';
 
 const resend = resendApiKey ? new Resend(resendApiKey) : null;
+const logger = createLogger('auth:email');
 
 /**
  * Centralized email delivery helper.
@@ -20,7 +22,10 @@ export async function sendEmail({
   html: string;
 }) {
   if (!resend) {
-    console.log(`[AUTH EMAIL][NO_PROVIDER] to=${to} subject=${subject}`);
+    logger.info({
+      msg: `[AUTH EMAIL][NO_PROVIDER] subject=${subject}`,
+      domain: to.includes('@') ? to.split('@')[1] : 'unknown',
+    });
     return;
   }
   const recipient = devEmailOverride ?? to;
@@ -39,17 +44,25 @@ export async function sendEmail({
   });
 
   if (error) {
-    console.error('[Email Error]', {
+    logger.error({
+      err: error,
       name: error.name,
       statusCode: error.statusCode,
       message: error.message,
       subject,
-      recipient: recipient.includes('@') ? recipient.split('@')[1] : 'unknown',
+      recipientDomain: recipient.includes('@')
+        ? recipient.split('@')[1]
+        : 'unknown',
+      msg: '[Email Error] Failed to send email',
     });
     throw error;
   } else if (devEmailOverride) {
-    console.log(
-      `[Email] Redirected from ${to} → ${recipient} | Subject: ${subject}`,
-    );
+    logger.info({
+      msg: `[Email] Redirected email delivery`,
+      subject,
+      recipientDomain: recipient.includes('@')
+        ? recipient.split('@')[1]
+        : 'unknown',
+    });
   }
 }

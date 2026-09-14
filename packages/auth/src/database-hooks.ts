@@ -1,6 +1,7 @@
 import { db } from '@repo/database';
 import { createAuthMiddleware } from 'better-auth/api';
 import { parseRoles, serializeRoles } from '@repo/roles';
+import { createLogger, AuthAttributes, trace } from '@repo/observability';
 import {
   invalidateUserCache,
   popPendingDeletion,
@@ -11,6 +12,8 @@ import {
   type UserData,
 } from './pending-storage';
 import { resolveClientIp } from './client-ip';
+
+const logger = createLogger('auth:database-hooks');
 
 type HeaderSource = {
   headers?: { get: (key: string) => string | null };
@@ -55,6 +58,12 @@ export const databaseHooks = {
         const u = user as unknown as UserData;
         if (!u?.id) return;
 
+        const activeSpan = trace.getActiveSpan();
+        if (activeSpan) {
+          activeSpan.setAttribute(AuthAttributes.ACTION, 'user_signed_up');
+          activeSpan.setAttribute(AuthAttributes.STATUS, 'success');
+        }
+
         const { ipAddress, userAgent } = extractIpAndUserAgent(
           ctx as HeaderSource | undefined,
         );
@@ -70,7 +79,7 @@ export const databaseHooks = {
             },
           })
           .catch((e: unknown) =>
-            console.error('[AuditLog] user_signed_up failed:', e),
+            logger.error({ err: e, msg: '[AuditLog] user_signed_up failed' }),
           );
       },
     },
@@ -157,7 +166,10 @@ export const databaseHooks = {
         await Promise.allSettled(writes).then((results) => {
           for (const r of results) {
             if (r.status === 'rejected') {
-              console.error('[AuditLog] user update hook failed:', r.reason);
+              logger.error({
+                err: r.reason,
+                msg: '[AuditLog] user update hook failed',
+              });
             }
           }
         });
@@ -172,6 +184,12 @@ export const databaseHooks = {
       after: async (user: unknown) => {
         const u = user as unknown as UserData;
         if (!u?.id) return;
+
+        const activeSpan = trace.getActiveSpan();
+        if (activeSpan) {
+          activeSpan.setAttribute(AuthAttributes.ACTION, 'account_deleted');
+          activeSpan.setAttribute(AuthAttributes.STATUS, 'success');
+        }
 
         const meta = await popPendingDeletion(u.id);
 
@@ -188,7 +206,7 @@ export const databaseHooks = {
               },
             })
             .catch((e: unknown) =>
-              console.error('[AuditLog] account_deleted failed:', e),
+              logger.error({ err: e, msg: '[AuditLog] account_deleted failed' }),
             );
         }
 
@@ -214,6 +232,16 @@ export const databaseHooks = {
       after: async (session: unknown, ctx: unknown) => {
         const s = session as unknown as SessionData;
         if (!s?.userId) return;
+
+        const activeSpan = trace.getActiveSpan();
+        if (activeSpan) {
+          activeSpan.setAttribute(
+            AuthAttributes.ACTION,
+            s.impersonatedBy ? 'user_impersonated' : 'session_created',
+          );
+          activeSpan.setAttribute(AuthAttributes.STATUS, 'success');
+        }
+
         const { ipAddress, userAgent } = extractIpAndUserAgent(
           ctx as HeaderSource | undefined,
         );
@@ -231,7 +259,7 @@ export const databaseHooks = {
             },
           })
           .catch((e: unknown) =>
-            console.error('[AuditLog] session_created failed:', e),
+            logger.error({ err: e, msg: '[AuditLog] session_created failed' }),
           );
       },
     },
@@ -241,6 +269,15 @@ export const databaseHooks = {
       before: async (session: unknown, ctx: unknown) => {
         const s = session as unknown as SessionData;
         if (!s?.userId) return;
+
+        const activeSpan = trace.getActiveSpan();
+        if (activeSpan) {
+          activeSpan.setAttribute(
+            AuthAttributes.ACTION,
+            s.impersonatedBy ? 'user_stop_impersonating' : 'user_signed_out',
+          );
+          activeSpan.setAttribute(AuthAttributes.STATUS, 'success');
+        }
 
         if (
           s.impersonatedBy &&
@@ -283,7 +320,7 @@ export const databaseHooks = {
             },
           })
           .catch((e: unknown) =>
-            console.error('[AuditLog] session delete failed:', e),
+            logger.error({ err: e, msg: '[AuditLog] session delete failed' }),
           );
       },
     },

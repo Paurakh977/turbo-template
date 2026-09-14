@@ -17,7 +17,7 @@ export async function enforceRoleHierarchy(
   ctx: Parameters<Parameters<typeof createAuthMiddleware>[0]>[0],
   targetUserId: string,
 ): Promise<void> {
-  const session = await getSessionFromCtx(ctx);
+  const session = await getSessionFromCtx(ctx as any);
   if (!session) {
     throw new APIError('UNAUTHORIZED', { message: 'Authentication required.' });
   }

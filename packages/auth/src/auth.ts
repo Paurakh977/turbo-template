@@ -1,5 +1,5 @@
 import './load-env';
-import { betterAuth } from 'better-auth';
+import { betterAuth, type BetterAuthPlugin } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { twoFactor } from 'better-auth/plugins/two-factor';
 import { admin } from 'better-auth/plugins/admin';
@@ -7,6 +7,7 @@ import { jwt } from 'better-auth/plugins';
 import { genericOAuth } from 'better-auth/plugins';
 import { nextCookies } from 'better-auth/next-js';
 import { createAuthMiddleware, APIError } from 'better-auth/api';
+import { createLogger } from '@repo/observability';
 import { AUTH_BASE_PATH, ADMIN_PLUGIN_ROLES, ac } from './permissions';
 import { parseRoles } from '@repo/roles';
 import { validatePasswordPolicy } from './password-policy';
@@ -29,6 +30,8 @@ import {
   usingPlaceholderSecret,
 } from './env';
 import { TRUSTED_PROXY_CIDRS } from './client-ip';
+
+const logger = createLogger('auth');
 
 export const ADMIN_ROLES = ['admin', 'superAdmin'] as const;
 export type AdminRole = (typeof ADMIN_ROLES)[number];
@@ -79,18 +82,28 @@ export const auth = betterAuth({
   // -------------------------------------------------------------------------
   // Hooks — server-side password complexity enforcement
   //
-  // Better Auth only enforces minPasswordLength / maxPasswordLength. This
-  // hook adds uppercase + lowercase + number + symbol requirements that
-  // match the client-side validation in apps/web/src/lib/validation.ts.
+  // Better Auth only enforces minPasswordLength / maxPasswordLength (see
+  // resetPassword in better-auth/src/api/routes/password.ts — length checks
+  // only). This hook adds uppercase + lowercase + number + symbol
+  // requirements that match the client-side validation in
+  // apps/web/src/lib/validation.ts.
   //
-  // Applied to: sign-up (new accounts) and change-password (credential
-  // accounts updating their password). Reset-password is intentionally
-  // excluded — users clicking an email link should not be blocked by
-  // complexity rules they haven't seen; enforcement happens on next sign-in.
+  // Applied to every endpoint that sets a credential password:
+  //   - /sign-up/email      (body.password)
+  //   - /change-password    (body.newPassword)
+  //   - /reset-password     (body.newPassword — the token-redemption endpoint
+  //                           that actually writes the new hash)
+  // Reset-password MUST be covered: it is reachable with only an emailed
+  // token, so skipping it lets an attacker (or user) set a weak password
+  // server-side regardless of what the reset-password UI validates.
   // -------------------------------------------------------------------------
   hooks: {
     before: createAuthMiddleware(async (ctx) => {
-      if (ctx.path === '/sign-up/email' || ctx.path === '/change-password') {
+      if (
+        ctx.path === '/sign-up/email' ||
+        ctx.path === '/change-password' ||
+        ctx.path === '/reset-password'
+      ) {
         const body = ctx.body as { password?: string; newPassword?: string };
         const password = body.newPassword ?? body.password;
 
@@ -141,7 +154,7 @@ export const auth = betterAuth({
     ? ((r) => ({
         get: async (key) => {
           const value = await r.get(key).catch((error) => {
-            console.error('[Redis Error] secondaryStorage.get failed:', error);
+            logger.error({ err: error, msg: '[Redis Error] secondaryStorage.get failed' });
             return null;
           });
           return value ?? null;
@@ -154,47 +167,41 @@ export const auth = betterAuth({
 
           if (ttlSeconds) {
             await r.set(key, value, 'EX', ttlSeconds).catch((error) =>
-              console.error('[Redis Error] secondaryStorage.set failed:', {
+              logger.error({
                 key,
                 ttl: ttlSeconds,
-                error,
+                err: error,
+                msg: '[Redis Error] secondaryStorage.set failed',
               }),
             );
             return;
           }
 
           await r.set(key, value).catch((error) =>
-            console.error('[Redis Error] secondaryStorage.set failed:', {
+            logger.error({
               key,
-              error,
+              err: error,
+              msg: '[Redis Error] secondaryStorage.set failed',
             }),
           );
         },
         delete: async (key) => {
           await r.del(key).catch((error) =>
-            console.error('[Redis Error] secondaryStorage.delete failed:', {
+            logger.error({
               key,
-              error,
+              err: error,
+              msg: '[Redis Error] secondaryStorage.delete failed',
             }),
           );
         },
-        // Atomic single-use read (Redis >= 6.2 GETDEL): verification tokens
-        // / one-time codes are consumed without the read-then-delete race.
-        // Better Auth gates state changes on a non-null return, so consume
-        // MUST stay atomic across processes - the SecondaryStorage contract
-        // forbids separate get+delete (two consumers could both receive the
-        // value). The legacy path therefore uses ONE Lua GET+DEL script
-        // (mirroring increment() below) so Redis < 6.2 stays supported
-        // atomically; a total storage failure fails CLOSED (null), never
-        // returning a value it failed to consume.
         getAndDelete: async (key: string) => {
           try {
             return await r.getdel(key);
           } catch (error) {
-            console.error(
-              '[Redis Error] secondaryStorage.getAndDelete (GETDEL) failed:',
-              error,
-            );
+            logger.error({
+              err: error,
+              msg: '[Redis Error] secondaryStorage.getAndDelete (GETDEL) failed',
+            });
             try {
               return (await r.eval(
                 `local v = redis.call('GET', KEYS[1])
@@ -204,19 +211,14 @@ return v`,
                 key,
               )) as string | null;
             } catch (fallbackError) {
-              console.error(
-                '[Redis Error] secondaryStorage.getAndDelete failed:',
-                fallbackError,
-              );
+              logger.error({
+                err: fallbackError,
+                msg: '[Redis Error] secondaryStorage.getAndDelete failed',
+              });
               return null;
             }
           }
         },
-        // Atomic fixed-window counter backing Better Auth's rate limiter
-        // (it wraps this into `consume`; without it the limiter degrades to
-        // a racy get->decide->set and warns "best-effort" at boot).
-        // TTL is applied on creation only - the counter expires a fixed
-        // window after the first hit. `ttl` is in SECONDS.
         increment: async (key: string, ttl: number) => {
           try {
             return (await r.eval(
@@ -228,12 +230,10 @@ return v`,
               String(Math.max(1, Math.floor(ttl))),
             )) as number;
           } catch (error) {
-            console.error(
-              '[Redis Error] secondaryStorage.increment failed:',
-              error,
-            );
-            // Degrade open on limiter-storage failure (same availability
-            // stance as the wrappers above): 0 <= max always allows.
+            logger.error({
+              err: error,
+              msg: '[Redis Error] secondaryStorage.increment failed',
+            });
             return 0;
           }
         },
@@ -282,7 +282,7 @@ return v`,
           </div>
         `,
       }).catch((error: unknown) => {
-        console.error('[Email Delivery Error] reset_password', error);
+        logger.error({ err: error, msg: '[Email Delivery Error] reset_password' });
       });
     },
     revokeSessionsOnPasswordReset: true,
@@ -311,7 +311,7 @@ return v`,
           </div>
         `,
       }).catch((error: unknown) => {
-        console.error('[Email Delivery Error] verification_email', error);
+        logger.error({ err: error, msg: '[Email Delivery Error] verification_email' });
       });
     },
     sendOnSignUp: true,
@@ -370,9 +370,9 @@ return v`,
   //   2. Better Auth plugin — per-endpoint, per-user/IP limits (this config)
   //   3. Server Action rate limiter — custom DB-backed for app-level mutations
   //
-    // Endpoint classification:
-    //   - Passive/read: high limits so passive session polling never triggers
-    //     false UX noise (get-session → 300/min, list-accounts → 60/min, etc.)
+  // Endpoint classification:
+  //   - Passive/read: high limits so passive session polling never triggers
+  //     false UX noise (get-session → 300/min, list-accounts → 60/min, etc.)
   //   - Auth challenge: strict limits to prevent brute-force. Per-page inline
   //     errors handle 429 (sign-in 5/min, sign-up 3/min, 2FA verify 3/10s)
   //   - Destructive: tightest limits (delete-user 2/min, change-email 3/min)
@@ -479,7 +479,7 @@ return v`,
        */
       handler: (promise) => {
         void promise.catch((e: unknown) =>
-          console.error('[Better Auth] Background task failed:', e),
+          logger.error({ err: e, msg: '[Better Auth] Background task failed' }),
         );
       },
     },
@@ -514,7 +514,7 @@ return v`,
               </div>
             `,
           }).catch((error: unknown) => {
-            console.error('[Email Delivery Error] two_factor_otp', error);
+            logger.error({ err: error, msg: '[Email Delivery Error] two_factor_otp' });
           });
         },
         storeOTP: 'encrypted',

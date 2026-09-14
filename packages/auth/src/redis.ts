@@ -1,9 +1,12 @@
 import Redis from 'ioredis';
+import { createLogger } from '@repo/observability';
 import { redisUrl } from './env';
 
 type GlobalRedisState = typeof globalThis & {
   __repoSharedRedisClient?: Redis;
 };
+
+const logger = createLogger('auth:redis');
 
 /**
  * Shared Redis client.
@@ -32,7 +35,7 @@ export const redis = (() => {
   // with an unhandled 'error' event. Every caller already handles failures
   // gracefully (falls back to primary storage / in-memory stashes).
   client.on('error', (error) => {
-    console.error('[Redis Error] Connection error:', error);
+    logger.error({ err: error, msg: '[Redis Error] Connection error' });
   });
 
   globalRedisState.__repoSharedRedisClient = client;

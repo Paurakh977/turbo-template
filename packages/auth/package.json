@@ -41,6 +41,7 @@
   },
   "dependencies": {
     "@repo/database": "workspace:^",
+    "@repo/observability": "workspace:^",
     "@repo/roles": "workspace:^",
     "better-auth": "catalog:",
     "dotenv": "catalog:",

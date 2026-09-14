@@ -19,6 +19,15 @@ jest.mock('./env', () => ({
   },
 }));
 
+jest.mock('@repo/observability', () => ({
+  createLogger: jest.fn(() => ({
+    info: jest.fn(),
+    error: jest.fn(),
+    warn: jest.fn(),
+    debug: jest.fn(),
+  })),
+}));
+
 import { sendEmail } from './email-helpers';
 import { Resend } from 'resend';
 
@@ -83,8 +92,9 @@ describe('sendEmail', () => {
     delete process.env.TEST_RESEND_API_KEY;
 
     jest.resetModules();
-    const consoleSpy = jest.spyOn(console, 'log').mockImplementation();
     const mod = require('./email-helpers');
+    const { createLogger } = require('@repo/observability');
+    const loggerInstance = createLogger.mock.results[0].value;
 
     await mod.sendEmail({
       to: 'user@example.com',
@@ -92,10 +102,11 @@ describe('sendEmail', () => {
       html: '<p>Hi</p>',
     });
 
-    expect(consoleSpy).toHaveBeenCalledWith(
-      expect.stringContaining('[AUTH EMAIL][NO_PROVIDER]'),
+    expect(loggerInstance.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        msg: expect.stringContaining('[AUTH EMAIL][NO_PROVIDER]'),
+      }),
     );
-    consoleSpy.mockRestore();
   });
 
   it('throws when Resend returns an error', async () => {

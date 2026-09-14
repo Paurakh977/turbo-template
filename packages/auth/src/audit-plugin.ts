@@ -2,6 +2,7 @@ import { db } from '@repo/database';
 import { createAuthMiddleware, getSessionFromCtx, APIError } from 'better-auth/api';
 import type { BetterAuthPlugin } from 'better-auth';
 import { parseRoles, serializeRoles, getMaxRoleWeight } from '@repo/roles';
+import { createLogger, AuthAttributes, trace } from '@repo/observability';
 import {
   enforceRoleHierarchy,
 } from './hierarchy';
@@ -11,6 +12,8 @@ import {
   storePendingStopImpersonation,
 } from './pending-storage';
 import { resolveClientIp } from './client-ip';
+
+const logger = createLogger('auth:audit-plugin');
 
 // ---------------------------------------------------------------------------
 // Audit-log plugin
@@ -42,11 +45,17 @@ export const auditLogPlugin = (): BetterAuthPlugin => ({
 
           if (!userId || !newRole) return;
 
+          const activeSpan = trace.getActiveSpan();
+          if (activeSpan) {
+            activeSpan.setAttribute(AuthAttributes.ACTION, 'role_changed');
+            activeSpan.setAttribute(AuthAttributes.TARGET_USER_ID, userId);
+          }
+
           // 🔒 HIERARCHY GUARD — actor cannot change the role of a peer/superior.
           await enforceRoleHierarchy(ctx, userId);
 
           // 🔒 Also prevent assigning a role HIGHER than the actor's own role.
-          const session = await getSessionFromCtx(ctx);
+          const session = await getSessionFromCtx(ctx as any);
           const actorRole =
             (session?.user as { role?: string })?.role ?? 'user';
           const actorWeight = getMaxRoleWeight(actorRole);
@@ -84,7 +93,7 @@ export const auditLogPlugin = (): BetterAuthPlugin => ({
               },
             })
             .catch((e: unknown) =>
-              console.error('[AuditLog] role_changed failed:', e),
+              logger.error({ err: e, msg: '[AuditLog] role_changed failed' }),
             );
 
           // Force cache invalidation so the new role is fetched instantly
@@ -100,18 +109,48 @@ export const auditLogPlugin = (): BetterAuthPlugin => ({
           const userId = body?.userId;
           if (!userId) return;
 
-          // 🔒 HIERARCHY GUARD
-          await enforceRoleHierarchy(ctx, userId);
+          const activeSpan = trace.getActiveSpan();
+          if (activeSpan) {
+            activeSpan.setAttribute(AuthAttributes.ACTION, 'user_banned');
+            activeSpan.setAttribute(AuthAttributes.TARGET_USER_ID, userId);
+          }
 
-          const session = await getSessionFromCtx(ctx);
+          const session = await getSessionFromCtx(ctx as any);
           const actorId = session?.user?.id;
           const ipAddress = resolveClientIp(ctx.headers);
           const userAgent = ctx.headers?.get('user-agent') ?? undefined;
 
-          if (actorId === userId) {
-            console.log('[AuditLog] Skipping self-ban attempt:', userId);
-            return;
+          // 🔒 SELF-BAN DENY — must THROW, not return. Per the Better Auth
+          // hooks docs, only `throw new APIError(...)` aborts the endpoint
+          // chain; returning (even after logging) lets the ban proceed.
+          // Mirrors the framework's own YOU_CANNOT_BAN_YOURSELF guard in
+          // better-auth/src/plugins/admin/routes.ts (BAD_REQUEST), checked
+          // here first so the error message names the real problem instead
+          // of the hierarchy guard's misleading privilege error (self always
+          // has weight >= self). The blocked attempt is audited under a
+          // distinct action so it can never be mistaken for a completed ban.
+          if (actorId && actorId === userId) {
+            await db.auditLog
+              .create({
+                data: {
+                  userId,
+                  action: 'user_ban_blocked',
+                  actor: actorId,
+                  ipAddress,
+                  userAgent,
+                  metadata: { reason: 'self_ban_attempt' },
+                },
+              })
+              .catch((e: unknown) =>
+                logger.error({ err: e, msg: '[AuditLog] user_ban_blocked failed' }),
+              );
+            throw new APIError('BAD_REQUEST', {
+              message: 'You cannot ban your own account.',
+            });
           }
+
+          // 🔒 HIERARCHY GUARD
+          await enforceRoleHierarchy(ctx, userId);
 
           await db.auditLog
             .create({
@@ -125,7 +164,7 @@ export const auditLogPlugin = (): BetterAuthPlugin => ({
               },
             })
             .catch((e: unknown) =>
-              console.error('[AuditLog] user_banned failed:', e),
+              logger.error({ err: e, msg: '[AuditLog] user_banned failed' }),
             );
 
           await invalidateUserCache(userId);
@@ -138,10 +177,16 @@ export const auditLogPlugin = (): BetterAuthPlugin => ({
           const userId = body?.userId;
           if (!userId) return;
 
+          const activeSpan = trace.getActiveSpan();
+          if (activeSpan) {
+            activeSpan.setAttribute(AuthAttributes.ACTION, 'user_unbanned');
+            activeSpan.setAttribute(AuthAttributes.TARGET_USER_ID, userId);
+          }
+
           // 🔒 HIERARCHY GUARD
           await enforceRoleHierarchy(ctx, userId);
 
-          const session = await getSessionFromCtx(ctx);
+          const session = await getSessionFromCtx(ctx as any);
           const ipAddress = resolveClientIp(ctx.headers);
           const userAgent = ctx.headers?.get('user-agent') ?? undefined;
 
@@ -156,7 +201,7 @@ export const auditLogPlugin = (): BetterAuthPlugin => ({
               },
             })
             .catch((e: unknown) =>
-              console.error('[AuditLog] user_unbanned failed:', e),
+              logger.error({ err: e, msg: '[AuditLog] user_unbanned failed' }),
             );
 
           await invalidateUserCache(userId);
@@ -170,10 +215,16 @@ export const auditLogPlugin = (): BetterAuthPlugin => ({
           const userId = body?.userId;
           if (!userId) return;
 
+          const activeSpan = trace.getActiveSpan();
+          if (activeSpan) {
+            activeSpan.setAttribute(AuthAttributes.ACTION, 'sessions_revoked');
+            activeSpan.setAttribute(AuthAttributes.TARGET_USER_ID, userId);
+          }
+
           // 🔒 HIERARCHY GUARD
           await enforceRoleHierarchy(ctx, userId);
 
-          const session = await getSessionFromCtx(ctx);
+          const session = await getSessionFromCtx(ctx as any);
           const ipAddress = resolveClientIp(ctx.headers);
           const userAgent = ctx.headers?.get('user-agent') ?? undefined;
 
@@ -188,7 +239,7 @@ export const auditLogPlugin = (): BetterAuthPlugin => ({
               },
             })
             .catch((e: unknown) =>
-              console.error('[AuditLog] sessions_revoked failed:', e),
+              logger.error({ err: e, msg: '[AuditLog] sessions_revoked failed' }),
             );
 
           await invalidateUserCache(userId);
@@ -202,21 +253,50 @@ export const auditLogPlugin = (): BetterAuthPlugin => ({
           const targetUserId = body?.userId;
           if (!targetUserId) return;
 
-          // 🔒 HIERARCHY GUARD
-          await enforceRoleHierarchy(ctx, targetUserId);
+          const activeSpan = trace.getActiveSpan();
+          if (activeSpan) {
+            activeSpan.setAttribute(AuthAttributes.ACTION, 'user_deleted');
+            activeSpan.setAttribute(AuthAttributes.TARGET_USER_ID, targetUserId);
+          }
 
-          const session = await getSessionFromCtx(ctx);
+          const session = await getSessionFromCtx(ctx as any);
           const actorId = session?.user?.id;
           const ipAddress = resolveClientIp(ctx.headers);
           const userAgent = ctx.headers?.get('user-agent') ?? undefined;
 
-          if (actorId === targetUserId) {
-            console.log(
-              '[AuditLog] Skipping self-delete attempt:',
-              targetUserId,
-            );
-            return;
+          // 🔒 SELF-DELETE DENY — must THROW, not return. Unlike ban-user,
+          // Better Auth has NO native self-delete guard on /admin/remove-user,
+          // so a bare `return` here would let an admin hard-delete their own
+          // account (only `throw new APIError(...)` aborts a before hook).
+          // Checked before the hierarchy guard so the message names the real
+          // problem. Audited under a distinct action; no cache invalidation
+          // (nothing changed).
+          if (actorId && actorId === targetUserId) {
+            await db.auditLog
+              .create({
+                data: {
+                  userId: targetUserId,
+                  action: 'user_delete_blocked',
+                  actor: actorId,
+                  ipAddress,
+                  userAgent,
+                  metadata: { reason: 'self_delete_attempt' },
+                },
+              })
+              .catch((e: unknown) =>
+                logger.error({
+                  err: e,
+                  msg: '[AuditLog] user_delete_blocked failed',
+                }),
+              );
+            throw new APIError('BAD_REQUEST', {
+              message:
+                'You cannot delete your own account via the admin panel.',
+            });
           }
+
+          // 🔒 HIERARCHY GUARD
+          await enforceRoleHierarchy(ctx, targetUserId);
 
           const targetUser = await db.user
             .findUnique({ where: { id: targetUserId } })
@@ -234,7 +314,7 @@ export const auditLogPlugin = (): BetterAuthPlugin => ({
               },
             })
             .catch((e: unknown) =>
-              console.error('[AuditLog] user_deleted failed:', e),
+              logger.error({ err: e, msg: '[AuditLog] user_deleted failed' }),
             );
 
           await invalidateUserCache(targetUserId);
@@ -250,8 +330,14 @@ export const auditLogPlugin = (): BetterAuthPlugin => ({
           const targetUserId = body?.userId;
           if (!targetUserId) return;
 
+          const activeSpan = trace.getActiveSpan();
+          if (activeSpan) {
+            activeSpan.setAttribute(AuthAttributes.ACTION, 'user_impersonation_started');
+            activeSpan.setAttribute(AuthAttributes.TARGET_USER_ID, targetUserId);
+          }
+
           // Get session and check if already being impersonated
-          const session = await getSessionFromCtx(ctx);
+          const session = await getSessionFromCtx(ctx as any);
           const currentImpersonatedBy = (
             session as unknown as {
               session?: { impersonatedBy?: string | null };
@@ -289,14 +375,17 @@ export const auditLogPlugin = (): BetterAuthPlugin => ({
               },
             })
             .catch((e: unknown) =>
-              console.error('[AuditLog] user_impersonation_started failed:', e),
+              logger.error({
+                err: e,
+                msg: '[AuditLog] user_impersonation_started failed',
+              }),
             );
         }),
       },
       {
         matcher: (ctx) => ctx.path === '/admin/stop-impersonating',
         handler: createAuthMiddleware(async (ctx) => {
-          const session = await getSessionFromCtx(ctx);
+          const session = await getSessionFromCtx(ctx as any);
           const userId = session?.user?.id;
           if (!userId) return;
 
@@ -306,6 +395,13 @@ export const auditLogPlugin = (): BetterAuthPlugin => ({
             }
           )?.session?.impersonatedBy;
           if (!actorId) return;
+
+          const activeSpan = trace.getActiveSpan();
+          if (activeSpan) {
+            activeSpan.setAttribute(AuthAttributes.ACTION, 'user_stop_impersonating');
+            activeSpan.setAttribute(AuthAttributes.TARGET_USER_ID, userId);
+            activeSpan.setAttribute(AuthAttributes.ACTOR_ID, actorId);
+          }
 
           const ipAddress = resolveClientIp(ctx.headers);
           const userAgent = ctx.headers?.get('user-agent') ?? undefined;
@@ -321,7 +417,10 @@ export const auditLogPlugin = (): BetterAuthPlugin => ({
               },
             })
             .catch((e: unknown) =>
-              console.error('[AuditLog] user_stop_impersonating failed:', e),
+              logger.error({
+                err: e,
+                msg: '[AuditLog] user_stop_impersonating failed',
+              }),
             );
 
           await storePendingStopImpersonation(userId);
@@ -347,7 +446,7 @@ export const auditLogPlugin = (): BetterAuthPlugin => ({
         //      databaseHooks.user.delete.after audit log + cache invalidation.
         matcher: (ctx) => ctx.path === '/delete-user',
         handler: createAuthMiddleware(async (ctx) => {
-          const session = await getSessionFromCtx(ctx);
+          const session = await getSessionFromCtx(ctx as any);
           if (!session?.user?.id) return;
 
           const userId = session.user.id;

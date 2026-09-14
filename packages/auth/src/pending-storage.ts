@@ -1,5 +1,8 @@
 import { db } from '@repo/database';
+import { createLogger } from '@repo/observability';
 import { redis } from './redis';
+
+const logger = createLogger('auth:pending-storage');
 
 // Better Auth types `data` / `oldData` in databaseHooks as `{}` — this
 // interface lets us safely cast to the actual shape without losing type
@@ -47,38 +50,41 @@ const STOP_IMPERSONATION_TTL_MS = 15_000;
  *   normal user-initiated ones which complete in the same request.
  * - pendingDeletions: self-deletion context (IP, UA, session ids) captured in
  *   the `/delete-user` before hook for the audit log in delete.after.
- *
- * Guard: entries older than 30 s are pruned (see sweep below) so a failed
- * `after` hook (e.g. adapter error) can never leak stale data.
  */
 const pendingUserUpdates = new Map<string, { data: UserData; ts: number }>();
-const pendingDeletions = new Map<string, { data: PendingDeletionMeta; ts: number }>();
+const pendingDeletions = new Map<
+  string,
+  { meta: PendingDeletionMeta; ts: number }
+>();
 const pendingStopImpersonations = new Map<string, number>();
 
-function storePendingInMemory(key: string, data: UserData) {
-  pendingUserUpdates.set(key, { data, ts: Date.now() });
+function storePendingInMemory(userId: string, data: UserData) {
+  pendingUserUpdates.set(userId, { data, ts: Date.now() });
 }
 
-function popPendingFromMemory<T>(key: string): T | undefined {
-  const entry = pendingUserUpdates.get(key);
-  pendingUserUpdates.delete(key);
+function popPendingFromMemory<T>(userId: string): T | undefined {
+  const entry = pendingUserUpdates.get(userId);
   if (!entry) return undefined;
+  pendingUserUpdates.delete(userId);
   if (Date.now() - entry.ts > PENDING_TTL_MS) return undefined;
   return entry.data as unknown as T;
 }
 
-function storePendingDeletionInMemory(userId: string, meta: PendingDeletionMeta) {
-  pendingDeletions.set(userId, { data: meta, ts: Date.now() });
+function storePendingDeletionInMemory(
+  userId: string,
+  meta: PendingDeletionMeta,
+) {
+  pendingDeletions.set(userId, { meta, ts: Date.now() });
 }
 
 function popPendingDeletionFromMemory(
   userId: string,
 ): PendingDeletionMeta | undefined {
   const entry = pendingDeletions.get(userId);
-  pendingDeletions.delete(userId);
   if (!entry) return undefined;
+  pendingDeletions.delete(userId);
   if (Date.now() - entry.ts > PENDING_TTL_MS) return undefined;
-  return entry.data;
+  return entry.meta;
 }
 
 function storePendingStopImpersonationInMemory(userId: string) {
@@ -100,7 +106,7 @@ export async function storePendingDeletion(
     await redis
       .set(`pending_deletion:${userId}`, JSON.stringify(meta), 'PX', PENDING_TTL_MS)
       .catch((e) => {
-        console.error('[Redis Error] storePendingDeletion:', e);
+        logger.error({ err: e, msg: '[Redis Error] storePendingDeletion' });
         storePendingDeletionInMemory(userId, meta);
       });
   } else {
@@ -114,17 +120,18 @@ export async function popPendingDeletion(
   if (redis) {
     let parsed: PendingDeletionMeta | undefined;
     const raw = await redis.get(`pending_deletion:${userId}`).catch((e) => {
-      console.error('[Redis Error] popPendingDeletion:', e);
+      logger.error({ err: e, msg: '[Redis Error] popPendingDeletion' });
       return null;
     });
     if (raw) {
       await redis
         .del(`pending_deletion:${userId}`)
-        .catch((e) => console.error('[Redis Error]', e));
+        .catch((e) => logger.error({ err: e, msg: '[Redis Error]' }));
       try {
         parsed = JSON.parse(raw) as PendingDeletionMeta;
       } catch {
-        console.error('[Redis Error] popPendingDeletion: invalid payload', {
+        logger.error({
+          msg: '[Redis Error] popPendingDeletion: invalid payload',
           userId,
         });
       }
@@ -141,7 +148,7 @@ export async function storePendingUser(userId: string, data: UserData) {
     await redis
       .set(`pending_user_update:${userId}`, JSON.stringify(data), 'PX', PENDING_TTL_MS)
       .catch((e) => {
-        console.error('[Redis Error] storePendingUser:', e);
+        logger.error({ err: e, msg: '[Redis Error] storePendingUser' });
         storePendingInMemory(userId, data);
       });
   } else {
@@ -155,19 +162,20 @@ export async function popPendingUser(
   if (redis) {
     let parsed: UserData | undefined;
     const raw = await redis.get(`pending_user_update:${userId}`).catch((e) => {
-      console.error('[Redis Error]', e);
+      logger.error({ err: e, msg: '[Redis Error]' });
       return null;
     });
     if (raw) {
       await redis
         .del(`pending_user_update:${userId}`)
-        .catch((e) => console.error('[Redis Error]', e));
+        .catch((e) => logger.error({ err: e, msg: '[Redis Error]' }));
       try {
         parsed = JSON.parse(raw) as UserData;
       } catch (e) {
-        console.error('[Redis Error] popPendingUser: invalid payload', {
+        logger.error({
+          msg: '[Redis Error] popPendingUser: invalid payload',
           userId,
-          error: e,
+          err: e,
         });
       }
     }
@@ -183,7 +191,7 @@ export async function storePendingStopImpersonation(userId: string) {
     await redis
       .set(`pending_stop_impersonation:${userId}`, '1', 'PX', STOP_IMPERSONATION_TTL_MS)
       .catch((e) => {
-        console.error('[Redis Error] storePendingStopImpersonation:', e);
+        logger.error({ err: e, msg: '[Redis Error] storePendingStopImpersonation' });
         storePendingStopImpersonationInMemory(userId);
       });
     return;
@@ -196,7 +204,7 @@ export async function popPendingStopImpersonation(userId: string): Promise<boole
   if (redis) {
     const key = `pending_stop_impersonation:${userId}`;
     const raw = await redis.get(key).catch((e) => {
-      console.error('[Redis Error] popPendingStopImpersonation:', e);
+      logger.error({ err: e, msg: '[Redis Error] popPendingStopImpersonation' });
       return null;
     });
 
@@ -204,7 +212,7 @@ export async function popPendingStopImpersonation(userId: string): Promise<boole
       await redis
         .del(key)
         .catch((e) =>
-          console.error('[Redis Error] popPendingStopImpersonation.del:', e),
+          logger.error({ err: e, msg: '[Redis Error] popPendingStopImpersonation.del' }),
         );
       return true;
     }
@@ -250,7 +258,7 @@ export async function invalidateUserCache(
 
     await pipeline.exec();
   } catch (e) {
-    console.error('[Cache Error] Failed to invalidate user cache:', e);
+    logger.error({ err: e, msg: '[Cache Error] Failed to invalidate user cache' });
   }
 }
 
