@@ -37,6 +37,7 @@ catalog:
 # that ships lifecycle scripts must be explicitly allowed (true) or denied
 # (false); anything unlisted fails the install (ERR_PNPM_IGNORED_BUILDS).
 allowBuilds:
+  "@datadog/pprof": true
   "@nestjs/core": true
   "@prisma/client": true
   "@prisma/engines": true
@@ -44,6 +45,7 @@ allowBuilds:
   better-auth: true
   esbuild: true
   prisma: true
+  protobufjs: true
   sharp: true
   # transitive via eslint tooling (napi resolver; ships signed platform pkgs)
   unrs-resolver: true

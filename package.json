@@ -23,7 +23,13 @@
     "db:migrate:dev": "turbo run db:migrate:dev",
     "db:migrate:deploy": "turbo run db:migrate:deploy",
     "db:studio": "turbo run db:studio",
-    "auth:generate": "turbo run auth:generate"
+    "auth:generate": "turbo run auth:generate",
+    "k6:smoke": "powershell -ExecutionPolicy Bypass -File k6/run.ps1 smoke",
+    "k6:load": "powershell -ExecutionPolicy Bypass -File k6/run.ps1 load",
+    "k6:stress": "powershell -ExecutionPolicy Bypass -File k6/run.ps1 stress",
+    "k6:spike": "powershell -ExecutionPolicy Bypass -File k6/run.ps1 spike",
+    "k6:soak": "powershell -ExecutionPolicy Bypass -File k6/run.ps1 soak",
+    "k6:edge": "powershell -ExecutionPolicy Bypass -File k6/run.ps1 edge-cases"
   },
   "devDependencies": {
     "@repo/eslint-config": "workspace:*",

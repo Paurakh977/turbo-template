@@ -55,7 +55,23 @@
         "CHOKIDAR_USEPOLLING",
         "CHOKIDAR_INTERVAL",
         "WATCHPACK_POLLING",
-        "TSC_WATCHFILE"
+        "TSC_WATCHFILE",
+        "OTEL_SDK_DISABLED",
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "OTEL_SERVICE_NAME",
+        "OTEL_SERVICE_NAME_API",
+        "OTEL_SERVICE_NAME_WEB",
+        "OTEL_SERVICE_NAMESPACE",
+        "OTEL_SERVICE_VERSION",
+        "GIT_SHA",
+        "OTEL_ENVIRONMENT",
+        "OTEL_LOG_LEVEL",
+        "PYROSCOPE_SERVER_ADDRESS",
+        "PYROSCOPE_APPLICATION_NAME",
+        "NEXT_PUBLIC_FARO_COLLECTOR_URL",
+        "NEXT_PUBLIC_FARO_APP_NAME",
+        "NEXT_PUBLIC_FARO_APP_VERSION",
+        "NEXT_PUBLIC_FARO_ENVIRONMENT"
       ]
     },
     "start": {
@@ -72,7 +88,23 @@
         "NEXT_PUBLIC_APP_URL",
         "INTERNAL_API_URL",
         "APP_NAME",
-        "EMAIL_FROM"
+        "EMAIL_FROM",
+        "OTEL_SDK_DISABLED",
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "OTEL_SERVICE_NAME",
+        "OTEL_SERVICE_NAME_API",
+        "OTEL_SERVICE_NAME_WEB",
+        "OTEL_SERVICE_NAMESPACE",
+        "OTEL_SERVICE_VERSION",
+        "GIT_SHA",
+        "OTEL_ENVIRONMENT",
+        "OTEL_LOG_LEVEL",
+        "PYROSCOPE_SERVER_ADDRESS",
+        "PYROSCOPE_APPLICATION_NAME",
+        "NEXT_PUBLIC_FARO_COLLECTOR_URL",
+        "NEXT_PUBLIC_FARO_APP_NAME",
+        "NEXT_PUBLIC_FARO_APP_VERSION",
+        "NEXT_PUBLIC_FARO_ENVIRONMENT"
       ]
     },
     "build": {
@@ -81,9 +113,27 @@
       "env": [
         "NEXT_PUBLIC_API_URL",
         "NEXT_PUBLIC_APP_URL",
-        "NEXT_ALLOWED_DEV_ORIGINS"
+        "NEXT_ALLOWED_DEV_ORIGINS",
+        "NEXT_PUBLIC_FARO_COLLECTOR_URL",
+        "NEXT_PUBLIC_FARO_APP_NAME",
+        "NEXT_PUBLIC_FARO_APP_VERSION",
+        "NEXT_PUBLIC_FARO_ENVIRONMENT"
       ],
-      "passThroughEnv": ["INTERNAL_API_URL"]
+      "passThroughEnv": [
+        "INTERNAL_API_URL",
+        "OTEL_SDK_DISABLED",
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "OTEL_SERVICE_NAME",
+        "OTEL_SERVICE_NAME_API",
+        "OTEL_SERVICE_NAME_WEB",
+        "OTEL_SERVICE_NAMESPACE",
+        "OTEL_SERVICE_VERSION",
+        "GIT_SHA",
+        "OTEL_ENVIRONMENT",
+        "OTEL_LOG_LEVEL",
+        "PYROSCOPE_SERVER_ADDRESS",
+        "PYROSCOPE_APPLICATION_NAME"
+      ]
     },
     "typecheck": {
       "dependsOn": ["^build"]
