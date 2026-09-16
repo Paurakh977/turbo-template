@@ -1,0 +1,14 @@
+{
+  "name": "@repo/k6-load-testing",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Production-grade k6 load testing suite for Turborepo observability validation",
+  "scripts": {
+    "smoke": "powershell -ExecutionPolicy Bypass -File run.ps1 smoke",
+    "load": "powershell -ExecutionPolicy Bypass -File run.ps1 load",
+    "stress": "powershell -ExecutionPolicy Bypass -File run.ps1 stress",
+    "spike": "powershell -ExecutionPolicy Bypass -File run.ps1 spike",
+    "soak": "powershell -ExecutionPolicy Bypass -File run.ps1 soak",
+    "edge": "powershell -ExecutionPolicy Bypass -File run.ps1 edge-cases"
+  }
+}

@@ -51,8 +51,8 @@ Rules that keep it consistent:
    cp .env.example .env
    ```
 
-   `.env` is git-ignored; `.env.example` is committed and must stay in sync with
-   `.env` key-for-key.
+   `.env` is git-ignored; the four `.*.example` templates are committed and each
+   must stay in sync with its `.env` counterpart key-for-key.
 
 2. **Compose always wins.** Inside containers, the env injected by
    `docker-compose.yml` (e.g. `DATABASE_URL=...@postgres:5432/...`) takes
@@ -60,12 +60,19 @@ Rules that keep it consistent:
    same `.env` works on your host (`@localhost`) and in containers
    (`@postgres` / `@redis`).
 
-3. **Per-package `.env.example` files are documentation, not loaders** — they
-   document exactly which variables each package validates:
-   - `apps/api/.env.example` — what the API requires (fails boot otherwise)
-   - `apps/web/.env.example` — what Next.js validates at config load
-   - `packages/auth/.env.example` — what `@repo/auth` requires at import time
-   - `packages/database/.env.example` — what Prisma / the seed script require
+3. **One template per consumer — all in the repo root.** There are no
+   per-package `.env.example` files; each template documents exactly which
+   variables its consumer validates:
+   - `.env.example` — prod + local/dev (this section). Copy to `.env`.
+   - `.env.e2e.example` — Playwright e2e only (`cp .env.e2e.example .env.e2e`,
+     then `docker compose --env-file .env.e2e --profile e2e up`). Isolated
+     dataset, throwaway credentials — never reuse for dev or prod.
+   - `.env.k6.example` — k6 host-run overlay only (`cp .env.k6.example .env.k6`,
+     then run apps with `K6_TESTING=true`). Layered over `.env` by the loaders
+     below; Docker Compose never reads it.
+   - `.env.test.example` — integration tests only (`cp .env.test.example
+     .env.test`). Docker test profile uses inline `TEST_*` defaults; local runs
+     go via `cp .env.test .env` + `pnpm --filter api test:integration`.
    - There is deliberately **no `apps/web/.env`**: the web keeps port 3000
      locally because `next.config.js` drops the root `PORT=3001` after loading
      it (unless Docker already injected a PORT).
@@ -74,7 +81,8 @@ Rules that keep it consistent:
    REQUIRED variable is missing:
    - **API**: the Joi schema in `apps/api/src/app.module.ts`
      (`HOST`, `PORT` as an integer 1-65535, `DATABASE_URL`, `REDIS_URL`,
-     `NEXT_PUBLIC_APP_URL`, `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET`, `APP_NAME`)
+     `NEXT_PUBLIC_APP_URL`, `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET`, `APP_NAME`,
+     plus the OTel set whenever `OTEL_SDK_DISABLED` isn't `'true'`)
    - **Auth**: `packages/auth/src/auth.ts` (`NEXT_PUBLIC_APP_URL`,
      `APP_NAME`, `EMAIL_FROM` throw at import). `BETTER_AUTH_SECRET` is
      build-time inert but fails every production SERVER boot when missing;
@@ -93,16 +101,19 @@ Rules that keep it consistent:
 
 ---
 
-## 3. The three Docker Compose profiles
+## 3. Docker Compose profiles
 
-`docker-compose.yml` defines one network (`app-network`) and three profiles.
-Run only **one profile at a time**.
+`docker-compose.yml` defines one network (`app-network`) and five profiles
+(+ `monitoring` in `docker-compose.observability.yml` for the telemetry stack
+alone). Run only **one app profile at a time**.
 
 | Profile | Runs in Docker | Runs on your host |
 |---|---|---|
 | `prod` | postgres, redis, pgadmin, migrate, api, web, proxy (nginx) | nothing |
 | `dev` | postgres, redis, pgadmin, api-dev, web-dev, proxy-dev — **hot reload inside containers** | nothing |
 | `local` | postgres, redis, pgadmin, proxy-local (nginx) | **api + web** via `pnpm dev` |
+| `test` | postgres-test, redis-test, migrate-test, api-test (runs the integration suite, then exits) | nothing — see §5 option A |
+| `e2e` | postgres-e2e, redis-e2e, migrate-e2e, api-e2e, web-e2e, proxy-e2e (isolated dataset) | Playwright (`pnpm --filter web test:e2e`) — see §5 option C |
 
 ### prod — full container stack
 
@@ -130,7 +141,7 @@ docker compose --profile dev up --build
 ```bash
 docker compose --profile local up -d   # postgres, redis, pgadmin, nginx
 pnpm dev                               # api -> :3001, web -> :3000 on your host
-pnpm db:seed                           # optional — see section 6
+pnpm db:seed                           # optional — see section 7
 ```
 
 - `proxy-local` routes `/api/*` -> `host.docker.internal:3001` and `/` ->
@@ -211,7 +222,124 @@ pnpm ls -r --depth -1                      # list all workspace packages
 
 ---
 
-## 5. Database workflow (Prisma 7)
+## 5. Testing — unit · integration · e2e · k6
+
+Every suite, what infra it needs, which env file feeds it, and the exact commands.
+`pnpm test` (unit) needs **no infrastructure** — unit specs live under `src/`
+and only use mocks (integration specs live under `test/` with their own jest
+configs, so they never run under `pnpm test`).
+
+| Suite | Needs running | Env file | Command |
+|---|---|---|---|
+| Unit (`pnpm test`) | nothing | your `.env` (any valid one) | `pnpm test` |
+| Integration (docker) | `test` profile (tmpfs PG + redis) | inline `TEST_*` compose defaults | option A below |
+| Integration (local) | local PG + Redis (see below) | `cp .env.test .env` | option B below |
+| E2E Playwright | `e2e` profile stack | `cp .env.e2e.example .env.e2e` | option C below |
+| k6 load | any reachable stack (default `https://localhost`) | `.env` (+ `.env.k6` overlay for host-run apps) | option D below |
+
+### A. Integration tests — docker (recommended, fully isolated)
+
+The `test` profile spins up its own Postgres (RAM-backed tmpfs) + Redis on
+shifted host ports (`5433`/`6380`, so your dev DB on `5432`/`6379` is untouched),
+migrates, then `api-test` runs all three integration configs
+(`test:integration` + `:strict` + `:oauth`) and exits with the suite result:
+
+```bash
+docker compose --profile test up --build -d
+docker wait template-turbo-repo-api-test-1  # exit code = suite result (0 = pass)
+docker compose --profile test logs api-test # full jest output on failure
+docker compose --profile test down
+```
+
+> Do NOT use `--abort-on-container-exit` here: `migrate-test`'s clean exit 0
+> would abort the run before `api-test` finishes. Detached + `docker wait` is
+> the correct pattern.
+
+No env file needed: the profile carries inline `TEST_*` defaults and injects
+`OTEL_SDK_DISABLED=true` (no collectors there) plus a relaxed
+`RATE_LIMIT_SIGNUP_MAX=100` itself.
+
+### B. Integration tests — local (apps on host, DBs wherever you like)
+
+Same suites, but the API runs on your machine via `test:integration`
+(`cross-env NODE_OPTIONS=--experimental-vm-modules jest --config
+./test/integration/jest-integration.config.cjs`). It reads `DATABASE_URL` /
+`REDIS_URL` from the root `.env`, so point them at a database:
+
+```bash
+# Easiest: reuse the local profile's PG/Redis (standard ports 5432/6379,
+# exactly what .env.test contains):
+docker compose --profile local up -d   # postgres + redis only for this
+cp .env.test.example .env.test
+cp .env.test .env                      # NEVER your dev .env — tests wipe data
+pnpm --filter api test:integration      # or test:integration:all (all 3 configs)
+```
+
+`.env.test` sets `OTEL_SDK_DISABLED=true` (same reason as the docker profile:
+no collectors) and `RATE_LIMIT_SIGNUP_MAX=100`. Restore your dev `.env`
+afterwards (`cp .env.example .env` + refill, or keep a backup).
+
+### C. E2E tests — isolated full stack + Playwright on host
+
+E2E needs everything (nginx TLS + api + web + PG + Redis) on a disposable
+dataset. The `e2e` profile provides it on shifted ports (`8443`/`5434`/`6381`);
+Playwright runs on your host against `https://localhost:8443` (same as CI —
+see `.github/workflows/e2e.yml`):
+
+```bash
+cp .env.e2e.example .env.e2e            # throwaway credentials, safe defaults
+docker compose --env-file .env.e2e --profile e2e up -d --build
+pnpm --filter web test:e2e              # Chromium must be installed once:
+                                        # pnpm --filter web exec playwright install chromium
+docker compose --env-file .env.e2e --profile e2e down -v   # -v: drop the e2e dataset
+```
+
+Notes:
+- `--env-file .env.e2e` is mandatory — without it the e2e services fall back
+  to dev-ish `:-` defaults and the host-side seed/assert clients
+  (`E2E_DATABASE_URL` / `E2E_REDIS_URL`) have nothing to read.
+- Never reuse `.env.e2e` for dev or prod (its header says so too).
+- The `local` profile + host apps canNOT substitute the e2e stack: Playwright
+  asserts TLS origins, rate limits, and seed flows pinned to `:8443`.
+
+### D. k6 load tests — against any running stack
+
+k6 is a load *generator*: it only needs an HTTP(S) URL, default
+`https://localhost` (override: `.\k6\run.ps1 load -BaseUrl https://...`).
+Pick the target first, then run a suite:
+
+```bash
+# Target 1: full docker stack (prod behaves most realistically)
+docker compose --profile prod up --build -d
+pnpm k6:smoke    # smoke | load | stress | spike | soak | edge-cases
+
+# Target 2: host-run apps (local profile infra + pnpm dev) — loosen the
+# shared-IP rate limits first, or the suite 429s itself:
+cp .env.k6.example .env.k6
+# PowerShell: $env:K6_TESTING='true'; pnpm dev
+# bash:       K6_TESTING=true pnpm dev
+pnpm k6:load
+```
+
+How the overlay works: with `K6_TESTING=true`, `load-env.ts` (api/auth) and
+`next.config.js` (web) layer `.env.k6` over `.env`. Docker Compose never reads
+it — container nginx keeps enforcing its limits (`NGINX_CONN_LIMIT=20`),
+which is why k6 thresholds treat `429` as expected behavior and `spike.js`
+explicitly asserts the `429` shields fire. There is intentionally **no**
+bypass header (an empty nginx limit key = no limiting at all).
+
+### Env files per suite — cheat sheet
+
+```
+.env.example       →  cp .env.example .env            (dev, prod, local runs)
+.env.e2e.example   →  cp .env.e2e.example .env.e2e    (option C only)
+.env.k6.example    →  cp .env.k6.example .env.k6      (option D, host-run apps)
+.env.test.example  →  cp .env.test.example .env.test  (option B only)
+```
+
+---
+
+## 6. Database workflow (Prisma 7)
 
 All DB scripts live in `packages/database` and read `DATABASE_URL` from the
 root `.env` (via `prisma.config.ts`). The generated client lives at
@@ -224,7 +352,7 @@ Order for a fresh environment:
 pnpm db:generate       # 1. generate the v7 client (needed before builds)
 pnpm db:migrate:dev    # 2. create & apply a migration (interactive) — OR —
 pnpm db:push           # 2b. push schema directly without a migration file
-pnpm db:seed           # 3. create the super admin (requires API up, section 6)
+pnpm db:seed           # 3. create the super admin (requires API up, section 7)
 pnpm db:studio         # 4. (optional) inspect data
 ```
 
@@ -237,7 +365,7 @@ pnpm db:studio         # 4. (optional) inspect data
 
 ---
 
-## 6. Seeding (pnpm db:seed)
+## 7. Seeding (pnpm db:seed)
 
 The seed script (`packages/database/src/seed.ts`) does two things:
 
@@ -270,7 +398,7 @@ strict env validation it usually refuses to boot at all now.
 
 ---
 
-## 7. TLS certificates (nginx)
+## 8. TLS certificates (nginx)
 
 Nginx requires `nginx/certs/<NGINX_SSL_CERT_FILENAME>` and
 `<NGINX_SSL_KEY_FILENAME>` (defaults: `localhost.crt` / `localhost.key`).
@@ -282,11 +410,13 @@ mkcert -key-file nginx/certs/localhost.key -cert-file nginx/certs/localhost.crt 
 
 ---
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 | Symptom | Cause / fix |
 |---|---|
 | `Missing required environment variable: X` | Root `.env` missing `X` or process not restarted after `.env` edit. Restart the local process / `docker compose up -d` again. |
+| Integration tests refuse to boot on OTel keys | `.env.test` predates the `OTEL_SDK_DISABLED=true` flag — re-copy from `.env.test.example`. Docker `api-test` injects it via compose. |
+| `test` profile run dies instantly | You used `--abort-on-container-exit`: `migrate-test`'s clean exit aborts the suite. Use detached + `docker wait` (section 5 A). |
 | API boots but sign-up/seed returns 500 | API env incomplete (e.g. no `DATABASE_URL`) — with the strict checks it should now fail at boot instead. Check API logs. |
 | Seed fails at `Better Auth sign-up failed: 500` | The API behind nginx is not healthy/up-to-date. In `local` mode your host API must be running. |
 | Port 3001 already in use | Another API instance (e.g. an old one) still running. `Stop-Process` / `kill` it, or check `Get-NetTCPConnection -LocalPort 3001`. |
@@ -298,7 +428,7 @@ mkcert -key-file nginx/certs/localhost.key -cert-file nginx/certs/localhost.crt 
 
 ---
 
-## 9. Daily cheatsheet
+## 10. Daily cheatsheet
 
 ```bash
 pnpm install                                # install everything
@@ -318,9 +448,11 @@ pnpm db:migrate:deploy
 pnpm db:seed
 pnpm db:studio
 
-# building / testing / linting
+# building / testing / linting (details: section 5)
 pnpm build
-pnpm test
+pnpm test                               # unit only, no infra
+pnpm --filter api test:integration      # needs PG+Redis, see section 5 A/B
+pnpm k6:smoke                           # needs a running stack, see section 5 D
 pnpm lint
 
 # scoped runs
