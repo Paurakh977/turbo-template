@@ -3,20 +3,20 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { authClient } from '../../lib/auth-client';
+import { authClient } from '../../lib/auth/auth-client';
 import { motion, AnimatePresence } from 'framer-motion';
 import { PasswordInput } from '../_components/PasswordInput';
 import {
   getPasswordStrength,
   isValidEmail,
   validatePasswordPolicy,
-} from '../../lib/validation';
+} from '../../lib/shared/validation';
 import {
   getResendVerificationPublicMessage,
   isRateLimitedAuthError,
   safeDecodeParam,
-} from '../../lib/auth-errors';
-import { getClientAppBaseUrl } from '../../lib/app-url';
+} from '../../lib/shared/auth-errors';
+import { getClientAppBaseUrl } from '../../lib/shared/app-url';
 
 export default function AuthPage() {
   const router = useRouter();

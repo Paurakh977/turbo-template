@@ -1,6 +1,6 @@
 import { headers } from 'next/headers';
 import Link from 'next/link';
-import { requireAdmin } from '../../lib/require-admin';
+import { requireAdmin } from '../../lib/server/require-admin';
 import { getPrimaryRole } from '@repo/auth/roles';
 import { listUsersFromApi } from '../../lib/server/auth-http';
 import {

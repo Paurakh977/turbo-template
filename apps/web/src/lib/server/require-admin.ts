@@ -1,10 +1,12 @@
+import 'server-only';
+
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 // Pure role-token helpers come from the dedicated subpath so this module
 // never instantiates a BetterAuth runtime just to compare role strings.
 import { hasAdminRole, hasSuperAdminRole } from '@repo/auth/roles';
 import type { Auth } from '@repo/auth';
-import { getSessionFromApi } from './server/auth-http';
+import { getSessionFromApi } from './auth-http';
 
 export type Session = Auth['$Infer']['Session'];
 export type SessionWithRole = Session & {

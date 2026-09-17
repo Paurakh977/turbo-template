@@ -3,12 +3,12 @@
 import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { authClient } from '../../../lib/auth-client';
+import { authClient } from '../../../lib/auth/auth-client';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   getVerifyEmailCallbackError,
   getVerifyEmailPublicError,
-} from '../../../lib/auth-errors';
+} from '../../../lib/shared/auth-errors';
 
 function VerifyEmailContent() {
   const router = useRouter();

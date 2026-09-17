@@ -2,9 +2,9 @@ import type { Metadata } from 'next';
 import { cookies, headers } from 'next/headers';
 import localFont from 'next/font/local';
 import '../styles/globals.css';
-import { THEME_INIT_SCRIPT, THEME_STORAGE_KEY } from '../lib/theme';
-import { ToastProvider } from '../lib/toast-context';
-import { FaroInit } from '../lib/faro-init';
+import { THEME_INIT_SCRIPT, THEME_STORAGE_KEY } from '../lib/ui/theme';
+import { ToastProvider } from '../lib/ui/toast-context';
+import { FaroInit } from '../lib/ui/faro-init';
 
 const geistSans = localFont({
   src: '../fonts/GeistVF.woff',

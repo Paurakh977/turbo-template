@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { callInternalApi } from './server/internal-api';
+import { callInternalApi } from './internal-api';
 
 type ServerActionRateLimitInput = {
   scope: string;

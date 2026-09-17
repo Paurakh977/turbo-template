@@ -3,7 +3,7 @@
 import { headers } from 'next/headers';
 import { getSessionFromApi } from '../../lib/server/auth-http';
 import { callInternalApi } from '../../lib/server/internal-api';
-import { checkServerActionRateLimit } from '../../lib/server-action-rate-limit';
+import { checkServerActionRateLimit } from '../../lib/server/server-action-rate-limit';
 
 /**
  * Fetches the caller's CURRENT role straight from the primary store via the

@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { headers } from 'next/headers';
-import { getPublicAppBaseUrl, trimTrailingSlash } from '../app-url';
+import { getPublicAppBaseUrl, trimTrailingSlash } from '../shared/app-url';
 
 export function inferOriginFromHeaders(h: Headers): string | null {
   const forwardedProto = h

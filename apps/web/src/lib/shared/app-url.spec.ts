@@ -3,7 +3,7 @@ import {
   buildAbsoluteUrl,
   getPublicAppBaseUrl,
   getClientAppBaseUrl,
-} from '../lib/app-url';
+} from './app-url';
 
 describe('trimTrailingSlash', () => {
   it('removes trailing slash', () => {
@@ -75,27 +75,27 @@ describe('getPublicAppBaseUrl', () => {
 
   it('uses NEXT_PUBLIC_APP_URL when set', () => {
     process.env.NEXT_PUBLIC_APP_URL = 'https://app.example.com';
-    const mod = require('../lib/app-url');
+    const mod = require('./app-url');
     expect(mod.getPublicAppBaseUrl()).toBe('https://app.example.com');
   });
 
   it('falls back to BETTER_AUTH_URL', () => {
     delete process.env.NEXT_PUBLIC_APP_URL;
     process.env.BETTER_AUTH_URL = 'https://auth.example.com';
-    const mod = require('../lib/app-url');
+    const mod = require('./app-url');
     expect(mod.getPublicAppBaseUrl()).toBe('https://auth.example.com');
   });
 
   it('falls back to localhost', () => {
     delete process.env.NEXT_PUBLIC_APP_URL;
     delete process.env.BETTER_AUTH_URL;
-    const mod = require('../lib/app-url');
+    const mod = require('./app-url');
     expect(mod.getPublicAppBaseUrl()).toBe('http://localhost:3000');
   });
 
   it('trims trailing slash from NEXT_PUBLIC_APP_URL', () => {
     process.env.NEXT_PUBLIC_APP_URL = 'https://app.example.com/';
-    const mod = require('../lib/app-url');
+    const mod = require('./app-url');
     expect(mod.getPublicAppBaseUrl()).toBe('https://app.example.com');
   });
 });

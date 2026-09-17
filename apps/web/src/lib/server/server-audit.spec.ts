@@ -2,12 +2,12 @@ jest.mock('server-only', () => ({}));
 jest.mock('next/headers', () => ({
   headers: jest.fn().mockResolvedValue(new Headers()),
 }));
-jest.mock('./server/internal-api', () => ({
+jest.mock('./internal-api', () => ({
   callInternalApi: jest.fn(),
 }));
 
 import { createServerAuditLog } from './server-audit';
-import { callInternalApi } from './server/internal-api';
+import { callInternalApi } from './internal-api';
 
 describe('createServerAuditLog', () => {
   beforeEach(() => {

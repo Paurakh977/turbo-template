@@ -1,4 +1,4 @@
-import { isValidEmail, getPasswordStrength, validatePasswordPolicy } from '../lib/validation';
+import { isValidEmail, getPasswordStrength, validatePasswordPolicy } from './validation';
 
 describe('isValidEmail', () => {
   describe('valid emails', () => {

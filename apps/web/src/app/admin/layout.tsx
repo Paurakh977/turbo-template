@@ -1,6 +1,6 @@
 import Link from 'next/link';
 
-import { requireAdmin } from '../../lib/require-admin';
+import { requireAdmin } from '../../lib/server/require-admin';
 import { getPrimaryRole } from '@repo/auth/roles';
 
 export default async function AdminLayout({

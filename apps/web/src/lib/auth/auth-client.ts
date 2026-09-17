@@ -8,7 +8,7 @@ import {
   AUTH_RATE_LIMIT_EVENT,
   AUTH_RATE_LIMIT_MESSAGE,
   type AuthRateLimitDetail,
-} from './auth-rate-limit-event';
+} from '../shared/auth-rate-limit-event';
 
 /**
  * The onError context from @better-fetch/fetch includes:

@@ -11,7 +11,7 @@ import {
 import {
   checkServerActionRateLimit,
   getServerActionRateLimitMessage,
-} from '../../../lib/server-action-rate-limit';
+} from '../../../lib/server/server-action-rate-limit';
 
 type NoteActionError = { error: string };
 

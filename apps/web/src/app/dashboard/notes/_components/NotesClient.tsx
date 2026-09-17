@@ -9,7 +9,7 @@ import {
 } from '../actions';
 import { ActionDialog } from '../../../_components/ActionDialog';
 import { type ToastKind } from '../../../_components/ToastRegion';
-import { useToast } from '../../../../lib/toast-context';
+import { useToast } from '../../../../lib/ui/toast-context';
 
 type Author = { id: string; name: string };
 type Note = {

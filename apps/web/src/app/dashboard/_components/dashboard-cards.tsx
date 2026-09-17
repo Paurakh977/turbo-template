@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { motion } from 'framer-motion';
-import { getRoleBadgeStyle } from '../../../lib/role-badge';
+import { getRoleBadgeStyle } from '../../../lib/shared/role-badge';
 import { useDashboardSession } from './DashboardShell';
 
 // ── Shared animation variants ────────────────────────────────────────────

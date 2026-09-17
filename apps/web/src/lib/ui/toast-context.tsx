@@ -2,12 +2,12 @@
 
 import { createContext, useContext, ReactNode, useEffect } from 'react';
 import { useToastRegion } from './use-toast-region';
-import { ToastRegion, type ToastKind } from '../app/_components/ToastRegion';
+import { ToastRegion, type ToastKind } from '../../app/_components/ToastRegion';
 import {
   AUTH_RATE_LIMIT_EVENT,
   AUTH_RATE_LIMIT_MESSAGE,
   type AuthRateLimitDetail,
-} from './auth-rate-limit-event';
+} from '../shared/auth-rate-limit-event';
 
 type ToastContextType = {
   pushToast: (kind: ToastKind, message: string) => void;

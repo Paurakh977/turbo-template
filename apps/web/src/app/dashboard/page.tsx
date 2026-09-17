@@ -3,15 +3,15 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { authClient, listLinkedAccounts, type LinkedAccount } from '../../lib/auth-client';
+import { authClient, listLinkedAccounts, type LinkedAccount } from '../../lib/auth/auth-client';
 import { getPrimaryRole, hasAdminRole, hasOperatorRole } from '@repo/auth/roles';
 import { motion } from 'framer-motion';
-import { useToast } from '../../lib/toast-context';
-import { buildAbsoluteUrl } from '../../lib/app-url';
+import { useToast } from '../../lib/ui/toast-context';
+import { buildAbsoluteUrl } from '../../lib/shared/app-url';
 import {
   getPasswordStrength,
   validatePasswordPolicy,
-} from '../../lib/validation';
+} from '../../lib/shared/validation';
 import { useDashboardSession } from './_components/DashboardShell';
 import {
   containerVariants,
@@ -244,7 +244,7 @@ export default function DashboardPage() {
   const role = getPrimaryRole(roleRaw);
 
   // Same canonical role-token predicate the server-side guards use
-  // (lib/require-admin.ts) so UI gating can never drift from enforcement.
+  // (lib/server/require-admin.ts) so UI gating can never drift from enforcement.
   const isAdmin = hasAdminRole(roleRaw);
   const isOperator = hasOperatorRole(roleRaw);
 

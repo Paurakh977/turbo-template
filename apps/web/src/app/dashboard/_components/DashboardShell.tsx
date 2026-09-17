@@ -3,12 +3,12 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { authClient, type Session } from '../../../lib/auth-client';
+import { authClient, type Session } from '../../../lib/auth/auth-client';
 // Canonical role-token checks (same predicates the server-side guards use),
-// NOT permission-proxy checks - see lib/require-admin.ts for the rationale.
+// NOT permission-proxy checks - see lib/server/require-admin.ts for the rationale.
 import { getPrimaryRole, hasAdminRole } from '@repo/auth/roles';
 import { getFreshRoleAction } from '../actions';
-import { useToast } from '../../../lib/toast-context';
+import { useToast } from '../../../lib/ui/toast-context';
 
 type DashboardSessionValue = {
   session: Session;

@@ -11,9 +11,9 @@ import {
 import { ActionDialog } from '../../../_components/ActionDialog';
 import { type ToastKind } from '../../../_components/ToastRegion';
 import { PasswordInput } from '../../../_components/PasswordInput';
-import { getRoleBadgeStyle } from '../../../../lib/role-badge';
-import { useToast } from '../../../../lib/toast-context';
-import { applyTheme, resolveThemeFromBrowser } from '../../../../lib/theme';
+import { getRoleBadgeStyle } from '../../../../lib/shared/role-badge';
+import { useToast } from '../../../../lib/ui/toast-context';
+import { applyTheme, resolveThemeFromBrowser } from '../../../../lib/ui/theme';
 
 type UserProps = {
   id: string;

@@ -1,5 +1,5 @@
 import { headers } from 'next/headers';
-import { requireAdmin } from '../../../lib/require-admin';
+import { requireAdmin } from '../../../lib/server/require-admin';
 import { formatDistanceToNow } from 'date-fns';
 import { THEME_GRANT_NAME, LABS_GRANT_NAME } from '@repo/auth/permissions';
 import { parseRoles } from '@repo/auth/roles';

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { authClient } from '../../../lib/auth-client';
+import { authClient } from '../../../lib/auth/auth-client';
 import {
   getPrimaryRole,
   hasGrantRole,
@@ -11,8 +11,8 @@ import {
 } from '@repo/auth/roles';
 import { THEME_GRANT_NAME, LABS_GRANT_NAME } from '@repo/auth/permissions';
 import { ActionDialog } from '../../_components/ActionDialog';
-import { useToast } from '../../../lib/toast-context';
-import { getRoleBadgeStyle } from '../../../lib/role-badge';
+import { useToast } from '../../../lib/ui/toast-context';
+import { getRoleBadgeStyle } from '../../../lib/shared/role-badge';
 import { resendVerificationEmailAction } from '../actions';
 
 export type AdminTableUser = {

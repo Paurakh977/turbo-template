@@ -11,13 +11,13 @@ import {
   listAccountsFromApi,
 } from '../../../lib/server/auth-http';
 import { getMyPermissionsFromApi } from '../../../lib/server/internal-api';
-import { createServerAuditLog } from '../../../lib/server-audit';
+import { createServerAuditLog } from '../../../lib/server/server-audit';
 import {
   checkServerActionRateLimit,
   getServerActionRateLimitMessage,
-} from '../../../lib/server-action-rate-limit';
+} from '../../../lib/server/server-action-rate-limit';
 import { getAppBaseUrl } from '../../../lib/server/app-url';
-import { buildAbsoluteUrl } from '../../../lib/app-url';
+import { buildAbsoluteUrl } from '../../../lib/shared/app-url';
 
 async function getSessionOrRedirect() {
   const h = await headers();

@@ -5,8 +5,8 @@ import type { Link as LinkType } from '@repo/api';
 import { Button } from '@repo/ui/button';
 import Image, { type ImageProps } from 'next/image';
 import Link from 'next/link';
-import { useToast } from '../lib/toast-context';
-import { safeDecodeParam } from '../lib/auth-errors';
+import { useToast } from '../lib/ui/toast-context';
+import { safeDecodeParam } from '../lib/shared/auth-errors';
 
 import styles from '../styles/page.module.css';
 

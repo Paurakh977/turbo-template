@@ -1,4 +1,4 @@
-import { getRoleBadgeStyle, ROLE_BADGE_STYLE } from '../lib/role-badge';
+import { getRoleBadgeStyle, ROLE_BADGE_STYLE } from './role-badge';
 
 describe('getRoleBadgeStyle', () => {
   it('returns primary style for superAdmin', () => {

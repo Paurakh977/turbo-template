@@ -4,13 +4,13 @@
 import { useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { authClient } from '../../../lib/auth-client';
+import { authClient } from '../../../lib/auth/auth-client';
 import { PasswordInput } from '../../_components/PasswordInput';
 import {
   getPasswordStrength,
   validatePasswordPolicy,
-} from '../../../lib/validation';
-import { getResetPasswordPublicError } from '../../../lib/auth-errors';
+} from '../../../lib/shared/validation';
+import { getResetPasswordPublicError } from '../../../lib/shared/auth-errors';
 
 function ResetPasswordForm() {
   const router = useRouter();

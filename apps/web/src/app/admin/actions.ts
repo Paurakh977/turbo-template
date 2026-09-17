@@ -4,13 +4,13 @@ import { isAPIError } from 'better-auth/api';
 import { headers } from 'next/headers';
 import { getAdminUserFromApi, sendVerificationEmailFromApi } from '../../lib/server/auth-http';
 import { canActOn, getPrimaryRole } from '@repo/roles';
-import { requireAdmin } from '../../lib/require-admin';
-import { buildAbsoluteUrl } from '../../lib/app-url';
+import { requireAdmin } from '../../lib/server/require-admin';
+import { buildAbsoluteUrl } from '../../lib/shared/app-url';
 import { getAppBaseUrl } from '../../lib/server/app-url';
 import {
   checkServerActionRateLimit,
   getServerActionRateLimitMessage,
-} from '../../lib/server-action-rate-limit';
+} from '../../lib/server/server-action-rate-limit';
 
 type ActionResult = { success: boolean } | { error: string };
 

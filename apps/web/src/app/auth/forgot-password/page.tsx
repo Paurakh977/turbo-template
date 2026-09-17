@@ -2,17 +2,17 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { authClient } from '../../../lib/auth-client';
+import { authClient } from '../../../lib/auth/auth-client';
 import { motion } from 'framer-motion';
-import { isValidEmail } from '../../../lib/validation';
+import { isValidEmail } from '../../../lib/shared/validation';
 import {
   getForgotPasswordPublicMessage,
   isRateLimitedAuthError,
-} from '../../../lib/auth-errors';
+} from '../../../lib/shared/auth-errors';
 import {
   buildAbsoluteUrl,
   getClientAppBaseUrl,
-} from '../../../lib/app-url';
+} from '../../../lib/shared/app-url';
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');

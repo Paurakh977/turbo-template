@@ -6,7 +6,7 @@ import Link from 'next/link';
 import {
   authClient,
   TWO_FACTOR_CHALLENGE_STORAGE_KEY,
-} from '../../../lib/auth-client';
+} from '../../../lib/auth/auth-client';
 import { motion, AnimatePresence } from 'framer-motion';
 
 type Method = 'totp' | 'otp' | 'backup';

@@ -6,7 +6,7 @@ import {
   getResetPasswordPublicError,
   getVerifyEmailPublicError,
   getVerifyEmailCallbackError,
-} from '../lib/auth-errors';
+} from './auth-errors';
 
 describe('safeDecodeParam', () => {
   it('decodes valid URI component', () => {

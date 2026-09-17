@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ToastItem, ToastKind } from '../app/_components/ToastRegion';
+import type { ToastItem, ToastKind } from '../../app/_components/ToastRegion';
 
 const TOAST_DURATION_MS = 3500;
 

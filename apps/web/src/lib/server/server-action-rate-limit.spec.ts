@@ -1,8 +1,8 @@
-jest.mock('../lib/server/internal-api', () => ({
+jest.mock('./internal-api', () => ({
   callInternalApi: jest.fn(),
 }));
 
-import { getServerActionRateLimitMessage } from '../lib/server-action-rate-limit';
+import { getServerActionRateLimitMessage } from './server-action-rate-limit';
 
 describe('getServerActionRateLimitMessage', () => {
   it('formats seconds correctly', () => {
