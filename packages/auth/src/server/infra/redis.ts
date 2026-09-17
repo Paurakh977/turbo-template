@@ -1,6 +1,6 @@
 import Redis from 'ioredis';
 import { createLogger } from '@repo/observability';
-import { redisUrl } from './env';
+import { redisUrl } from '../../config/env';
 
 type GlobalRedisState = typeof globalThis & {
   __repoSharedRedisClient?: Redis;

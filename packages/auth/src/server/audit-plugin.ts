@@ -11,7 +11,7 @@ import {
   storePendingDeletion,
   storePendingStopImpersonation,
 } from './pending-storage';
-import { resolveClientIp } from './client-ip';
+import { resolveClientIp } from '../shared/client-ip';
 
 const logger = createLogger('auth:audit-plugin');
 

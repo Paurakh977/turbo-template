@@ -1,7 +1,7 @@
 /**
  * Server-side password complexity policy.
  *
- * Matches the client-side validation in apps/web/src/lib/validation.ts
+ * Matches the client-side validation in apps/web/src/lib/shared/validation.ts
  * to ensure consistent enforcement regardless of how the request arrives
  * (UI, API call, curl, etc.).
  */

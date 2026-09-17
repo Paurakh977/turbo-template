@@ -7,7 +7,7 @@ jest.mock('resend', () => {
   };
 });
 
-jest.mock('./env', () => ({
+jest.mock('../../config/env', () => ({
   get devEmailOverride() {
     return process.env.TEST_DEV_EMAIL_OVERRIDE ?? undefined;
   },

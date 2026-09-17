@@ -11,7 +11,7 @@ import {
   type SessionData,
   type UserData,
 } from './pending-storage';
-import { resolveClientIp } from './client-ip';
+import { resolveClientIp } from '../shared/client-ip';
 
 const logger = createLogger('auth:database-hooks');
 

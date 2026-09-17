@@ -6,7 +6,7 @@ export default {
   rootDir: 'src',
   moduleNameMapper: {
     '^@repo/auth$': '<rootDir>/../../../packages/auth/src/index.ts',
-    '^@repo/auth/(.*)$': '<rootDir>/../../../packages/auth/src/$1.ts',
+    '^@repo/auth/(.*)$': '<rootDir>/../../../packages/auth/src/shared/$1.ts',
     '^@repo/roles$': '<rootDir>/../../../packages/roles/src/index.ts',
     '^@repo/ui$': '<rootDir>/../../../packages/ui/src/index.ts',
     '^@repo/ui/(.*)$': '<rootDir>/../../../packages/ui/src/$1.tsx',

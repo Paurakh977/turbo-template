@@ -16,19 +16,19 @@
       "require": "./dist/index.js"
     },
     "./permissions": {
-      "types": "./src/permissions.ts",
-      "import": "./dist/permissions.js",
-      "require": "./dist/permissions.js"
+      "types": "./src/shared/permissions.ts",
+      "import": "./dist/shared/permissions.js",
+      "require": "./dist/shared/permissions.js"
     },
     "./roles": {
-      "types": "./src/roles.ts",
-      "import": "./dist/roles.js",
-      "require": "./dist/roles.js"
+      "types": "./src/shared/roles.ts",
+      "import": "./dist/shared/roles.js",
+      "require": "./dist/shared/roles.js"
     },
     "./password-policy": {
-      "types": "./src/password-policy.ts",
-      "import": "./dist/password-policy.js",
-      "require": "./dist/password-policy.js"
+      "types": "./src/shared/password-policy.ts",
+      "import": "./dist/shared/password-policy.js",
+      "require": "./dist/shared/password-policy.js"
     }
   },
   "scripts": {

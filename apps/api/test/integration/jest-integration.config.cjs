@@ -28,7 +28,7 @@ module.exports = {
   },
   moduleNameMapper: {
     '^@repo/auth$': path.join(root, 'packages/auth/src/index.ts'),
-    '^@repo/auth/(.*)$': path.join(root, 'packages/auth/src/$1'),
+    '^@repo/auth/(.*)$': path.join(root, 'packages/auth/src/shared/$1'),
     '^@repo/database$': path.join(root, 'packages/database/src/index.ts'),
     '^@repo/database/(.*)$': path.join(root, 'packages/database/src/$1'),
     '^@repo/roles$': path.join(root, 'packages/roles/src/index.ts'),

@@ -1,6 +1,6 @@
 import { db } from '@repo/database';
 import { createLogger } from '@repo/observability';
-import { redis } from './redis';
+import { redis } from './infra/redis';
 
 const logger = createLogger('auth:pending-storage');
 

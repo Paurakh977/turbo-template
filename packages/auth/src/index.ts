@@ -1,5 +1,5 @@
-export { auth, ADMIN_ROLES } from './auth';
-export type { Auth } from './auth';
+export { auth, ADMIN_ROLES } from './server/auth';
+export type { Auth } from './server/auth';
 export {
   type BaseRole,
   ROLE_WEIGHT,
@@ -13,7 +13,7 @@ export {
   hasOperatorRole,
   hasGrantRole,
   canActOn,
-} from './roles';
+} from './shared/roles';
 export {
   AUTH_BASE_PATH,
   ADMIN_PLUGIN_ROLES,
@@ -24,8 +24,8 @@ export {
   statement,
   THEME_GRANT_NAME,
   LABS_GRANT_NAME,
-} from './permissions';
+} from './shared/permissions';
 export {
   validatePasswordPolicy,
   type PasswordPolicyResult,
-} from './password-policy';
+} from './shared/password-policy';

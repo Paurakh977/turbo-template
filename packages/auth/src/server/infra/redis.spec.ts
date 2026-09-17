@@ -14,7 +14,7 @@ jest.mock('ioredis', () => {
   return { __esModule: true, default: mockRedis };
 });
 
-jest.mock('./env', () => ({
+jest.mock('../../config/env', () => ({
   get redisUrl() {
     return process.env.REDIS_URL ?? null;
   },

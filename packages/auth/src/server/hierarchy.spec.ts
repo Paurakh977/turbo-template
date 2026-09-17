@@ -26,7 +26,7 @@ jest.mock('./pending-storage', () => ({
   storePendingStopImpersonation: jest.fn(),
 }));
 
-jest.mock('./client-ip', () => ({
+jest.mock('../shared/client-ip', () => ({
   resolveClientIp: jest.fn().mockReturnValue('127.0.0.1'),
   TRUSTED_PROXY_CIDRS: ['10.0.0.0/8'],
 }));

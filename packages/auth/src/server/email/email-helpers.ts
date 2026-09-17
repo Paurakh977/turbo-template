@@ -1,6 +1,6 @@
 import { Resend } from 'resend';
 import { createLogger } from '@repo/observability';
-import { devEmailOverride, emailFrom, resendApiKey } from './env';
+import { devEmailOverride, emailFrom, resendApiKey } from '../../config/env';
 
 const resend = resendApiKey ? new Resend(resendApiKey) : null;
 const logger = createLogger('auth:email');

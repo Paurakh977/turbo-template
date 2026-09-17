@@ -1,4 +1,4 @@
-import './load-env';
+import '../config/load-env';
 import { betterAuth, type BetterAuthPlugin } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { twoFactor } from 'better-auth/plugins/two-factor';
@@ -8,12 +8,12 @@ import { genericOAuth } from 'better-auth/plugins';
 import { nextCookies } from 'better-auth/next-js';
 import { createAuthMiddleware, APIError } from 'better-auth/api';
 import { createLogger } from '@repo/observability';
-import { AUTH_BASE_PATH, ADMIN_PLUGIN_ROLES, ac } from './permissions';
+import { AUTH_BASE_PATH, ADMIN_PLUGIN_ROLES, ac } from '../shared/permissions';
 import { parseRoles } from '@repo/roles';
-import { validatePasswordPolicy } from './password-policy';
+import { validatePasswordPolicy } from '../shared/password-policy';
 import { db } from '@repo/database';
-import { redis } from './redis';
-import { sendEmail } from './email-helpers';
+import { redis } from './infra/redis';
+import { sendEmail } from './email/email-helpers';
 import { databaseHooks } from './database-hooks';
 import { auditLogPlugin } from './audit-plugin';
 import {
@@ -28,8 +28,8 @@ import {
   secret,
   isProduction,
   usingPlaceholderSecret,
-} from './env';
-import { TRUSTED_PROXY_CIDRS } from './client-ip';
+} from '../config/env';
+import { TRUSTED_PROXY_CIDRS } from '../shared/client-ip';
 
 const logger = createLogger('auth');
 
@@ -86,7 +86,7 @@ export const auth = betterAuth({
   // resetPassword in better-auth/src/api/routes/password.ts — length checks
   // only). This hook adds uppercase + lowercase + number + symbol
   // requirements that match the client-side validation in
-  // apps/web/src/lib/validation.ts.
+  // apps/web/src/lib/shared/validation.ts.
   //
   // Applied to every endpoint that sets a credential password:
   //   - /sign-up/email      (body.password)

@@ -1,4 +1,4 @@
-jest.mock('./redis', () => ({
+jest.mock('./infra/redis', () => ({
   redis: null,
 }));
 
