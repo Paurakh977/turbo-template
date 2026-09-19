@@ -24,21 +24,69 @@ function parsePositiveInt(
   return value;
 }
 
+type PoolErrorListener = (err: Error) => void;
+const poolErrorListeners: PoolErrorListener[] = [];
+
+export function addPoolErrorListener(listener: PoolErrorListener): () => void {
+  poolErrorListeners.push(listener);
+  return () => {
+    const idx = poolErrorListeners.indexOf(listener);
+    if (idx !== -1) poolErrorListeners.splice(idx, 1);
+  };
+}
+
 function getPool(): Pool {
-  globalForPrisma.pgPool ??= new Pool({
-    connectionString: process.env.DATABASE_URL ?? '',
-    // Validated: bare Number() turned "10x" into a silently-truncated pool
-    // size and "" into NaN. Pool max of 0 would mean a pool that can never
-    // acquire a client (hangs forever), hence min 1 here.
-    max: parsePositiveInt('DATABASE_POOL_MAX', 10, { min: 1 }),
-    connectionTimeoutMillis: parsePositiveInt(
-      'DATABASE_CONNECTION_TIMEOUT_MS',
-      5_000,
-    ),
-    idleTimeoutMillis: parsePositiveInt('DATABASE_IDLE_TIMEOUT_MS', 30_000),
-  });
+  if (!globalForPrisma.pgPool) {
+    const pool = new Pool({
+      connectionString: process.env.DATABASE_URL ?? '',
+      // Validated: bare Number() turned "10x" into a silently-truncated pool
+      // size and "" into NaN. Pool max of 0 would mean a pool that can never
+      // acquire a client (hangs forever), hence min 1 here.
+      max: parsePositiveInt('DATABASE_POOL_MAX', 10, { min: 1 }),
+      connectionTimeoutMillis: parsePositiveInt(
+        'DATABASE_CONNECTION_TIMEOUT_MS',
+        5_000,
+      ),
+      idleTimeoutMillis: parsePositiveInt('DATABASE_IDLE_TIMEOUT_MS', 30_000),
+    });
+
+    pool.on('error', (err) => {
+      // Idle client error — prevents Node from crashing on unhandled error event
+      console.error('[Database Pool Error] Unexpected idle client error:', err);
+      for (const listener of poolErrorListeners) {
+        try {
+          listener(err);
+        } catch {
+          // Prevent listener failures from crashing pool handler
+        }
+      }
+    });
+
+    globalForPrisma.pgPool = pool;
+  }
 
   return globalForPrisma.pgPool;
+}
+
+export interface DatabasePoolStats {
+  totalCount: number;
+  idleCount: number;
+  waitingCount: number;
+  max: number;
+}
+
+export function getPoolStats(): DatabasePoolStats {
+  const max = parsePositiveInt('DATABASE_POOL_MAX', 10, { min: 1 });
+  const pool = globalForPrisma.pgPool;
+  if (!pool) {
+    return { totalCount: 0, idleCount: 0, waitingCount: 0, max };
+  }
+  return {
+    totalCount: pool.totalCount,
+    idleCount: pool.idleCount,
+    waitingCount: pool.waitingCount,
+    max,
+  };
 }
 
 function getClient(): PrismaClient {

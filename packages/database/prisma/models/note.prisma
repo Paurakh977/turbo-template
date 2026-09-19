@@ -7,7 +7,11 @@ model Note {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([authorId])
+  // NOTE: single-column [authorId] removed 2026-09 — redundant leftmost
+  // prefix of [authorId, createdAt] below. [createdAt] kept for global
+  // newest-first listing (admin, no author filter).
   @@index([createdAt])
+  // Note listing per author sorted newest-first (covering index)
+  @@index([authorId, createdAt(sort: Desc)])
   @@map("note")
 }

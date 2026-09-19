@@ -22,6 +22,8 @@ model User {
   twofactors       TwoFactor[]
 
   @@unique([email])
+  // Admin user listing sorted by newest first
+  @@index([createdAt(sort: Desc)])
   @@map("user")
 }
 
@@ -38,7 +40,12 @@ model Session {
   impersonatedBy String?
 
   @@unique([token])
-  @@index([userId])
+  // NOTE: single-column [userId] removed 2026-09 — redundant leftmost prefix
+  // of [userId, expiresAt] below (covers user-only + user+expiry queries).
+  // Sweep-by-expiry cleanup queries and session validation
+  @@index([expiresAt])
+  // Active-session list per user (userId + expiry filter)
+  @@index([userId, expiresAt])
   @@map("session")
 }
 
@@ -59,18 +66,25 @@ model Account {
   updatedAt             DateTime  @updatedAt
 
   @@index([userId])
+  // OAuth provider lookup (providerId + accountId)
+  @@index([providerId, accountId])
   @@map("account")
 }
 
 model Verification {
   id         String   @id
   identifier String
-  value      String
   expiresAt  DateTime
+  value      String
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  @@index([identifier])
+  // NOTE: single-column [identifier] removed 2026-09 — redundant leftmost
+  // prefix of [identifier, expiresAt] below.
+  // Identifier + expiry (validity check in single index scan)
+  @@index([identifier, expiresAt])
+  // Sweep expired verifications
+  @@index([expiresAt])
   @@map("verification")
 }
 
@@ -107,5 +121,7 @@ model Jwks {
   createdAt  DateTime  @default(now())
   expiresAt  DateTime?
 
+  // JWKS rotation sweep — find expired keys efficiently
+  @@index([expiresAt])
   @@map("jwks")
 }

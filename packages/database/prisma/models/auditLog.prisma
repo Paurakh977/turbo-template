@@ -9,11 +9,14 @@ model AuditLog {
   userAgent String?
   createdAt DateTime @default(now())
 
-  @@index([userId])
-  @@index([action])
-  @@index([createdAt])
-  @@index([actor])
-  @@index([userId, action, createdAt])
-  @@index([action, createdAt])
+  // Stable deterministic pagination (createdAt DESC, id DESC tie-
+  // breaker ensures a consistent page window even when rows share a timestamp).
+  @@index([createdAt(sort: Desc), id(sort: Desc)])
+  // Per-user audit history (filters + time-ordered pagination)
+  @@index([userId, createdAt(sort: Desc)])
+  // Per-actor audit history
+  @@index([actor, createdAt(sort: Desc)])
+  // Per-action filter with stable pagination tie-breaker
+  @@index([action, createdAt(sort: Desc), id(sort: Desc)])
   @@map("audit_log")
 }

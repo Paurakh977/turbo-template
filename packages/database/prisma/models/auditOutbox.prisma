@@ -1,0 +1,54 @@
+// Transactional outbox for background audit writes.
+//
+// Why a table, not Redis Streams / BullMQ / RabbitMQ / Kafka / LISTEN:
+// - Atomicity: the business mutation and the outbox row commit in ONE PG
+//   transaction (see NotesService.create with $transaction). External brokers
+//   cannot join that transaction without 2PC — a crash between COMMIT and
+//   publish loses the audit (or duplicates it without an idempotency key).
+// - One infra: PG 16 is already operated, backed up, and monitored. Every
+//   alternative adds a stateful service (BullMQ: Redis + worker proc;
+//   RabbitMQ/Kafka: new clusters; Streams: consumer-group + trim ops).
+// - LISTEN/NOTIFY is explicitly rejected: notifications are NOT persisted —
+//   a subscriber disconnect loses everything emitted while away (PG docs).
+//   Polling (250ms) bounds latency with full durability; SKIP LOCKED lets N
+//   pollers share work without blocking each other.
+// - Volume fits: audit events are low-rate domain/UX rows (note/profile/
+//   theme/labs), not a streaming workload. A partial index on
+//   (status, next_attempt_at) keeps each poll to an index-only scan.
+//
+// Status machine: PENDING -> CLAIMED -> DONE | PENDING (retry, attempts+1)
+//   -> DLQ (attempts exhausted; redrive = UPDATE back to PENDING, see docs).
+// CLAIMED rows older than the claim timeout are reclaimable (crashed-worker
+// recovery). Idempotency: idempotency_key UNIQUE — duplicate enqueue
+// (retry, double-submit) collides and is ignored, never double-inserted.
+// Ordering: claimed in (created_at, id) order per poll batch (best-effort
+// FIFO); GLOBAL cross-instance ordering is NOT guaranteed — same as the
+// pre-outbox per-request awaits, which also interleaved across instances.
+model AuditOutbox {
+  id             String   @id @default(cuid())
+  idempotencyKey String   @unique @map("idempotency_key")
+  action         String
+  userId         String?  @map("user_id")
+  actor          String?
+  targetId       String?  @map("target_id")
+  metadata       Json?
+  ipAddress      String?  @map("ip_address")
+  userAgent      String?  @map("user_agent")
+  status         String   @default("PENDING")
+  attempts       Int      @default(0)
+  nextAttemptAt  DateTime @default(now()) @map("next_attempt_at")
+  claimedBy      String?  @map("claimed_by")
+  claimedAt      DateTime? @map("claimed_at")
+  lastError      String?  @map("last_error")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  // Poller hot path: due rows only (partial index keeps the scan tiny).
+  @@index([status, nextAttemptAt(sort: Asc)], map: "audit_outbox_due_idx")
+  // FIFO claim order within a batch.
+  @@index([createdAt(sort: Asc), id(sort: Asc)], map: "audit_outbox_fifo_idx")
+  // NOTE: retention purge uses a PARTIAL index on (updated_at, id) WHERE
+  // status = 'DONE' (migration audit_outbox_retention_index). Prisma
+  // @@index cannot express partial predicates, so it lives in SQL only.
+  @@map("audit_outbox")
+}
