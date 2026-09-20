@@ -1,3 +1,8 @@
+jest.mock('@repo/auth', () => ({
+  ADMIN_PLUGIN_ROLES: {},
+  statement: { notes: [], settings: [] },
+}));
+
 import { validate } from 'class-validator';
 import { plainToInstance, TransformFnParams } from 'class-transformer';
 import { RecordAuditDto, ListAuditQuery } from './audit.controller';

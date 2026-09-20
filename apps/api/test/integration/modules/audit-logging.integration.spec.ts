@@ -10,6 +10,23 @@ import { registerUserViaApi } from '../helpers/auth';
 
 const TEST_PASSWORD = 'TestPassword123!';
 
+/**
+ * Background audits go through the transactional outbox (250ms poll).
+ * Poll until the row lands instead of a fixed sleep that races the poller.
+ */
+async function waitForAudit(
+  where: Parameters<typeof db.auditLog.findMany>[0]['where'],
+  timeoutMs = 5_000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const logs = await db.auditLog.findMany({ where });
+    if (logs.length > 0) return logs;
+    if (Date.now() > deadline) return logs;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
+
 describe('Audit Logging Cross-Cutting (integration)', () => {
   let app: INestApplication;
 
@@ -41,12 +58,10 @@ describe('Audit Logging Cross-Cutting (integration)', () => {
         .send({ title: 'Audited Note', content: 'Audited Content' })
         .expect(201);
 
-      // Wait a bit for async audit write
-      await new Promise((r) => setTimeout(r, 200));
-
       const user = await db.user.findUnique({ where: { email } });
-      const logs = await db.auditLog.findMany({
-        where: { userId: user!.id, action: 'note_created' },
+      const logs = await waitForAudit({
+        userId: user!.id,
+        action: 'note_created',
       });
 
       expect(logs.length).toBeGreaterThanOrEqual(1);
@@ -72,11 +87,10 @@ describe('Audit Logging Cross-Cutting (integration)', () => {
         .send({ title: 'Updated' })
         .expect(200);
 
-      await new Promise((r) => setTimeout(r, 200));
-
       const user = await db.user.findUnique({ where: { email } });
-      const logs = await db.auditLog.findMany({
-        where: { userId: user!.id, action: 'note_updated' },
+      const logs = await waitForAudit({
+        userId: user!.id,
+        action: 'note_updated',
       });
 
       expect(logs.length).toBeGreaterThanOrEqual(1);
@@ -97,11 +111,10 @@ describe('Audit Logging Cross-Cutting (integration)', () => {
         .set('Cookie', signup.cookie!)
         .expect(204);
 
-      await new Promise((r) => setTimeout(r, 200));
-
       const user = await db.user.findUnique({ where: { email } });
-      const logs = await db.auditLog.findMany({
-        where: { userId: user!.id, action: 'note_deleted' },
+      const logs = await waitForAudit({
+        userId: user!.id,
+        action: 'note_deleted',
       });
 
       expect(logs.length).toBeGreaterThanOrEqual(1);
@@ -120,16 +133,13 @@ describe('Audit Logging Cross-Cutting (integration)', () => {
         .send({ action: 'profile_updated' })
         .expect(201);
 
-      await new Promise((r) => setTimeout(r, 200));
-
       const user = await db.user.findUnique({ where: { email } });
-      const logs = await db.auditLog.findMany({
-        where: { userId: user!.id, action: 'profile_updated' },
-        orderBy: { createdAt: 'desc' },
-        take: 1,
-      });
+      const logs = await waitForAudit(
+        { userId: user!.id, action: 'profile_updated' },
+        5_000,
+      );
 
-      expect(logs.length).toBe(1);
+      expect(logs.length).toBeGreaterThanOrEqual(1);
       expect(logs[0].userAgent).toBe('IntegrationTestAgent/1.0');
       // IP may be null in test (no real proxy chain)
     });

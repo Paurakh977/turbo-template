@@ -48,11 +48,17 @@ describe('AuditModule (integration)', () => {
         .send({ action: 'profile_updated', metadata: { field: 'name' } })
         .expect(201);
 
-      // Verify the audit log was written to the database
+      // Outbox poller (250ms) delivers the audit row asynchronously.
       const user = await db.user.findUnique({ where: { email } });
-      const logs = await db.auditLog.findMany({
-        where: { userId: user!.id, action: 'profile_updated' },
-      });
+      const deadline = Date.now() + 5_000;
+      let logs: Awaited<ReturnType<typeof db.auditLog.findMany>> = [];
+      while (Date.now() < deadline) {
+        logs = await db.auditLog.findMany({
+          where: { userId: user!.id, action: 'profile_updated' },
+        });
+        if (logs.length > 0) break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
       expect(logs.length).toBeGreaterThanOrEqual(1);
     });
 
