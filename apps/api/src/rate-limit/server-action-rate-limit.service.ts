@@ -11,10 +11,12 @@ export type RateLimitDecision = {
 /**
  * Atomic fixed-window rate limiter on Redis.
  *
- * The Lua script performs INCR + EXPIRE-on-first-create in ONE round trip so
- * the window starts at the first hit and later increments never extend it -
- * identical contract to Better Auth's SecondaryStorage.increment and to the
- * DB-backed limiter this replaces (web's server-action-rate-limit.ts).
+ * The Lua script performs INCR + EXPIRE-on-first-create + PTTL in ONE round
+ * trip (the TTL used to cost a second `TTL` RTT on every DENIED
+ * check — the hottest path under abuse). The window starts at the first hit
+ * and later increments never extend it — identical contract to Better Auth's
+ * SecondaryStorage.increment and to the DB-backed limiter this replaces
+ * (web's server-action-rate-limit.ts).
  *
  * Errors propagate to the caller so it can decide fail-open vs fail-closed.
  */
@@ -31,18 +33,19 @@ export class ServerActionRateLimitService {
     const key = `server-action:${input.scope}:${input.identifier}`;
     const windowSeconds = Math.max(1, Math.ceil(input.windowMs / 1000));
 
-    const result = await this.redis.eval(
-      "local v = redis.call('INCR', KEYS[1]) if v == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end return v",
+    const result = (await this.redis.eval(
+      "local v = redis.call('INCR', KEYS[1]) if v == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end return {v, redis.call('PTTL', KEYS[1])}",
       1,
       key,
       String(windowSeconds),
-    );
+    )) as [number, number] | null;
 
-    const count = Number(result) || 0;
+    const count = Number(result?.[0]) || 0;
+    const ttlMs = Number(result?.[1]);
 
     if (count > input.max) {
-      const ttlSeconds = await this.redis.ttl(key);
-      const retryAfterMs = ttlSeconds > 0 ? ttlSeconds * 1000 : input.windowMs;
+      const retryAfterMs =
+        Number.isFinite(ttlMs) && ttlMs > 0 ? ttlMs : input.windowMs;
       return { allowed: false, retryAfterMs: Math.max(1000, retryAfterMs) };
     }
     return { allowed: true, retryAfterMs: 0 };

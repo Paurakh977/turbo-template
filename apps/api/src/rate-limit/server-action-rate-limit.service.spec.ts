@@ -1,7 +1,6 @@
 import { jest } from '@jest/globals';
 
 const evalMock = jest.fn<() => Promise<unknown>>();
-const ttlMock = jest.fn<() => Promise<number>>();
 
 jest.mock('../redis/redis.module', () => ({
   REDIS_CLIENT: 'REDIS_CLIENT',
@@ -17,21 +16,20 @@ describe('ServerActionRateLimitService', () => {
     service = new ServerActionRateLimitService({
       // deno-lint-ignore no-explicit-any
       eval: evalMock as any,
-      ttl: ttlMock as any,
     } as never);
   });
 
-  it('allows hits inside the window', async () => {
-    evalMock.mockResolvedValue(3);
+  it('allows hits inside the window with a single Lua round trip', async () => {
+    evalMock.mockResolvedValue([3, 59_000]);
     await expect(
       service.check({ scope: 's', identifier: 'u', windowMs: 60_000, max: 5 }),
     ).resolves.toEqual({ allowed: true, retryAfterMs: 0 });
     expect(evalMock).toHaveBeenCalledTimes(1);
+    expect(evalMock.mock.calls[0][0]).toContain('PTTL');
   });
 
   it('blocks once the counter exceeds max and reports remaining TTL', async () => {
-    evalMock.mockResolvedValueOnce(6); // INCR result above max
-    ttlMock.mockResolvedValueOnce(23);
+    evalMock.mockResolvedValueOnce([6, 23_000]); // INCR above max + PTTL
     const decision = await service.check({
       scope: 's',
       identifier: 'u',
@@ -43,8 +41,7 @@ describe('ServerActionRateLimitService', () => {
   });
 
   it('falls back to the full window when the key has no TTL', async () => {
-    evalMock.mockResolvedValueOnce(7);
-    ttlMock.mockResolvedValueOnce(-1);
+    evalMock.mockResolvedValueOnce([7, -1]);
     const decision = await service.check({
       scope: 's',
       identifier: 'u',
