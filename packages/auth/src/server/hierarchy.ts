@@ -18,13 +18,38 @@ export async function enforceRoleHierarchy(
   targetUserId: string,
 ): Promise<void> {
   const session = await getSessionFromCtx(ctx as any);
+  await enforceRoleHierarchyWithSession(session, targetUserId);
+}
+
+/**
+ * Single-session hierarchy guard (Tasks 1, 10).
+ *
+ * Before: every admin `before` hook called `getSessionFromCtx` AND
+ * `enforceRoleHierarchy` (which called `getSessionFromCtx` again) = 2x
+ * secondaryStorage GETs (Redis) + 2x target `findUnique` (handler refetched
+ * for audit metadata). After: hooks resolve the session ONCE, pass it here,
+ * and reuse the returned target row for audit metadata — 1x session, 1x user.
+ *
+ * Returns the target user so callers never refetch the same row. Session
+ * role is used ONLY for hierarchy comparison here; enforcement elsewhere
+ * still uses the fresh DB role. Freshness is preserved via
+ * `invalidateUserCache` on every mutation.
+ */
+export async function enforceRoleHierarchyWithSession(
+  session: unknown,
+  targetUserId: string,
+): Promise<{ id: string; email: string | null; role: string | null }> {
   if (!session) {
     throw new APIError('UNAUTHORIZED', { message: 'Authentication required.' });
   }
 
-  const actorRole = (session.user as { role?: string }).role ?? 'user';
+  const actorRole =
+    (session as { user?: { role?: string } }).user?.role ?? 'user';
   const targetUser = await db.user
-    .findUnique({ where: { id: targetUserId } })
+    .findUnique({
+      where: { id: targetUserId },
+      select: { id: true, email: true, role: true },
+    })
     .catch(() => null);
   if (!targetUser) {
     throw new APIError('NOT_FOUND', { message: 'Target user not found.' });
@@ -37,4 +62,5 @@ export async function enforceRoleHierarchy(
         'You do not have permission to perform this action on a user with equal or higher privileges.',
     });
   }
+  return targetUser as { id: string; email: string | null; role: string | null };
 }

@@ -59,7 +59,8 @@ export const databaseHooks = {
         if (!u?.id) return;
 
         const activeSpan = trace.getActiveSpan();
-        if (activeSpan) {
+        // isRecording() — see audit-plugin.ts (same ended-span race).
+        if (activeSpan?.isRecording()) {
           activeSpan.setAttribute(AuthAttributes.ACTION, 'user_signed_up');
           activeSpan.setAttribute(AuthAttributes.STATUS, 'success');
         }
@@ -115,38 +116,11 @@ export const databaseHooks = {
 
         const writes: Promise<unknown>[] = [];
 
-        // Role change via normal user update (rare; admin path is separate)
-        if (old.role !== u.role) {
-          writes.push(
-            db.auditLog.create({
-              data: {
-                userId: u.id,
-                action: 'role_changed',
-                metadata: { from: old.role ?? 'user', to: u.role ?? 'user' },
-              },
-            }),
-          );
-        }
-
-        // Ban/unban via normal update path
-        if (!old.banned && u.banned) {
-          writes.push(
-            db.auditLog.create({
-              data: {
-                userId: u.id,
-                action: 'user_banned',
-                metadata: { reason: u.banReason ?? null },
-              },
-            }),
-          );
-        }
-        if (old.banned && !u.banned) {
-          writes.push(
-            db.auditLog.create({
-              data: { userId: u.id, action: 'user_unbanned' },
-            }),
-          );
-        }
+        // Role/ban transitions are owned by `auditLogPlugin` (after hooks
+        // with actor attribution + post-success check). Writing them here too
+        // double-audits every admin mutation because admin endpoints go
+        // through internalAdapter.updateUser → with-hooks → this hook.
+        // This hook keeps email_changed (user-initiated) + cache invalidation.
 
         // Email change
         if (old.email !== u.email) {
@@ -186,7 +160,8 @@ export const databaseHooks = {
         if (!u?.id) return;
 
         const activeSpan = trace.getActiveSpan();
-        if (activeSpan) {
+        // isRecording() — see audit-plugin.ts (same ended-span race).
+        if (activeSpan?.isRecording()) {
           activeSpan.setAttribute(AuthAttributes.ACTION, 'account_deleted');
           activeSpan.setAttribute(AuthAttributes.STATUS, 'success');
         }
@@ -234,7 +209,8 @@ export const databaseHooks = {
         if (!s?.userId) return;
 
         const activeSpan = trace.getActiveSpan();
-        if (activeSpan) {
+        // isRecording() — see audit-plugin.ts (same ended-span race).
+        if (activeSpan?.isRecording()) {
           activeSpan.setAttribute(
             AuthAttributes.ACTION,
             s.impersonatedBy ? 'user_impersonated' : 'session_created',
@@ -271,7 +247,8 @@ export const databaseHooks = {
         if (!s?.userId) return;
 
         const activeSpan = trace.getActiveSpan();
-        if (activeSpan) {
+        // isRecording() — see audit-plugin.ts (same ended-span race).
+        if (activeSpan?.isRecording()) {
           activeSpan.setAttribute(
             AuthAttributes.ACTION,
             s.impersonatedBy ? 'user_stop_impersonating' : 'user_signed_out',
