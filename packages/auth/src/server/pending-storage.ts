@@ -114,19 +114,45 @@ export async function storePendingDeletion(
   }
 }
 
+/**
+ * Atomic pop: GETDEL in ONE round trip instead of GET + DEL in two.
+ * GETDEL needs Redis >= 6.2; older servers/proxies fall back to the same Lua
+ * GET+DEL used by secondaryStorage.getAndDelete. Atomicity also fixes a
+ * latent double-consume: the old code parsed the value even when the
+ * follow-up DEL failed, so a retrying hook could consume the stash twice.
+ */
+async function popRedisKey(key: string, op: string): Promise<string | null> {
+  if (!redis) return null;
+  try {
+    return await redis.getdel(key);
+  } catch {
+    try {
+      const raw = await redis.eval(
+        "local v=redis.call('GET',KEYS[1]) if v then redis.call('DEL',KEYS[1]) end return v",
+        1,
+        key,
+      );
+      return typeof raw === 'string' ? raw : null;
+    } catch (e) {
+      logger.error({ err: e, msg: `[Redis Error] ${op}` });
+      return null;
+    }
+  }
+}
+
 export async function popPendingDeletion(
   userId: string,
 ): Promise<PendingDeletionMeta | undefined> {
   if (redis) {
     let parsed: PendingDeletionMeta | undefined;
-    const raw = await redis.get(`pending_deletion:${userId}`).catch((e) => {
+    const raw = await popRedisKey(
+      `pending_deletion:${userId}`,
+      'popPendingDeletion',
+    ).catch((e) => {
       logger.error({ err: e, msg: '[Redis Error] popPendingDeletion' });
       return null;
     });
     if (raw) {
-      await redis
-        .del(`pending_deletion:${userId}`)
-        .catch((e) => logger.error({ err: e, msg: '[Redis Error]' }));
       try {
         parsed = JSON.parse(raw) as PendingDeletionMeta;
       } catch {
@@ -161,14 +187,14 @@ export async function popPendingUser(
 ): Promise<UserData | undefined> {
   if (redis) {
     let parsed: UserData | undefined;
-    const raw = await redis.get(`pending_user_update:${userId}`).catch((e) => {
+    const raw = await popRedisKey(
+      `pending_user_update:${userId}`,
+      'popPendingUser',
+    ).catch((e) => {
       logger.error({ err: e, msg: '[Redis Error]' });
       return null;
     });
     if (raw) {
-      await redis
-        .del(`pending_user_update:${userId}`)
-        .catch((e) => logger.error({ err: e, msg: '[Redis Error]' }));
       try {
         parsed = JSON.parse(raw) as UserData;
       } catch (e) {
@@ -202,18 +228,15 @@ export async function storePendingStopImpersonation(userId: string) {
 
 export async function popPendingStopImpersonation(userId: string): Promise<boolean> {
   if (redis) {
-    const key = `pending_stop_impersonation:${userId}`;
-    const raw = await redis.get(key).catch((e) => {
+    const raw = await popRedisKey(
+      `pending_stop_impersonation:${userId}`,
+      'popPendingStopImpersonation',
+    ).catch((e) => {
       logger.error({ err: e, msg: '[Redis Error] popPendingStopImpersonation' });
       return null;
     });
 
     if (raw) {
-      await redis
-        .del(key)
-        .catch((e) =>
-          logger.error({ err: e, msg: '[Redis Error] popPendingStopImpersonation.del' }),
-        );
       return true;
     }
 
@@ -224,10 +247,40 @@ export async function popPendingStopImpersonation(userId: string): Promise<boole
 }
 
 // ---------------------------------------------------------------------------
-// Cache invalidation
-// Destroys the user's secondary storage cache in Redis (if enabled) so that
-// the next request misses the cache, hits the DB, and fetches the fresh data
-// (like new roles, ban status, etc) instantly.
+// Cache invalidation.
+//
+// Redis key inventory (verified against better-auth@1.6.29 secondaryStorage,
+// shipped internal-adapter.mjs, + full codebase grep — every written key has
+// a creation/read/invalidation path, no dead namespaces):
+//   <sessionToken> (bare)  — WRITTEN by secondaryStorage.set on sign-in,
+//     READ by secondaryStorage.get on every getSession, DELETED here + by
+//     secondaryStorage.delete on sign-out/revoke. TTL = SESSION_EXPIRES_IN 7d.
+//   active-sessions-<userId> — CORRECTION: Better Auth DOES write
+//     this session-id list (internal-adapter createSession/deleteSession/
+//     deleteSessions/listSessions). The old comment claiming "no such key"
+//     was wrong — it read app code but not the shipped adapter. The framework
+//     filters expired/missing entries on read, so a stale list is tolerated,
+//     but we now DEL it here anyway so revocation is complete immediately.
+//     There is still NO `session:<token>` prefix and NO `user:<id>` row cache
+//     (verified zero writers) — do NOT re-add those deletes.
+//   verification:*          — short-lived OTP/reset/email keys, consumed
+//     atomically via getAndDelete (GETDEL + Lua fallback). No app-level
+//     invalidation needed (1h reset, 24h verification, OTP minutes).
+//   rate-limit counters     — Better Auth internal INCR+EXPIRE, expire
+//     naturally per window. Never explicitly deleted.
+//   server-action:<scope>:<id> — API-tier fixed-window limiter (Lua
+//     INCR+EXPIRE+PTTL, single round trip), expires per scope window. Scope
+//     allowlisted, no delete.
+//   throttle:{<tracker>:<name>}:hits|:blocked — Nest global throttler via
+//     @nest-lab/throttler-storage-redis. Disjoint by construction.
+//   pending_deletion/user_update/stop_impersonation:<userId> — 15-30s stash
+//     consumed atomically via GETDEL (+ Lua fallback) in hooks. Redis TTL
+//     native, in-memory sweep else.
+//
+// Freshness: role/ban/delete/revoke call this BEFORE/AFTER the mutation so
+// the next getSession misses Redis and hits PostgreSQL instantly. Password
+// reset revocation is native (`revokeSessionsOnPasswordReset`) + session
+// delete hooks — no extra work needed here.
 // ---------------------------------------------------------------------------
 export async function invalidateUserCache(
   userId: string,
@@ -235,26 +288,28 @@ export async function invalidateUserCache(
 ) {
   if (!redis) return;
   try {
-    const userSessions = await db.session.findMany({ where: { userId } });
+    // Select token only — full rows wasted PG payload.
+    const userSessions = await db.session.findMany({
+      where: { userId },
+      select: { token: true },
+    });
     const pipeline = redis.pipeline();
     for (const session of userSessions) {
-      // Better Auth usually caches the session using its token as the key
-      pipeline.del(session.token);
-      // Just in case it uses variations in newer versions
-      pipeline.del(`session:${session.token}`);
-      pipeline.del(`session:${session.id}`);
+      // Bare token = the exact secondaryStorage key shape in this version.
+      if (session.token) pipeline.del(session.token);
     }
-    // Also delete any cached user record directly
-    pipeline.del(userId);
-    pipeline.del(`user:${userId}`);
+    // Framework-owned session-id list (see inventory above): stale entries
+    // are tolerated on read, but deleting completes revocation immediately.
+    pipeline.del(`active-sessions-${userId}`);
 
+    // Self-delete path: sessions are already gone from PG by the time
+    // delete.after runs, so findMany returns []. The stashed token from the
+    // /delete-user before hook covers that window.
     if (options?.sessionToken) {
       pipeline.del(options.sessionToken);
-      pipeline.del(`session:${options.sessionToken}`);
     }
-    if (options?.sessionId) {
-      pipeline.del(`session:${options.sessionId}`);
-    }
+    // sessionId is never a Redis key (key = token); kept only to document
+    // the intentional omission — do NOT re-add `session:<id>` deletes.
 
     await pipeline.exec();
   } catch (e) {

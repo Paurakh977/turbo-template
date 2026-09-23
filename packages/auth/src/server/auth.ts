@@ -7,7 +7,7 @@ import { jwt } from 'better-auth/plugins';
 import { genericOAuth } from 'better-auth/plugins';
 import { nextCookies } from 'better-auth/next-js';
 import { createAuthMiddleware, APIError } from 'better-auth/api';
-import { createLogger } from '@repo/observability';
+import { createLogger, getMeter } from '@repo/observability';
 import { AUTH_BASE_PATH, ADMIN_PLUGIN_ROLES, ac } from '../shared/permissions';
 import { parseRoles } from '@repo/roles';
 import { validatePasswordPolicy } from '../shared/password-policy';
@@ -32,6 +32,23 @@ import {
 import { TRUSTED_PROXY_CIDRS } from '../shared/client-ip';
 
 const logger = createLogger('auth');
+
+const meter = getMeter('auth');
+const secondaryStorageHitsTotal = meter.createCounter(
+  'secondary_storage_hits_total',
+  { description: 'Total number of secondary storage cache hits' },
+);
+const secondaryStorageMissesTotal = meter.createCounter(
+  'secondary_storage_misses_total',
+  { description: 'Total number of secondary storage cache misses' },
+);
+const secondaryStorageFallbackTotal = meter.createCounter(
+  'secondary_storage_fallback_total',
+  {
+    description:
+      'Total number of secondary storage operations falling back to database or memory',
+  },
+);
 
 export const ADMIN_ROLES = ['admin', 'superAdmin'] as const;
 export type AdminRole = (typeof ADMIN_ROLES)[number];
@@ -146,18 +163,30 @@ export const auth = betterAuth({
   },
 
   // -------------------------------------------------------------------------
-  // Secondary storage (Redis)
-  // All operations are wrapped with error handling — a Redis outage degrades
-  // to primary storage instead of taking down auth-wide operations.
+  // Secondary storage (Redis L1 session cache — Tasks 4-6).
+  // Key shape in better-auth@1.6.29 is the BARE session token (no prefix).
+  // All ops are fail-open: a Redis outage degrades to PostgreSQL instead of
+  // taking down auth. Invalidation lives in pending-storage.ts
+  // `invalidateUserCache` (role/ban/delete/revoke) + native
+  // `secondaryStorage.delete` on sign-out/revoke. Do NOT add `session:` /
+  // `user:` prefixed deletes — no writer produces those keys in this version.
   // -------------------------------------------------------------------------
   secondaryStorage: redis
     ? ((r) => ({
         get: async (key) => {
-          const value = await r.get(key).catch((error) => {
+          try {
+            const value = await r.get(key);
+            if (value !== null && value !== undefined) {
+              secondaryStorageHitsTotal.add(1);
+              return value;
+            }
+            secondaryStorageMissesTotal.add(1);
+            return null;
+          } catch (error) {
+            secondaryStorageFallbackTotal.add(1);
             logger.error({ err: error, msg: '[Redis Error] secondaryStorage.get failed' });
             return null;
-          });
-          return value ?? null;
+          }
         },
         set: async (key, value, ttl) => {
           const ttlSeconds =
@@ -166,51 +195,67 @@ export const auth = betterAuth({
               : undefined;
 
           if (ttlSeconds) {
-            await r.set(key, value, 'EX', ttlSeconds).catch((error) =>
+            await r.set(key, value, 'EX', ttlSeconds).catch((error) => {
+              secondaryStorageFallbackTotal.add(1);
               logger.error({
                 key,
                 ttl: ttlSeconds,
                 err: error,
                 msg: '[Redis Error] secondaryStorage.set failed',
-              }),
-            );
+              });
+            });
             return;
           }
 
-          await r.set(key, value).catch((error) =>
+          await r.set(key, value).catch((error) => {
+            secondaryStorageFallbackTotal.add(1);
             logger.error({
               key,
               err: error,
               msg: '[Redis Error] secondaryStorage.set failed',
-            }),
-          );
+            });
+          });
         },
         delete: async (key) => {
-          await r.del(key).catch((error) =>
+          await r.del(key).catch((error) => {
+            secondaryStorageFallbackTotal.add(1);
             logger.error({
               key,
               err: error,
               msg: '[Redis Error] secondaryStorage.delete failed',
-            }),
-          );
+            });
+          });
         },
         getAndDelete: async (key: string) => {
           try {
-            return await r.getdel(key);
+            const value = await r.getdel(key);
+            if (value !== null && value !== undefined) {
+              secondaryStorageHitsTotal.add(1);
+              return value;
+            }
+            secondaryStorageMissesTotal.add(1);
+            return null;
           } catch (error) {
             logger.error({
               err: error,
               msg: '[Redis Error] secondaryStorage.getAndDelete (GETDEL) failed',
             });
             try {
-              return (await r.eval(
+              const raw = (await r.eval(
                 `local v = redis.call('GET', KEYS[1])
 if v then redis.call('DEL', KEYS[1]) end
 return v`,
                 1,
                 key,
               )) as string | null;
+              if (raw !== null && raw !== undefined) {
+                secondaryStorageHitsTotal.add(1);
+                return raw;
+              }
+              secondaryStorageMissesTotal.add(1);
+              return null;
             } catch (fallbackError) {
+              secondaryStorageFallbackTotal.add(1);
               logger.error({
                 err: fallbackError,
                 msg: '[Redis Error] secondaryStorage.getAndDelete failed',
@@ -230,6 +275,7 @@ return v`,
               String(Math.max(1, Math.floor(ttl))),
             )) as number;
           } catch (error) {
+            secondaryStorageFallbackTotal.add(1);
             logger.error({
               err: error,
               msg: '[Redis Error] secondaryStorage.increment failed',
@@ -542,7 +588,27 @@ return v`,
         'Your account has been suspended. Contact support if you believe this is an error.',
     }),
 
+    // JWT is SECONDARY to session cookies: browsers never send
+    // Bearer tokens — the JWT plugin exists for microservice/gateway
+    // consumers only (see jwt.integration.spec.ts: Bearer on /api/notes may
+    // 401; cookie session is authoritative). JWKS rotation (30d) + grace
+    // (7d overlap) are handled NATIVELY by Better Auth against the PG `Jwks`
+    // table — no app-level memory/Redis cache. A custom cache would risk
+    // serving a rotated-out key during grace; verification happens only in
+    // tests today, so the DB read cost is negligible. Do NOT add one.
+    //
+    // PERF: `disableSettingJwtHeader: true` is the OFFICIAL
+    // Better Auth opt-out (JwtOptions, default false; shipped
+    // dist/plugins/jwt/index.mjs `after /get-session` hook returns early
+    // when set). Without it, EVERY /get-session with a live session paid
+    // `getLatestKey` → unfiltered `findMany(jwks)` + private-key decrypt +
+    // ES256 sign (~180-200ms) just to mint a `set-auth-jwt` header that NO
+    // prod code reads (verified: zero `set-auth-jwt` consumers in apps/;
+    // browsers are cookie-based). The /token + /jwks endpoints used by
+    // future microservices are UNAFFECTED by this flag — rotation, grace,
+    // payload, and verification behavior are identical.
     jwt({
+      disableSettingJwtHeader: true,
       jwt: {
         expirationTime: '30m',
         definePayload: ({ user }) => ({

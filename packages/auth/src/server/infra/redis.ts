@@ -1,5 +1,5 @@
 import Redis from 'ioredis';
-import { createLogger } from '@repo/observability';
+import { createLogger, getMeter } from '@repo/observability';
 import { redisUrl } from '../../config/env';
 
 type GlobalRedisState = typeof globalThis & {
@@ -7,6 +7,18 @@ type GlobalRedisState = typeof globalThis & {
 };
 
 const logger = createLogger('auth:redis');
+
+const meter = getMeter('redis');
+const redisErrorsTotal = meter.createCounter('redis_errors_total', {
+  description: 'Total number of Redis client errors',
+});
+const redisReconnectTotal = meter.createCounter('redis_reconnect_total', {
+  description: 'Total number of Redis client reconnect attempts',
+});
+const redisConnectedGauge = meter.createGauge('redis_connected', {
+  description: 'Whether Redis client is connected (1 or 0)',
+  unit: '{status}',
+});
 
 /**
  * Shared Redis client.
@@ -17,7 +29,10 @@ const logger = createLogger('auth:redis');
  * throws on connection failure.
  */
 export const redis = (() => {
-  if (!redisUrl) return null;
+  if (!redisUrl) {
+    redisConnectedGauge.record(0);
+    return null;
+  }
   const globalRedisState = globalThis as GlobalRedisState;
   if (globalRedisState.__repoSharedRedisClient) {
     return globalRedisState.__repoSharedRedisClient;
@@ -35,9 +50,32 @@ export const redis = (() => {
   // with an unhandled 'error' event. Every caller already handles failures
   // gracefully (falls back to primary storage / in-memory stashes).
   client.on('error', (error) => {
+    redisErrorsTotal.add(1);
+    redisConnectedGauge.record(0);
     logger.error({ err: error, msg: '[Redis Error] Connection error' });
+  });
+
+  client.on('connect', () => {
+    redisConnectedGauge.record(1);
+  });
+
+  client.on('ready', () => {
+    redisConnectedGauge.record(1);
+  });
+
+  client.on('reconnecting', () => {
+    redisReconnectTotal.add(1);
+    redisConnectedGauge.record(0);
+  });
+
+  client.on('close', () => {
+    redisConnectedGauge.record(0);
+  });
+
+  client.on('end', () => {
+    redisConnectedGauge.record(0);
   });
 
   globalRedisState.__repoSharedRedisClient = client;
   return client;
-})();
+})();
