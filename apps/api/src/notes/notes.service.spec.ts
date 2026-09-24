@@ -1,19 +1,39 @@
 import { jest } from '@jest/globals';
 
 const noteFindUnique = jest.fn();
+const noteCreate = jest.fn();
 const noteUpdate = jest.fn();
 const noteDelete = jest.fn();
 const auditCreate = jest.fn();
 const userFindUnique = jest.fn();
 
+// NotesService wraps the atomic write + outbox enqueue in
+// db.$transaction (interactive form). The mock runs the callback against a tx
+// client wired to the same jest.fn()s so assertions stay unchanged; with no
+// queue injected the service keeps the synchronous auditLog.create fallback.
 jest.mock('@repo/database', () => ({
   db: {
     note: {
       findUnique: (...args: unknown[]) => noteFindUnique(...(args as [])),
+      create: (...args: unknown[]) => noteCreate(...(args as [])),
       // Atomic single-row writes back the TOCTOU-safe update/remove paths:
       // a row deleted mid-flight throws P2025 instead of returning a count.
       update: (...args: unknown[]) => noteUpdate(...(args as [])),
       delete: (...args: unknown[]) => noteDelete(...(args as [])),
+    },
+    $transaction: (...args: unknown[]) => {
+      const first = args[0] as ((tx: unknown) => unknown) | unknown[];
+      if (typeof first === 'function') {
+        return first({
+          note: {
+            findUnique: (...a: unknown[]) => noteFindUnique(...(a as [])),
+            create: (...a: unknown[]) => noteCreate(...(a as [])),
+            update: (...a: unknown[]) => noteUpdate(...(a as [])),
+            delete: (...a: unknown[]) => noteDelete(...(a as [])),
+          },
+        });
+      }
+      return Promise.resolve([]);
     },
     user: { findUnique: (...args: unknown[]) => userFindUnique(...(args as [])) },
     auditLog: { create: (...args: unknown[]) => auditCreate(...(args as [])) },
@@ -25,6 +45,25 @@ jest.mock('@repo/auth', () => ({
     api: {
       userHasPermission: jest.fn(),
     },
+  },
+  // Local evaluation (Tasks 2-3) uses the same AccessControl objects the
+  // service imports. Minimal real semantics: user has no notes perms,
+  // operator/admin have list/create/update, superAdmin adds delete.
+  ADMIN_PLUGIN_ROLES: {
+    user: { authorize: () => ({ success: false }) },
+    operator: {
+      authorize: (perm: Record<string, string[]>) =>
+        perm.notes?.includes('delete') ? { success: false } : { success: true },
+    },
+    admin: {
+      authorize: (perm: Record<string, string[]>) =>
+        perm.notes?.includes('delete') ? { success: false } : { success: true },
+    },
+    superAdmin: { authorize: () => ({ success: true }) },
+  },
+  statement: {
+    notes: ['create', 'list', 'update', 'delete'],
+    settings: ['read', 'profile', 'security', 'theme', 'labs'],
   },
 }));
 
@@ -65,7 +104,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { NotesService } from './notes.service';
-import { auth } from '@repo/auth';
+import { AuthorizationService } from '../common/authorization.service';
 
 type SessionFixture = Parameters<NotesService['update']>[0];
 
@@ -96,12 +135,16 @@ describe('NotesService.update authorization', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new NotesService(mockMetricsService as never);
+    service = new NotesService(
+      mockMetricsService as never,
+      new AuthorizationService(),
+    );
   });
 
   it('throws NotFound for a missing note', async () => {
     noteFindUnique.mockResolvedValue(null);
-    (auth.api.userHasPermission as jest.Mock).mockResolvedValue({ success: true });
+    // operator holds update — reaches the note lookup (was userHasPermission).
+    userFindUnique.mockResolvedValue({ role: 'operator' });
 
     await expect(
       service.update(
@@ -114,7 +157,7 @@ describe('NotesService.update authorization', () => {
   });
 
   it('rejects an empty patch without touching the DB or writing an audit row', async () => {
-    (auth.api.userHasPermission as jest.Mock).mockResolvedValue({ success: true });
+    userFindUnique.mockResolvedValue({ role: 'operator' });
 
     await expect(
       service.update(makeSession({}), 'n1', {}, { ip: null, userAgent: null }),
@@ -124,9 +167,9 @@ describe('NotesService.update authorization', () => {
   });
 
   it("blocks editing someone else's note without an admin role", async () => {
-    (auth.api.userHasPermission as jest.Mock).mockResolvedValue({ success: true });
+    // operator passes the permission gate but fails the ownership/admin gate.
+    userFindUnique.mockResolvedValue({ role: 'operator' });
     noteFindUnique.mockResolvedValue(ownNote({ authorId: 'someone-else' }));
-    userFindUnique.mockResolvedValue({ role: 'user' });
 
     await expect(
       service.update(
@@ -140,8 +183,7 @@ describe('NotesService.update authorization', () => {
   });
 
   it('maps a lost update race to clean NotFound instead of a raw P2025', async () => {
-    (auth.api.userHasPermission as jest.Mock).mockResolvedValue({ success: true });
-    userFindUnique.mockResolvedValue({ role: 'user' });
+    userFindUnique.mockResolvedValue({ role: 'operator' });
     noteFindUnique.mockResolvedValue(ownNote());
     noteUpdate.mockRejectedValue({ code: 'P2025' });
 
@@ -158,7 +200,6 @@ describe('NotesService.update authorization', () => {
   });
 
   it('returns the updated row straight from the atomic write (no refetch)', async () => {
-    (auth.api.userHasPermission as jest.Mock).mockResolvedValue({ success: true });
     userFindUnique.mockResolvedValue({ role: 'admin' });
     noteFindUnique.mockResolvedValue(ownNote()); // ownership fetch only
     noteUpdate.mockResolvedValue(ownNote({ title: 'renamed' }));
@@ -178,7 +219,6 @@ describe('NotesService.update authorization', () => {
   });
 
   it('checks permissions against the EFFECTIVE (impersonating) admin id', async () => {
-    (auth.api.userHasPermission as jest.Mock).mockResolvedValue({ success: true });
     const updated = ownNote({ title: 'new' });
     noteFindUnique.mockResolvedValue(updated);
     // The FRESH role is fetched for the effective id, not the impersonated user
@@ -193,16 +233,11 @@ describe('NotesService.update authorization', () => {
     );
 
     expect(result.title).toBe('new');
-    expect(userHasPermissionMockCalls().userId).toBe('admin-9');
     expect(userFindUnique.mock.calls[0][0]).toEqual({
       where: { id: 'admin-9' },
       select: { role: true },
     });
   });
-
-  function userHasPermissionMockCalls(): { userId: string } {
-    return (auth.api.userHasPermission as jest.Mock).mock.calls[0][0].body;
-  }
 });
 
 describe('NotesService.remove', () => {
@@ -210,11 +245,15 @@ describe('NotesService.remove', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new NotesService(mockMetricsService as never);
+    service = new NotesService(
+      mockMetricsService as never,
+      new AuthorizationService(),
+    );
   });
 
   it('audits with the title returned by the atomic delete on success', async () => {
-    (auth.api.userHasPermission as jest.Mock).mockResolvedValue({ success: true });
+    // delete requires superAdmin under local evaluation.
+    userFindUnique.mockResolvedValue({ role: 'superAdmin' });
     noteDelete.mockResolvedValue({ title: 'doomed' });
 
     await service.remove(makeSession({}), 'n1', { ip: '10.0.0.1', userAgent: 'ua' });
@@ -228,7 +267,7 @@ describe('NotesService.remove', () => {
   });
 
   it('reports NotFound for a missing row without writing an audit', async () => {
-    (auth.api.userHasPermission as jest.Mock).mockResolvedValue({ success: true });
+    userFindUnique.mockResolvedValue({ role: 'superAdmin' });
     noteDelete.mockRejectedValue({ code: 'P2025' });
 
     await expect(
@@ -238,7 +277,7 @@ describe('NotesService.remove', () => {
   });
 
   it('maps a lost delete race to clean NotFound without auditing a deletion that did not happen', async () => {
-    (auth.api.userHasPermission as jest.Mock).mockResolvedValue({ success: true });
+    userFindUnique.mockResolvedValue({ role: 'superAdmin' });
     noteDelete.mockRejectedValue({ code: 'P2025' });
 
     await expect(

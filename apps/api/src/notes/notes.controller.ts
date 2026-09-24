@@ -42,6 +42,8 @@ export class NotesController {
       session,
       query.limit ?? DEFAULT_LIMIT,
       query.offset ?? 0,
+      // Defaults true (backwards compatible); lean clients pass false.
+      query.withTotal ?? true,
     );
   }
 

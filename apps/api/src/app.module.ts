@@ -8,12 +8,17 @@ import {
   ThrottlerModule,
   ThrottlerGuard,
 } from '@nestjs/throttler';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { AuthModule } from '@thallesp/nestjs-better-auth';
 import { auth } from '@repo/auth';
 import { db } from '@repo/database';
 
-import { RedisModule } from './redis/redis.module';
+import type Redis from 'ioredis';
+
+import { RedisModule, REDIS_CLIENT } from './redis/redis.module';
+import { RedisThrottlerStorage } from './rate-limit/redis-throttler.storage';
+import { RequestContextInterceptor } from './common/request-context.interceptor';
+import { AuditQueueModule } from './common/audit-queue.module';
 import { ObservabilityModule } from './common/observability/observability.module';
 import { LinksModule } from './links/links.module';
 import { NotesModule } from './notes/notes.module';
@@ -139,19 +144,31 @@ class DatabaseShutdown implements BeforeApplicationShutdown {
       validationOptions: { abortEarly: false },
     }),
     RedisModule,
+    // Global singleton: one FIFO for all producers (notes, audit, …).
+    // MUST stay imported exactly once — see audit-queue.module.ts.
+    AuditQueueModule,
     ObservabilityModule,
+    // Redis-backed throttler: shared counters across API
+    // replicas via the existing REDIS_CLIENT singleton + official
+    // @nest-lab/throttler-storage-redis (atomic Lua INCR+EXPIRE). Budgets
+    // unchanged. See rate-limit/redis-throttler.storage.ts for key shape,
+    // outage posture (fail-open to memory), and layer responsibilities.
     ThrottlerModule.forRootAsync({
-      useFactory: () => [
-        {
-          name: 'global',
-          // Configurable via env vars for load-testing scenarios where all
-          // VUs share one IP (127.0.0.1). Defaults are production-safe.
-          // NOTE: must use parseThrottleInt, not Number(?? fallback) —
-          // Compose sends "" when unset and Number("") === 0.
-          ttl: parseThrottleInt('THROTTLE_TTL_MS', 60_000),
-          limit: parseThrottleInt('THROTTLE_LIMIT', 200),
-        },
-      ],
+      inject: [REDIS_CLIENT],
+      useFactory: (redis: Redis) => ({
+        throttlers: [
+          {
+            name: 'global',
+            // Configurable via env vars for load-testing scenarios where all
+            // VUs share one IP (127.0.0.1). Defaults are production-safe.
+            // NOTE: must use parseThrottleInt, not Number(?? fallback) —
+            // Compose sends "" when unset and Number("") === 0.
+            ttl: parseThrottleInt('THROTTLE_TTL_MS', 60_000),
+            limit: parseThrottleInt('THROTTLE_LIMIT', 200),
+          },
+        ],
+        storage: new RedisThrottlerStorage(redis),
+      }),
     }),
     AuthModule.forRoot({
       auth,
@@ -179,6 +196,13 @@ class DatabaseShutdown implements BeforeApplicationShutdown {
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
+    },
+    {
+      // Runs AFTER the vendor AuthGuard (guards precede interceptors), so
+      // `req.session` is settled when the request context is populated.
+      // See common/request-context.interceptor.ts.
+      provide: APP_INTERCEPTOR,
+      useClass: RequestContextInterceptor,
     },
   ],
 })

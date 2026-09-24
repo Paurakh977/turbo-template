@@ -3,6 +3,9 @@ jest.mock('@repo/database', () => ({
     user: {
       findUnique: jest.fn(),
     },
+    account: {
+      findMany: jest.fn(),
+    },
   },
 }));
 
@@ -43,6 +46,7 @@ jest.mock('@repo/auth', () => ({
 }));
 
 import { UsersController } from './users.controller';
+import { AuthorizationService } from '../common/authorization.service';
 import { db } from '@repo/database';
 
 describe('UsersController', () => {
@@ -50,7 +54,7 @@ describe('UsersController', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    controller = new UsersController();
+    controller = new UsersController(new AuthorizationService());
   });
 
   function makeSession(userId = 'user-1', impersonatedBy?: string) {
@@ -145,6 +149,66 @@ describe('UsersController', () => {
       const result = await controller.myPermissions(makeSession());
 
       expect(result.role).toBe('user');
+    });
+  });
+
+  describe('myBootstrap', () => {
+    it('returns combined session identity and effective permissions', async () => {
+      (db.user.findUnique as jest.Mock).mockResolvedValue({
+        id: 'user-1',
+        name: 'Alice',
+        email: 'alice@example.com',
+        emailVerified: true,
+        image: null,
+        role: 'admin',
+      });
+
+      const result = await controller.myBootstrap(makeSession('user-1'));
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          userId: 'user-1',
+          sessionUserId: 'user-1',
+          role: 'admin',
+          effectiveRole: 'admin',
+          impersonatedBy: null,
+          sessionUser: {
+            id: 'user-1',
+            name: 'Alice',
+            email: 'alice@example.com',
+            emailVerified: true,
+            image: null,
+          },
+        }),
+      );
+      expect(db.account.findMany).not.toHaveBeenCalled();
+    });
+
+    it('fetches accounts when with=accounts is specified', async () => {
+      (db.user.findUnique as jest.Mock).mockResolvedValue({
+        id: 'user-1',
+        name: 'Alice',
+        email: 'alice@example.com',
+        emailVerified: true,
+        image: null,
+        role: 'user',
+      });
+      (db.account.findMany as jest.Mock).mockResolvedValue([
+        { id: 'acc-1', providerId: 'credential', accountId: 'cred-1' },
+      ]);
+
+      const result = await controller.myBootstrap(
+        makeSession('user-1'),
+        'accounts',
+      );
+
+      expect(result.accounts).toEqual([
+        { id: 'acc-1', providerId: 'credential', accountId: 'cred-1' },
+      ]);
+      expect(db.account.findMany).toHaveBeenCalledWith({
+        where: { userId: 'user-1' },
+        select: { id: true, providerId: true, accountId: true },
+      });
     });
   });
 });

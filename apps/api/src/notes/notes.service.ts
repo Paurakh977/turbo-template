@@ -3,10 +3,11 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  Optional,
 } from '@nestjs/common';
 import { db } from '@repo/database';
-import { auth } from '@repo/auth';
 import { withSpan, AppAttributes } from '@repo/observability';
+import { AuditQueueService, type OutboxTxClient } from '../common/audit-queue.service';
 
 import type { ServerSession } from '../common/session.utils';
 import {
@@ -16,6 +17,7 @@ import {
 } from '../common/session.utils';
 import { writeAuditRow } from '../common/audit-writer';
 import { MetricsService } from '../common/observability/metrics.service';
+import { AuthorizationService } from '../common/authorization.service';
 import { CreateNoteDto, UpdateNoteDto, DEFAULT_LIMIT } from './dto/note.dto';
 
 export type SerializedNote = {
@@ -67,7 +69,7 @@ function isRecordNotFoundError(err: unknown): boolean {
 
 /**
  * Domain rules mirrored 1:1 from the previous web-tier implementation so
- * Phase 3's RBAC-parity gate (doc 3.4) can compare verdicts exactly:
+ * the RBAC-parity gate (doc 3.4) can compare verdicts exactly:
  * - create/update/delete gated by the EFFECTIVE user's live permission
  *   (impersonating admin's id when impersonation is active)
  * - update restricted to the note's author unless the effective user holds
@@ -76,37 +78,47 @@ function isRecordNotFoundError(err: unknown): boolean {
  */
 @Injectable()
 export class NotesService {
-  constructor(private readonly metricsService: MetricsService) {}
+  constructor(
+    private readonly metricsService: MetricsService,
+    private readonly authz: AuthorizationService,
+    // @Optional: unit tests construct the service directly without a queue
+    // and exercise the synchronous fallback; the Nest module ALWAYS provides
+    // the queue, so production is background-only. Do NOT add more producers
+    // without going through the queue (ordering) — see audit-writer.ts.
+    @Optional() private readonly auditQueue?: AuditQueueService,
+  ) {}
 
-  async assertPermission(
-    session: ServerSession,
+  /**
+   * Local permission check against an already-loaded authoritative role.
+   * Reuses the single source of AccessControl rules (ADMIN_PLUGIN_ROLES) —
+   * same verdicts as `auth.api.userHasPermission` without its extra adapter
+   * read. Callers MUST pass the fresh DB role, never the session snapshot.
+   */
+  assertPermission(
+    roleRaw: string,
     action: 'create' | 'update' | 'delete',
-  ): Promise<void> {
-    const result = await auth.api.userHasPermission({
-      body: {
-        userId: getEffectiveUserId(session),
-        permissions: { notes: [action] },
-      },
-    });
-    if (result?.success !== true) {
-      throw new ForbiddenException(
-        action === 'delete'
-          ? 'Only superAdmins can delete notes.'
-          : `You do not have permission to ${action} notes.`,
-      );
-    }
+  ): void {
+    this.authz.assertPermission(roleRaw, 'notes', action);
   }
 
   async listForSession(
     session: ServerSession,
     limit = DEFAULT_LIMIT,
     offset = 0,
+    // COUNT opt-out (see ListNotesQuery.withTotal). Default true =
+    // backwards compatible; false skips the total probe for clients that
+    // never render totals (web UI, k6). The authorization role read above is
+    // untouched — security posture is identical either way.
+    withTotal = true,
   ): Promise<{
     notes: SerializedNote[];
     viewerRole: string;
-    total: number;
+    /** Exact total, or `null` when skipped via `?withTotal=false`. */
+    total: number | null;
     limit: number;
     offset: number;
+    /** True when rows exist beyond this page (offset- or cursor-style). */
+    hasMore: boolean;
   }> {
     return withSpan('notes.list', async (span) => {
       span.setAttribute(AppAttributes.OPERATION, 'notes.list');
@@ -114,22 +126,31 @@ export class NotesService {
       span.setAttribute(AppAttributes.ENTITY_TYPE, 'note');
 
       try {
-        const viewerRole = await this.getFreshRoleRaw(
+        // One authoritative role read per request — reused for scoping.
+        const viewerRole = await this.authz.getFreshRoleRaw(
           getEffectiveUserId(session),
         );
         const canListAll = hasOperatorRole(viewerRole);
 
         const where = canListAll ? undefined : { authorId: session.user.id };
-        const [notes, total] = await Promise.all([
+        // Fetch limit+1 rows so `hasMore` is derived from the SAME single
+        // findMany (no extra round trip). Ordering stays deterministic
+        // (createdAt DESC, id DESC tie-break — matches the covering index),
+        // so slicing the probe row off never shifts page contents.
+        // When withTotal=false the count branch resolves without touching PG,
+        // cutting this endpoint from 3 PG queries to 2 (role + findMany).
+        const [rows, total] = await Promise.all([
           db.note.findMany({
             where,
-            orderBy: { createdAt: 'desc' },
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
             include: NOTE_INCLUDE,
-            take: limit,
+            take: limit + 1,
             skip: offset,
           }),
-          db.note.count({ where }),
+          withTotal ? db.note.count({ where }) : Promise.resolve(null),
         ]);
+        const hasMore = rows.length > limit;
+        const notes = hasMore ? rows.slice(0, limit) : rows;
 
         this.metricsService.recordNoteOperation('list', 'success');
         return {
@@ -138,6 +159,7 @@ export class NotesService {
           total,
           limit,
           offset,
+          hasMore,
         };
       } catch (err) {
         this.metricsService.recordNoteOperation('list', 'failure');
@@ -157,23 +179,36 @@ export class NotesService {
       span.setAttribute(AppAttributes.ENTITY_TYPE, 'note');
 
       try {
-        await this.assertPermission(session, 'create');
+        // Single role fetch → permission check (no userHasPermission round trip).
+        const roleRaw = await this.authz.getFreshRoleRaw(
+          getEffectiveUserId(session),
+        );
+        this.assertPermission(roleRaw, 'create');
 
-        const note = await db.note.create({
-          data: {
-            title: dto.title,
-            content: dto.content,
-            authorId: session.user.id,
-          },
-          include: NOTE_INCLUDE,
+        // Note + outbox row commit atomically - kill -9 before
+        // commit loses both (client retries, idempotency dedupes); kill -9
+        // after commit loses nothing (poller redelivers).
+        const note = await db.$transaction(async (tx) => {
+          const created = await tx.note.create({
+            data: {
+              title: dto.title,
+              content: dto.content,
+              authorId: session.user.id,
+            },
+            include: NOTE_INCLUDE,
+          });
+          await this.writeAudit(
+            session,
+            'note_created',
+            meta,
+            { noteId: created.id, title: created.title },
+            tx as unknown as OutboxTxClient,
+            'note_created:' + created.id,
+          );
+          return created;
         });
 
         span.setAttribute(AppAttributes.ENTITY_ID, note.id);
-
-        await this.writeAudit(session, 'note_created', meta, {
-          noteId: note.id,
-          title: note.title,
-        });
 
         this.metricsService.recordNoteOperation('create', 'success');
         return serialize(note);
@@ -197,15 +232,18 @@ export class NotesService {
       span.setAttribute(AppAttributes.ENTITY_ID, noteId);
 
       try {
-        await this.assertPermission(session, 'update');
+        // One authoritative role fetch reused for BOTH permission evaluation
+        // and the admin ownership override (was 2 reads: userHasPermission +
+        // getFreshRoleRaw).
+        const roleRaw = await this.authz.getFreshRoleRaw(
+          getEffectiveUserId(session),
+        );
+        this.assertPermission(roleRaw, 'update');
 
         if (!dto.title?.trim() && !dto.content?.trim()) {
           throw new BadRequestException('Nothing to update.');
         }
 
-        const roleRaw = await this.getFreshRoleRaw(
-          getEffectiveUserId(session),
-        );
         const isAdmin = hasAdminRole(roleRaw);
 
         const note = await db.note.findUnique({
@@ -224,26 +262,31 @@ export class NotesService {
         // override (admins may edit others' notes). authorId is immutable,
         // so the pre-read cannot go stale; a delete winning the race throws
         // P2025, mapped to 404 below.
-        let updated;
-        try {
-          updated = await db.note.update({
-            where: { id: noteId },
-            data: {
-              ...(dto.title ? { title: dto.title } : {}),
-              ...(dto.content ? { content: dto.content } : {}),
-            },
-            include: NOTE_INCLUDE,
-          });
-        } catch (err) {
-          if (isRecordNotFoundError(err)) {
-            throw new NotFoundException('Note not found.');
+        const updated = await db.$transaction(async (tx) => {
+          let next: Parameters<typeof serialize>[0];
+          try {
+            next = await tx.note.update({
+              where: { id: noteId },
+              data: {
+                ...(dto.title ? { title: dto.title } : {}),
+                ...(dto.content ? { content: dto.content } : {}),
+              },
+              include: NOTE_INCLUDE,
+            });
+          } catch (err) {
+            if (isRecordNotFoundError(err)) {
+              throw new NotFoundException('Note not found.');
+            }
+            throw err;
           }
-          throw err;
-        }
-
-        await this.writeAudit(session, 'note_updated', meta, {
-          noteId,
-          title: dto.title || note.title,
+          await this.writeAudit(
+            session,
+            'note_updated',
+            meta,
+            { noteId, title: dto.title || note.title },
+            tx as unknown as OutboxTxClient,
+          );
+          return next;
         });
 
         this.metricsService.recordNoteOperation('update', 'success');
@@ -267,27 +310,34 @@ export class NotesService {
       span.setAttribute(AppAttributes.ENTITY_ID, noteId);
 
       try {
-        await this.assertPermission(session, 'delete');
+        const roleRaw = await this.authz.getFreshRoleRaw(
+          getEffectiveUserId(session),
+        );
+        this.assertPermission(roleRaw, 'delete');
 
         // Single atomic delete returning the title for the audit row (1 query
         // instead of findUnique + deleteMany). A missing row throws P2025,
         // mapped to 404 — no audit row for a deletion that never happened.
-        let existing;
-        try {
-          existing = await db.note.delete({
-            where: { id: noteId },
-            select: { title: true },
-          });
-        } catch (err) {
-          if (isRecordNotFoundError(err)) {
-            throw new NotFoundException('Note not found.');
+        await db.$transaction(async (tx) => {
+          let existing;
+          try {
+            existing = await tx.note.delete({
+              where: { id: noteId },
+              select: { title: true },
+            });
+          } catch (err) {
+            if (isRecordNotFoundError(err)) {
+              throw new NotFoundException('Note not found.');
+            }
+            throw err;
           }
-          throw err;
-        }
-
-        await this.writeAudit(session, 'note_deleted', meta, {
-          noteId,
-          title: existing.title,
+          await this.writeAudit(
+            session,
+            'note_deleted',
+            meta,
+            { noteId, title: existing.title },
+            tx as unknown as OutboxTxClient,
+          );
         });
 
         this.metricsService.recordNoteOperation('delete', 'success');
@@ -299,30 +349,32 @@ export class NotesService {
   }
 
   /**
-   * Fresh role straight from the DB (mirrors web's behaviour of never trusting
-   * the possibly-stale session snapshot for authorization decisions).
-   * Accepts either a full session or an explicit user id.
+   * note_created/updated/deleted are BACKGROUND audits: domain
+   * events with no privilege change. The queue preserves mutation→audit
+   * ordering (sequential per-process drain) plus retry, and returns
+   * immediately — removing 1 PG RTT from every mutation's critical path.
+   * The synchronous fallback below runs ONLY when no queue is injected
+   * (unit tests); production always has the global AuditQueueModule.
    */
-  private async getFreshRoleRaw(
-    sessionOrUserId: ServerSession | string,
-  ): Promise<string> {
-    const userId =
-      typeof sessionOrUserId === 'string'
-        ? sessionOrUserId
-        : sessionOrUserId.user.id;
-    const user = await db.user.findUnique({
-      where: { id: userId },
-      select: { role: true },
-    });
-    return (user?.role as string | null | undefined) ?? 'user';
-  }
-
   private async writeAudit(
     session: ServerSession,
     action: string,
     meta: { ip: string | null; userAgent: string | null },
     metadata?: Record<string, unknown>,
+    tx?: OutboxTxClient,
+    idempotencyKey?: string,
   ): Promise<void> {
+    if (this.auditQueue) {
+      // Awaited durable enqueue (resolves on outbox COMMIT); inside
+      // $transaction the row commits atomically with the note mutation.
+      await this.auditQueue.enqueueSessionAudit(
+        session,
+        { action, metadata },
+        meta,
+        tx || idempotencyKey ? { tx, idempotencyKey } : undefined,
+      );
+      return;
+    }
     await writeAuditRow(session, { action, metadata }, meta);
   }
 }

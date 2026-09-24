@@ -1,14 +1,12 @@
-import { Controller, Get, Session } from '@nestjs/common';
+import { Controller, Get, Query, Session } from '@nestjs/common';
 import { db } from '@repo/database';
-// Main-entry import: the api tsconfig uses Node10 resolution where package
-// subpath exports do not resolve.
-import {
-  ADMIN_PLUGIN_ROLES,
-  statement,
-} from '@repo/auth';
 
 import type { ServerSession } from '../common/session.utils';
 import { getEffectiveUserId } from '../common/session.utils';
+import {
+  AuthorizationService,
+  evaluateAppPermissions,
+} from '../common/authorization.service';
 
 /**
  * App-level permission resources exposed to the web tier. Deliberately NOT
@@ -48,14 +46,14 @@ type AppResource = (typeof APP_RESOURCES)[number];
  */
 @Controller('users')
 export class UsersController {
+  constructor(private readonly authz: AuthorizationService) {}
+
   @Get('me/role')
   async myRole(@Session() session: ServerSession) {
-    const user = await db.user.findUnique({
-      where: { id: session.user.id },
-      select: { role: true },
-    });
+    // Single implementation via AuthorizationService: identical
+    // query, plus the per-request memo when other checks run in this request.
     return {
-      role: (user?.role as string | null | undefined) ?? 'user',
+      role: await this.authz.getFreshRoleRaw(session.user.id),
     };
   }
 
@@ -63,34 +61,96 @@ export class UsersController {
   async myPermissions(@Session() session: ServerSession) {
     const effectiveId = getEffectiveUserId(session);
 
-    const user = await db.user.findUnique({
-      where: { id: effectiveId },
-      select: { role: true },
-    });
+    const rawRoles = await this.authz.getFreshRoleRaw(effectiveId);
     // Mirror better-auth: empty/null role falls back to the configured
-    // defaultRole ('user').
-    const rawRoles = (user?.role as string | null | undefined) || 'user';
-    const roleTokens = rawRoles.split(',');
-
-    const permissions: Record<AppResource, string[]> = {
-      notes: [],
-      settings: [],
-    };
-
-    for (const resource of APP_RESOURCES) {
-      for (const action of statement[resource]) {
-        const allowed = roleTokens.some(
-          (token) =>
-            ADMIN_PLUGIN_ROLES[token]?.authorize({
-              [resource]: [action],
-            })?.success === true,
-        );
-        if (allowed && !permissions[resource].includes(action)) {
-          permissions[resource].push(action);
-        }
-      }
-    }
+    // defaultRole ('user'). Local evaluation — same algorithm as the admin
+    // plugin, no per-action fan-out, one query per request.
+    const permissions = evaluateAppPermissions(rawRoles);
 
     return { userId: effectiveId, role: rawRoles, permissions };
+  }
+
+  /**
+   * Combined bootstrap: session identity +
+   * effective permissions in ONE HTTP round trip and ONE AuthGuard session
+   * resolution. Supports optional `?with=accounts` to coalesce linked
+   * account queries for the Settings page.
+   *
+   * Replaces the web-tier pattern `getSessionFromApi + getMyPermissions + listAccounts`
+   * (3 HTTP, 3 session lookups) with a single call.
+   * - Non-impersonated (common): 1x `findUnique role`.
+   * - Impersonating: 2x in parallel (session user vs effective user rows
+   *   differ) — still 1 HTTP instead of 2.
+   *
+   * Semantics preserved (do NOT unify without product change):
+   * - `role` = SESSION user (DashboardShell hides admin chrome in view).
+   * - `effectiveRole`/`permissions` = EFFECTIVE user (enforcement verdicts).
+   */
+  @Get('me/bootstrap')
+  async myBootstrap(
+    @Session() session: ServerSession,
+    @Query('with') withParam?: string,
+  ) {
+    const sessionUserId = session.user.id;
+    const effectiveId = getEffectiveUserId(session);
+    const impersonatedBy =
+      (session as { session?: { impersonatedBy?: string | null } }).session
+        ?.impersonatedBy ?? null;
+
+    const includeAccounts =
+      withParam?.split(',').map((s) => s.trim()).includes('accounts') ?? false;
+
+    // Session-user profile for pages that render identity (Settings) —
+    // same row as the role read, no extra query. Falls back to the
+    // cookie snapshot only if the row vanished mid-request. Impersonated
+    // path fetches both rows in parallel (reviewer nit: was sequential).
+    const sessionProfilePromise = db.user.findUnique({
+      where: { id: sessionUserId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        emailVerified: true,
+        image: true,
+        role: true,
+      },
+    });
+    const effectiveRolePromise =
+      sessionUserId === effectiveId
+        ? null
+        : this.authz.getFreshRoleRaw(effectiveId);
+    const accountsPromise = includeAccounts
+      ? db.account.findMany({
+          where: { userId: sessionUserId },
+          select: { id: true, providerId: true, accountId: true },
+        })
+      : null;
+
+    const [sessionProfile, effectiveRoleOrNull, accountsList] =
+      await Promise.all([
+        sessionProfilePromise,
+        effectiveRolePromise,
+        accountsPromise,
+      ]);
+    const role =
+      (sessionProfile?.role as string | null | undefined) ?? 'user';
+    const effectiveRole = effectiveRoleOrNull ?? role;
+    return {
+      userId: effectiveId,
+      sessionUserId,
+      role,
+      effectiveRole,
+      permissions: evaluateAppPermissions(effectiveRole),
+      impersonatedBy,
+      sessionUser: {
+        id: sessionProfile?.id ?? sessionUserId,
+        name: sessionProfile?.name ?? session.user.name,
+        email: sessionProfile?.email ?? session.user.email,
+        emailVerified:
+          sessionProfile?.emailVerified ?? session.user.emailVerified,
+        image: sessionProfile?.image ?? session.user.image ?? null,
+      },
+      ...(accountsList ? { accounts: accountsList } : {}),
+    };
   }
 }
