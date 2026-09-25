@@ -4,7 +4,14 @@ import { callInternalApi } from './internal-api';
 
 type ServerActionRateLimitInput = {
   scope: string;
-  identifier: string;
+  /**
+   * Legacy log label: the API derives the bucket key from the
+   * authenticated session (`rate-limit.controller.ts`), so the identifier was
+   * never load-bearing — and it forced a sequential bootstrap → rate edge
+   * (the id wasn't known until bootstrap resolved). Now optional; pass only
+   * to tag the limiter-unavailable log line.
+   */
+  identifier?: string;
   windowMs: number;
   max: number;
   failOpen?: boolean;
@@ -55,7 +62,7 @@ export async function checkServerActionRateLimit({
   } catch (error) {
     console.error('[RateLimit] limiter unavailable:', {
       scope,
-      identifier,
+      identifier: identifier ?? 'session-derived',
       error,
     });
     return {

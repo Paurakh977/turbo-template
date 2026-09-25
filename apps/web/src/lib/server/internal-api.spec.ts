@@ -14,9 +14,8 @@ jest.mock('better-auth/api', () => ({
   },
 }));
 
-// Test the toApiStatus helper and callInternalApi indirectly via the exported
-// functions. We need to test callInternalApi which is not directly exported,
-// so we test through getMyPermissionsFromApi and the toApiStatus pattern.
+// Test callInternalApi directly (obsolete permissions helper removed —
+// zero callers; the /me/permissions endpoint stays live for API consumers).
 
 describe('internal-api module', () => {
   const originalEnv = process.env;

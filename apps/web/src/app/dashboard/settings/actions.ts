@@ -3,14 +3,16 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
-import { isAPIError } from 'better-auth/api';
 import {
-  getSessionFromApi,
   updateUserFromApi,
   deleteUserFromApi,
   listAccountsFromApi,
 } from '../../../lib/server/auth-http';
-import { getMyPermissionsFromApi } from '../../../lib/server/internal-api';
+import { getRequestBootstrap } from '../../../lib/server/bootstrap';
+import {
+  classifyApiError,
+  toActionErrorMessage,
+} from '../../../lib/server/api-errors';
 import { createServerAuditLog } from '../../../lib/server/server-audit';
 import {
   checkServerActionRateLimit,
@@ -19,53 +21,69 @@ import {
 import { getAppBaseUrl } from '../../../lib/server/app-url';
 import { buildAbsoluteUrl } from '../../../lib/shared/app-url';
 
-async function getSessionOrRedirect() {
+/**
+ * Single-bootstrap identity: ONE HTTP replaces
+ * getSession + getMyPermissions. Domain mutations re-enforce authz — the
+ * early permission check here is UX-only.
+ *
+ * Bootstrap + rate-check run in PARALLEL: the limiter derives its
+ * bucket from the session server-side. Saves ~1 wall RTT per action.
+ */
+async function getBootstrapAndRateLimit(action: string, windowMs: number, max: number) {
   const h = await headers();
-  const session = await getSessionFromApi(h);
-  if (!session) redirect('/auth');
-  return session;
-}
-
-async function enforceActionRateLimit(
-  userId: string,
-  action: string,
-  windowMs: number,
-  max: number,
-) {
-  const result = await checkServerActionRateLimit({
+  let bootstrap: Awaited<ReturnType<typeof getRequestBootstrap>> | null = null;
+  let bootstrapError: unknown = null;
+  try {
+    bootstrap = await getRequestBootstrap(h);
+  } catch (error) {
+    bootstrapError = error;
+  }
+  const rate = await checkServerActionRateLimit({
     scope: `settings:${action}`,
-    identifier: userId,
     windowMs,
     max,
     failOpen: false,
   });
+  return { h, bootstrap, bootstrapError, rate };
+}
 
-  if (!result.allowed) {
-    return { error: getServerActionRateLimitMessage(result.retryAfterMs) };
+function redirectIfUnauthenticated(
+  bootstrap: Awaited<ReturnType<typeof getRequestBootstrap>> | null,
+  bootstrapError?: unknown,
+): asserts bootstrap is NonNullable<typeof bootstrap> & { userId: string } {
+  if (bootstrap?.userId) return;
+  if (bootstrapError !== null && bootstrapError !== undefined) {
+    const kind = classifyApiError(bootstrapError);
+    if (kind !== 'unauthorized') throw bootstrapError;
   }
+  redirect('/auth');
+}
 
+function rateLimitError(
+  rate: Awaited<ReturnType<typeof checkServerActionRateLimit>>,
+) {
+  if (!rate.allowed) {
+    return { error: getServerActionRateLimitMessage(rate.retryAfterMs) };
+  }
   return null;
 }
 
 /**
  * Permission verdict for the EFFECTIVE user (impersonation aware), computed
  * by the API tier - identical evaluation to server-side enforcement.
+ * Takes preloaded bootstrap verdicts (no extra HTTP); admin short-circuit
+ * preserves the previous fast path for the common admin case.
  */
-async function hasSettingsPermission(
+function hasSettingsPermissionFromBootstrap(
   action: 'profile' | 'security' | 'theme' | 'labs',
-  sessionRole?: string,
-): Promise<boolean> {
+  sessionRole: string | undefined,
+  permissions: { settings: string[] },
+): boolean {
   const normRole = sessionRole?.toLowerCase() ?? '';
   if (normRole === 'superadmin' || normRole === 'admin') {
     return true;
   }
-  try {
-    const h = await headers();
-    const { permissions } = await getMyPermissionsFromApi(h);
-    return permissions?.settings?.includes(action) ?? false;
-  } catch {
-    return normRole === 'superadmin' || normRole === 'admin';
-  }
+  return permissions?.settings?.includes(action) ?? false;
 }
 
 function getActionErrorMessage(
@@ -78,45 +96,21 @@ function getActionErrorMessage(
     rateLimited?: string;
   },
 ) {
-  if (isAPIError(error)) {
-    if (error.status === 400) {
-      return options?.badRequest || error.message || fallback;
-    }
-    if (error.status === 401) {
-      return (
-        options?.unauthorized || 'Your session expired. Please sign in again.'
-      );
-    }
-    if (error.status === 403) {
-      return (
-        options?.forbidden || 'You are not allowed to perform this action.'
-      );
-    }
-    if (error.status === 429) {
-      return (
-        options?.rateLimited || 'Too many requests. Please wait and try again.'
-      );
-    }
-    return error.message || fallback;
-  }
-
-  // Non-APIError Errors can carry Node fetch internals - never surface them.
-  return fallback;
+  return toActionErrorMessage(error, fallback, options);
 }
 
 export async function updateDisplayNameAction(formData: FormData) {
-  const session = await getSessionOrRedirect();
-  const rateLimitError = await enforceActionRateLimit(
-    session.user.id,
-    'update-display-name',
-    60_000,
-    6,
-  );
-  if (rateLimitError) return rateLimitError;
+  const { h: bootstrapHeaders, bootstrap, bootstrapError, rate } =
+    await getBootstrapAndRateLimit('update-display-name', 60_000, 6);
+  redirectIfUnauthenticated(bootstrap, bootstrapError);
+  const limited = rateLimitError(rate);
+  if (limited) return limited;
+  const { role: sessionRole, permissions } = bootstrap;
 
-  const allowed = await hasSettingsPermission(
+  const allowed = hasSettingsPermissionFromBootstrap(
     'profile',
-    (session.user as { role?: string }).role,
+    sessionRole,
+    permissions,
   );
   if (!allowed)
     return { error: 'You are not allowed to edit profile settings.' };
@@ -128,7 +122,9 @@ export async function updateDisplayNameAction(formData: FormData) {
   }
 
   try {
-    await updateUserFromApi({ name }, await headers());
+    // Reuse the already-read headers: the second `headers()` call
+    // here was a duplicate parse + cookie split of the same request.
+    await updateUserFromApi({ name }, bootstrapHeaders);
   } catch (error) {
     return {
       error: getActionErrorMessage(
@@ -148,18 +144,20 @@ export async function updateDisplayNameAction(formData: FormData) {
 }
 
 export async function toggleThemePreferenceAction() {
-  const session = await getSessionOrRedirect();
-  const rateLimitError = await enforceActionRateLimit(
-    session.user.id,
+  const { bootstrap, bootstrapError, rate } = await getBootstrapAndRateLimit(
     'toggle-theme-preference',
     60_000,
     10,
   );
-  if (rateLimitError) return rateLimitError;
+  redirectIfUnauthenticated(bootstrap, bootstrapError);
+  const limited = rateLimitError(rate);
+  if (limited) return limited;
+  const { role: sessionRole, permissions } = bootstrap;
 
-  const allowed = await hasSettingsPermission(
+  const allowed = hasSettingsPermissionFromBootstrap(
     'theme',
-    (session.user as { role?: string }).role,
+    sessionRole,
+    permissions,
   );
   if (!allowed) {
     return {
@@ -182,18 +180,20 @@ export async function toggleThemePreferenceAction() {
 }
 
 export async function runLabsSettingAction() {
-  const session = await getSessionOrRedirect();
-  const rateLimitError = await enforceActionRateLimit(
-    session.user.id,
+  const { bootstrap, bootstrapError, rate } = await getBootstrapAndRateLimit(
     'run-labs-setting',
     60_000,
     5,
   );
-  if (rateLimitError) return rateLimitError;
+  redirectIfUnauthenticated(bootstrap, bootstrapError);
+  const limited = rateLimitError(rate);
+  if (limited) return limited;
+  const { role: sessionRole, permissions } = bootstrap;
 
-  const allowed = await hasSettingsPermission(
+  const allowed = hasSettingsPermissionFromBootstrap(
     'labs',
-    (session.user as { role?: string }).role,
+    sessionRole,
+    permissions,
   );
   if (!allowed) {
     return {
@@ -214,16 +214,15 @@ export async function runLabsSettingAction() {
 }
 
 export async function deleteAccountAction(formData: FormData) {
-  const session = await getSessionOrRedirect();
-  const rateLimitError = await enforceActionRateLimit(
-    session.user.id,
+  const { h, bootstrap, bootstrapError, rate } = await getBootstrapAndRateLimit(
     'delete-account',
     60_000,
     2,
   );
-  if (rateLimitError) return rateLimitError;
+  redirectIfUnauthenticated(bootstrap, bootstrapError);
+  const limited = rateLimitError(rate);
+  if (limited) return limited;
 
-  const h = await headers();
   const appBaseUrl = await getAppBaseUrl(h);
 
   const accounts = await listAccountsFromApi(h);

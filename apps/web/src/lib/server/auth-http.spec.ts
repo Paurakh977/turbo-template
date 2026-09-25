@@ -1,11 +1,34 @@
 jest.mock('server-only', () => ({}));
+// Real-shape mock: string token in `status`, numeric code in `statusCode`
+// (better-call/dist/error.mjs). P1-2 regression: the previous mock carried
+// only `status`, hiding the dead `error.status === 404` comparison.
 jest.mock('better-auth/api', () => ({
   APIError: class APIError extends Error {
     status: string;
+    statusCode: number | null;
     body: unknown;
     constructor(status: string, body: unknown) {
-      super(status);
+      super(
+        typeof body === 'object' &&
+        body !== null &&
+        'message' in body &&
+        typeof (body as { message?: unknown }).message === 'string'
+          ? (body as { message: string }).message
+          : status,
+      );
+      this.name = 'APIError';
       this.status = status;
+      const codes: Record<string, number> = {
+        BAD_REQUEST: 400,
+        UNAUTHORIZED: 401,
+        FORBIDDEN: 403,
+        NOT_FOUND: 404,
+        TOO_MANY_REQUESTS: 429,
+        INTERNAL_SERVER_ERROR: 500,
+        SERVICE_UNAVAILABLE: 503,
+        GATEWAY_TIMEOUT: 504,
+      };
+      this.statusCode = codes[status] ?? null;
       this.body = body;
     }
   },
@@ -168,7 +191,8 @@ describe('auth-http callAuthApi', () => {
     expect(result).toEqual([]);
   });
 
-  it('getAdminUserFromApi returns null on 404', async () => {
+  // 100% branch coverage for getAdminUserFromApi — no try/catch-pass.
+  it('getAdminUserFromApi returns null on 404 (token + numeric shapes)', async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: false,
       status: 404,
@@ -177,11 +201,60 @@ describe('auth-http callAuthApi', () => {
     });
     const { getAdminUserFromApi } = require('./auth-http');
     const headers = new Headers();
-    try {
-      const result = await getAdminUserFromApi('u1', headers);
-      expect(result).toBeNull();
-    } catch {
-      expect(true).toBe(true);
-    }
+    await expect(getAdminUserFromApi('u1', headers)).resolves.toBeNull();
+  });
+
+  it('getAdminUserFromApi returns null on 404 with an empty body', async () => {
+    // Exercises the throwForNonOkResponse fallback branch (rawText empty →
+    // statusText body) while still producing status NOT_FOUND / 404.
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      statusText: 'Not Found',
+      text: () => Promise.resolve(''),
+    });
+    const { getAdminUserFromApi } = require('./auth-http');
+    const headers = new Headers();
+    await expect(getAdminUserFromApi('u1', headers)).resolves.toBeNull();
+  });
+
+  it('gateway 404 surfaces as APIError token NOT_FOUND with numeric 404', async () => {
+    // Pins the real better-call shape the P1-2 fix relies on: `status` is
+    // the string token, `statusCode` the number. Guards against mock drift.
+    const { APIError } = jest.requireMock('better-auth/api');
+    const err = new APIError('NOT_FOUND', { message: 'not found' });
+    expect(err.status).toBe('NOT_FOUND');
+    expect(err.statusCode).toBe(404);
+    expect(err.status).not.toBe(404 as unknown as string);
+  });
+
+  it('getAdminUserFromApi rethrows 500 instead of mapping to null', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      statusText: 'Internal Server Error',
+      text: () => Promise.resolve('{"message":"boom"}'),
+    });
+    const { getAdminUserFromApi } = require('./auth-http');
+    const headers = new Headers();
+    await expect(getAdminUserFromApi('u1', headers)).rejects.toMatchObject({
+      status: 'INTERNAL_SERVER_ERROR',
+      statusCode: 500,
+    });
+  });
+
+  it('getAdminUserFromApi rethrows 403 instead of mapping to null', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      statusText: 'Forbidden',
+      text: () => Promise.resolve('{"message":"denied"}'),
+    });
+    const { getAdminUserFromApi } = require('./auth-http');
+    const headers = new Headers();
+    await expect(getAdminUserFromApi('u1', headers)).rejects.toMatchObject({
+      status: 'FORBIDDEN',
+      statusCode: 403,
+    });
   });
 });

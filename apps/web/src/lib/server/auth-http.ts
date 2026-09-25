@@ -3,6 +3,15 @@ import 'server-only';
 import { APIError } from 'better-auth/api';
 import type { Auth } from '@repo/auth';
 import { AUTH_BASE_PATH } from '@repo/auth/permissions';
+import {
+  DEFAULT_TIMEOUT_MS,
+  buildForwardedHeaders,
+  internalApiBaseUrl,
+  isTimeoutError,
+  throwForNonOkResponse,
+  throwTimeoutAsApiError,
+  throwUnreachableAsApiError,
+} from './fetch-internal';
 
 /**
  * Cookie-forwarding HTTP gateway to the API tier's Better Auth endpoints.
@@ -29,68 +38,6 @@ import { AUTH_BASE_PATH } from '@repo/auth/permissions';
  */
 
 type AuthSession = Auth['$Infer']['Session'];
-
-const DEFAULT_TIMEOUT_MS = 5_000;
-
-/** APIError status tokens this gateway can produce. */
-type ApiErrorStatus =
-  | 'BAD_REQUEST'
-  | 'UNAUTHORIZED'
-  | 'FORBIDDEN'
-  | 'NOT_FOUND'
-  | 'CONFLICT'
-  | 'TOO_MANY_REQUESTS'
-  | 'BAD_GATEWAY'
-  | 'SERVICE_UNAVAILABLE'
-  | 'GATEWAY_TIMEOUT'
-  | 'INTERNAL_SERVER_ERROR';
-
-/** Status-line -> APIError status token map (better-auth vocabulary). */
-function toApiStatus(status: number): ApiErrorStatus {
-  switch (status) {
-    case 400:
-      return 'BAD_REQUEST';
-    case 401:
-      return 'UNAUTHORIZED';
-    case 403:
-      return 'FORBIDDEN';
-    case 404:
-      return 'NOT_FOUND';
-    case 409:
-      return 'CONFLICT';
-    case 429:
-      return 'TOO_MANY_REQUESTS';
-    case 502:
-      return 'BAD_GATEWAY';
-    case 503:
-      return 'SERVICE_UNAVAILABLE';
-    case 504:
-      return 'GATEWAY_TIMEOUT';
-    default:
-      return 'INTERNAL_SERVER_ERROR';
-  }
-}
-
-function internalApiBaseUrl(): string {
-  const raw = process.env.INTERNAL_API_URL?.trim();
-  if (!raw) {
-    throw new APIError('INTERNAL_SERVER_ERROR', {
-      message:
-        'INTERNAL_API_URL is not set - the web tier cannot reach the auth API. ' +
-        'Docker Compose injects it (http://api:3001); for host runs add ' +
-        "'INTERNAL_API_URL=http://localhost:3001' to .env and start the API.",
-    });
-  }
-  return raw.replace(/\/+$/, '');
-}
-
-/**
- * The public origin browsers use. Better Auth's CSRF check validates the
- * Origin header against trustedOrigins, which contains this value.
- */
-function publicAppOrigin(): string | undefined {
-  return process.env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/+$/, '') || undefined;
-}
 
 export type CallAuthApiOptions = {
   /** Incoming request headers; enables cookie + IP + UA forwarding. */
@@ -120,25 +67,11 @@ async function callAuthApi<TResponse>(
     }
   }
 
-  const headers = new Headers();
-  headers.set('accept', 'application/json');
+  // Shared core — same forwarding/timeout/error contract as domain
+  // gateway. Non-2xx mapping lives in fetch-internal; the only gateway-local
+  // branch left is getAdminUserFromApi's 404→null below.
+  const headers = buildForwardedHeaders(requestHeaders);
   if (body !== undefined) headers.set('content-type', 'application/json');
-
-  const origin = publicAppOrigin();
-  if (origin) headers.set('origin', origin);
-
-  if (requestHeaders) {
-    const cookie = requestHeaders.get('cookie');
-    if (cookie) headers.set('cookie', cookie);
-
-    const forwardedFor = requestHeaders.get('x-forwarded-for');
-    if (forwardedFor) headers.set('x-forwarded-for', forwardedFor);
-    const realIp = requestHeaders.get('x-real-ip');
-    if (realIp) headers.set('x-real-ip', realIp);
-
-    const userAgent = requestHeaders.get('user-agent');
-    if (userAgent) headers.set('user-agent', userAgent);
-  }
 
   let response: Response;
   try {
@@ -152,22 +85,20 @@ async function callAuthApi<TResponse>(
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
-    const isTimeout =
-      error instanceof Error &&
-      (error.name === 'TimeoutError' ||
-        error.name === 'AbortError' ||
-        (error as { cause?: { name?: string } }).cause?.name ===
-          'TimeoutError');
-    if (isTimeout) {
-      console.error(`[AuthHttp] timeout after ${timeoutMs}ms: ${path}`);
-      throw new APIError('GATEWAY_TIMEOUT', {
-        message: 'Authentication service timed out. Please try again.',
-      });
+    if (isTimeoutError(error)) {
+      throwTimeoutAsApiError(
+        'AuthHttp',
+        path,
+        timeoutMs,
+        'Authentication service timed out. Please try again.',
+      );
     }
-    console.error(`[AuthHttp] unreachable API for ${path}:`, error);
-    throw new APIError('SERVICE_UNAVAILABLE', {
-      message: 'Authentication service is temporarily unavailable.',
-    });
+    throwUnreachableAsApiError(
+      'AuthHttp',
+      path,
+      error,
+      'Authentication service is temporarily unavailable.',
+    );
   }
 
   const rawText = await response.text();
@@ -181,11 +112,7 @@ async function callAuthApi<TResponse>(
   }
 
   if (!response.ok) {
-    const errorBody =
-      parsed && typeof parsed === 'object'
-        ? (parsed as Record<string, unknown>)
-        : { message: rawText || response.statusText || 'Auth request failed' };
-    throw new APIError(toApiStatus(response.status), errorBody);
+    throwForNonOkResponse(response, parsed, rawText);
   }
 
   return parsed as TResponse;
@@ -353,9 +280,15 @@ export async function getAdminUserFromApi(
     });
   } catch (error) {
     // Unknown target user surfaces as 404 from the endpoint.
+    // better-call APIError carries the string token in `status`
+    // ("NOT_FOUND") and the numeric code in `statusCode` (404) — see
+    // better-call/dist/error.mjs constructor. Never compare
+    // `error.status === 404` (always false). Accept both fields so mocked
+    // and real shapes map to null; everything else rethrows.
     if (
       error instanceof APIError &&
-      error.status === 404
+      ((error as unknown as { statusCode?: unknown }).statusCode === 404 ||
+        (error as unknown as { status?: unknown }).status === 'NOT_FOUND')
     ) {
       return null;
     }

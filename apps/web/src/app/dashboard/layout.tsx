@@ -1,17 +1,18 @@
 import { headers } from 'next/headers';
-import { redirect } from 'next/navigation';
-import { getSessionFromApi } from '../../lib/server/auth-http';
+import { getRequestBootstrap } from '../../lib/server/bootstrap';
+import { throwUnlessAuth } from '../../lib/server/api-errors';
 import { DashboardShell } from './_components/DashboardShell';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * Shared dashboard layout — fetches the session server-side so the shell
- * (header, impersonation banner) is never rendered from a client-side
- * round-trip, then delegates interactive pieces to client components.
+ * Shared dashboard layout — fetches the request bootstrap ONCE per request
+ * (cached via React cache(), see lib/server/bootstrap). Pages reuse the same
+ * cached result, so navigation pays 1 bootstrap HTTP + 1 domain HTTP instead
+ * of layout session + page bootstrap + data.
  *
- * Architecture B: the session is resolved by the API tier over
- * cookie-forwarded HTTP - web holds no DB credentials or signing secret.
+ * Architecture B: identity resolved by the API tier over cookie-forwarded
+ * HTTP - web holds no DB credentials or signing secret.
  */
 export default async function DashboardLayout({
   children,
@@ -19,8 +20,32 @@ export default async function DashboardLayout({
   children: React.ReactNode;
 }) {
   const h = await headers();
-  const session = await getSessionFromApi(h);
-  if (!session) redirect('/auth');
+  let bootstrap: Awaited<ReturnType<typeof getRequestBootstrap>>;
+  try {
+    bootstrap = await getRequestBootstrap(h);
+  } catch (error) {
+    throwUnlessAuth(error);
+  }
+  if (!bootstrap!.userId) {
+    const { redirect } = await import('next/navigation');
+    redirect('/auth');
+  }
+
+  // DashboardShell expects a Better Auth Session; derive the fields it reads
+  // (user.id/name/email/role + session.impersonatedBy) from the bootstrap.
+  // Full session lookup is unnecessary — enforcement stays server-side.
+  const session = {
+    user: {
+      id: bootstrap!.sessionUserId,
+      name: bootstrap!.sessionUser.name,
+      email: bootstrap!.sessionUser.email,
+      image: bootstrap!.sessionUser.image,
+      role: bootstrap!.role,
+    },
+    session: {
+      impersonatedBy: bootstrap!.impersonatedBy,
+    },
+  } as unknown as Parameters<typeof DashboardShell>[0]['session'];
 
   return <DashboardShell session={session}>{children}</DashboardShell>;
 }

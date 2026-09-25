@@ -1,30 +1,47 @@
 import { headers } from 'next/headers';
-import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { getPrimaryRole } from '@repo/auth/roles';
-import {
-  getSessionFromApi,
-  listAccountsFromApi,
-} from '../../../lib/server/auth-http';
-import { getMyPermissionsFromApi } from '../../../lib/server/internal-api';
+import { listAccountsFromApi } from '../../../lib/server/auth-http';
+import { getRequestBootstrap } from '../../../lib/server/bootstrap';
+import { throwUnlessAuth } from '../../../lib/server/api-errors';
 import { SettingsClient } from './_components/SettingsClient';
 
 export const dynamic = 'force-dynamic';
 
 export default async function SettingsPage() {
   const h = await headers();
-  const session = await getSessionFromApi(h);
-  if (!session) redirect('/auth');
+  // Combined bootstrap with accounts.
+  // Request-cached (layout's base bootstrap is a different cache key, so this
+  // is 1 HTTP here — still coalesced identity+perms+accounts vs 3 before).
+  // throwUnlessAuth redirects ONLY on 401; 503/504 throw to error.tsx.
+  let bootstrap: Awaited<ReturnType<typeof getRequestBootstrap>>;
+  try {
+    bootstrap = await getRequestBootstrap(h, { with: 'accounts' });
+  } catch (error) {
+    throwUnlessAuth(error);
+  }
+  if (!bootstrap?.userId) {
+    const { redirect } = await import('next/navigation');
+    redirect('/auth');
+  }
 
-  const roleRaw = (session.user as { role?: string }).role ?? 'user';
+  let accounts: Array<{ providerId: string }> =
+    (bootstrap.accounts as Array<{ providerId: string }> | undefined) ?? [];
+  if (accounts.length === 0 && !bootstrap.accounts) {
+    try {
+      accounts = await listAccountsFromApi(h);
+    } catch (error) {
+      throwUnlessAuth(error);
+    }
+  }
+
+  // Display the SESSION user's role (browsed account while impersonating);
+  // gating below stays effective-role based (acting admin). Matches
+  // pre-refactor display semantics, but fresh from the DB instead of the
+  // possibly-stale session snapshot.
+  const roleRaw = bootstrap.role ?? 'user';
   const role = getPrimaryRole(roleRaw);
-
-  // Effective-user permission verdicts (impersonation aware) + linked
-  // accounts, both resolved by the API tier in a single round trip each.
-  const [{ permissions: perms }, accounts] = await Promise.all([
-    getMyPermissionsFromApi(h),
-    listAccountsFromApi(h),
-  ]);
+  const perms = bootstrap.permissions;
 
   const canManageProfile = perms.settings.includes('profile');
   const canManageTheme = perms.settings.includes('theme');
@@ -65,11 +82,11 @@ export default async function SettingsPage() {
 
         <SettingsClient
           user={{
-            id: session.user.id,
-            name: session.user.name,
-            email: session.user.email,
-            emailVerified: session.user.emailVerified,
-            image: session.user.image ?? null,
+            id: bootstrap.sessionUser.id,
+            name: bootstrap.sessionUser.name,
+            email: bootstrap.sessionUser.email,
+            emailVerified: bootstrap.sessionUser.emailVerified,
+            image: bootstrap.sessionUser.image ?? null,
             role,
           }}
           perms={{

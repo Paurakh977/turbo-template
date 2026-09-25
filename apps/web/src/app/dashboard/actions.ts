@@ -1,8 +1,8 @@
 'use server';
 
 import { headers } from 'next/headers';
-import { getSessionFromApi } from '../../lib/server/auth-http';
-import { callInternalApi } from '../../lib/server/internal-api';
+import { getRequestBootstrap } from '../../lib/server/bootstrap';
+import { classifyApiError } from '../../lib/server/api-errors';
 import { checkServerActionRateLimit } from '../../lib/server/server-action-rate-limit';
 
 /**
@@ -15,25 +15,42 @@ import { checkServerActionRateLimit } from '../../lib/server/server-action-rate-
 export async function getFreshRoleAction(): Promise<string | null> {
   try {
     const h = await headers();
-    const session = await getSessionFromApi(h);
-    if (!session?.user?.id) return null;
-
-    // Read-only action, but it still hits the store on every tab focus —
-    // bound it per user. Fail-open so a limiter hiccup never degrades UI.
-    const rate = await checkServerActionRateLimit({
-      scope: 'dashboard:fresh-role',
-      identifier: session.user.id,
-      windowMs: 60_000,
-      max: 30,
-      failOpen: true,
-    });
+    // Bootstrap: identity + fresh SESSION role in 1 HTTP (was
+    // getSession + me/role = 2 HTTP). Rate-check runs in PARALLEL:
+    // the limiter derives its bucket from the session, so the bootstrap
+    // result is not needed first — ~1 wall RTT saved per poll.
+    // Polling reuses the request-scoped helper (same fingerprint
+    // keys as layout/pages) and classifies bootstrap failures — 401 yields
+    // null (signed out), anything else (503/504/timeout) is logged and also
+    // yields null WITHOUT masquerading as "not authenticated".
+    const [bootstrapResult, rate] = await Promise.all([
+      getRequestBootstrap(h)
+        .then((b) => ({ ok: true as const, bootstrap: b }))
+        .catch((error: unknown) => ({ ok: false as const, error })),
+      // Read-only action, but it still hits the store on every tab focus —
+      // bound it per user. Fail-open so a limiter hiccup never degrades UI.
+      checkServerActionRateLimit({
+        scope: 'dashboard:fresh-role',
+        windowMs: 60_000,
+        max: 30,
+        failOpen: true,
+      }),
+    ]);
+    if (!bootstrapResult.ok) {
+      const kind = classifyApiError(bootstrapResult.error);
+      if (kind !== 'unauthorized') {
+        console.error(
+          '[Dashboard] getFreshRoleAction bootstrap unavailable:',
+          bootstrapResult.error,
+        );
+      }
+      return null;
+    }
+    const bootstrap = bootstrapResult.bootstrap;
+    if (!bootstrap?.userId) return null;
     if (!rate.allowed) return null;
 
-    const { role } = await callInternalApi<{ role: string }>(
-      '/api/users/me/role',
-      { requestHeaders: h },
-    );
-    return role ?? 'user';
+    return bootstrap.role ?? 'user';
   } catch (error) {
     console.error('[Dashboard] getFreshRoleAction failed:', error);
     return null;

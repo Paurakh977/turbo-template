@@ -3,11 +3,12 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
-import { getSessionFromApi } from '../../../lib/server/auth-http';
+import { callInternalApi } from '../../../lib/server/internal-api';
 import {
-  callInternalApi,
-  getMyPermissionsFromApi,
-} from '../../../lib/server/internal-api';
+  classifyApiError,
+  toActionError,
+} from '../../../lib/server/api-errors';
+import { getRequestBootstrap } from '../../../lib/server/bootstrap';
 import {
   checkServerActionRateLimit,
   getServerActionRateLimitMessage,
@@ -15,48 +16,73 @@ import {
 
 type NoteActionError = { error: string };
 
-async function getSessionOrRedirect() {
+/**
+ * Single-bootstrap identity: ONE HTTP (`/me/bootstrap`) replaces
+ * `getSessionFromApi + getMyPermissions` (2 HTTP, 2 session lookups).
+ * Returns headers + permissions for rate-limit + UI gating.
+ * The domain mutation re-enforces authz server-side — this early check is
+ * UX-only and never trusted for security.
+ *
+ * Bootstrap + rate-check run in PARALLEL: the limiter derives its
+ * bucket from the session server-side, so neither request needs the other's
+ * result. Saves ~1 wall RTT per mutation (HTTP count unchanged — a full
+ * merge into a domain guard is deferred, see plan §5/ISSUE 3).
+ */
+async function getBootstrapAndRateLimit(action: string, windowMs: number, max: number) {
   const h = await headers();
-  const session = await getSessionFromApi(h);
-  if (!session) redirect('/auth');
-  return session;
-}
-
-async function enforceActionRateLimit(
-  userId: string,
-  action: string,
-  windowMs: number,
-  max: number,
-) {
-  const result = await checkServerActionRateLimit({
+  let bootstrap: Awaited<ReturnType<typeof getRequestBootstrap>> | null = null;
+  let bootstrapError: unknown = null;
+  try {
+    bootstrap = await getRequestBootstrap(h);
+  } catch (error) {
+    bootstrapError = error;
+  }
+  const rate = await checkServerActionRateLimit({
     scope: `notes:${action}`,
-    identifier: userId,
     windowMs,
     max,
     failOpen: false,
   });
+  return { h, bootstrap, bootstrapError, rate };
+}
 
-  if (!result.allowed) {
-    return { error: getServerActionRateLimitMessage(result.retryAfterMs) };
+function redirectIfUnauthenticated(
+  bootstrap: Awaited<ReturnType<typeof getRequestBootstrap>> | null,
+  bootstrapError?: unknown,
+): asserts bootstrap is NonNullable<typeof bootstrap> & { userId: string } {
+  // 401 (or null bootstrap from 401) → login. Anything else (503/504/timeout)
+  // must NOT become a login redirect — throw so the action returns a service
+  // error instead.
+  if (bootstrap?.userId) return;
+  if (bootstrapError !== null && bootstrapError !== undefined) {
+    const kind = classifyApiError(bootstrapError);
+    if (kind !== 'unauthorized') throw bootstrapError;
   }
+  redirect('/auth');
+}
 
+function rateLimitError(
+  rate: Awaited<ReturnType<typeof checkServerActionRateLimit>>,
+) {
+  if (!rate.allowed) {
+    return { error: getServerActionRateLimitMessage(rate.retryAfterMs) };
+  }
   return null;
 }
 
 export async function createNoteAction(formData: FormData) {
-  const h = await headers();
-  const session = await getSessionOrRedirect();
-  const rateLimitError = await enforceActionRateLimit(
-    session.user.id,
+  const { h, bootstrap, bootstrapError, rate } = await getBootstrapAndRateLimit(
     'create-note',
     60_000,
     10,
   );
-  if (rateLimitError) return rateLimitError;
+  redirectIfUnauthenticated(bootstrap, bootstrapError);
+  const limited = rateLimitError(rate);
+  if (limited) return limited;
+  const { permissions } = bootstrap;
 
   // Verdicts are computed by the API for the EFFECTIVE user (impersonation
   // aware) - no client-supplied user id involved.
-  const { permissions } = await getMyPermissionsFromApi(h);
   if (!permissions.notes.includes('create')) {
     return { error: 'Only operators and above can create notes.' };
   }
@@ -92,22 +118,21 @@ export async function createNoteAction(formData: FormData) {
     };
   } catch (error) {
     console.error('[Notes] create failed:', error);
-    return { error: 'Could not create the note. Please try again.' };
+    return toNoteActionError(error, 'Could not create the note. Please try again.');
   }
 }
 
 export async function updateNoteAction(noteId: string, formData: FormData) {
-  const h = await headers();
-  const session = await getSessionOrRedirect();
-  const rateLimitError = await enforceActionRateLimit(
-    session.user.id,
+  const { h, bootstrap, bootstrapError, rate } = await getBootstrapAndRateLimit(
     'update-note',
     60_000,
     20,
   );
-  if (rateLimitError) return rateLimitError;
+  redirectIfUnauthenticated(bootstrap, bootstrapError);
+  const limited = rateLimitError(rate);
+  if (limited) return limited;
+  const { permissions } = bootstrap;
 
-  const { permissions } = await getMyPermissionsFromApi(h);
   if (!permissions.notes.includes('update')) {
     return { error: 'You do not have permission to update notes.' };
   }
@@ -130,7 +155,7 @@ export async function updateNoteAction(noteId: string, formData: FormData) {
       requestHeaders: h,
     });
   } catch (error) {
-    return toActionError(error, 'Could not update the note.');
+    return toNoteActionError(error, 'Could not update the note.');
   }
 
   revalidatePath('/dashboard/notes');
@@ -138,17 +163,16 @@ export async function updateNoteAction(noteId: string, formData: FormData) {
 }
 
 export async function deleteNoteAction(noteId: string) {
-  const h = await headers();
-  const session = await getSessionOrRedirect();
-  const rateLimitError = await enforceActionRateLimit(
-    session.user.id,
+  const { h, bootstrap, bootstrapError, rate } = await getBootstrapAndRateLimit(
     'delete-note',
     60_000,
     10,
   );
-  if (rateLimitError) return rateLimitError;
+  redirectIfUnauthenticated(bootstrap, bootstrapError);
+  const limited = rateLimitError(rate);
+  if (limited) return limited;
+  const { permissions } = bootstrap;
 
-  const { permissions } = await getMyPermissionsFromApi(h);
   if (!permissions.notes.includes('delete')) {
     return { error: 'You do not have permission to delete notes.' };
   }
@@ -159,24 +183,13 @@ export async function deleteNoteAction(noteId: string) {
       requestHeaders: h,
     });
   } catch (error) {
-    return toActionError(error, 'Could not delete the note.');
+    return toNoteActionError(error, 'Could not delete the note.');
   }
 
   revalidatePath('/dashboard/notes');
   return { success: true };
 }
 
-function toActionError(error: unknown, fallback: string): NoteActionError {
-  // APIError instances carry a human message from the API tier
-  // (NotFound -> "Note not found.", Forbidden -> ownership message).
-  if (
-    error &&
-    typeof error === 'object' &&
-    'message' in error &&
-    typeof (error as { message?: unknown }).message === 'string' &&
-    (error as { message: string }).message
-  ) {
-    return { error: (error as { message: string }).message };
-  }
-  return { error: fallback };
+function toNoteActionError(error: unknown, fallback: string): NoteActionError {
+  return toActionError(error, fallback);
 }

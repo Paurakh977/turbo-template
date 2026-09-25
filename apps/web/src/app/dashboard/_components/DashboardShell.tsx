@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { authClient, type Session } from '../../../lib/auth/auth-client';
@@ -68,11 +68,19 @@ export function DashboardShell({
   // Fetch the DB-authoritative role on mount and whenever the tab regains
   // focus/visibility, preferring it over the (possibly cached) session role
   // for role-derived UI. Degrades silently — the cached role still works.
+  // Debounced to 60s: rapid focus flapping (alt-tab, devtools,
+  // multi-window) used to fire 3 HTTP per event (useSession refetch +
+  // bootstrap + rate-check). Freshness loss is bounded — demotions still
+  // surface within a minute, and enforcement never depended on this poll.
+  const lastRefreshRef = useRef(0);
   useEffect(() => {
     if (!sessionUserId) return;
     let cancelled = false;
 
     const refresh = () => {
+      const now = Date.now();
+      if (now - lastRefreshRef.current < 60_000) return;
+      lastRefreshRef.current = now;
       getFreshRoleAction()
         .then((role) => {
           if (!cancelled && role) setFreshRole(role);

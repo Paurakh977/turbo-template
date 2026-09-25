@@ -4,7 +4,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { THEME_GRANT_NAME, LABS_GRANT_NAME } from '@repo/auth/permissions';
 import { parseRoles } from '@repo/auth/roles';
 import { callInternalApi } from '../../../lib/server/internal-api';
-import { isAPIError } from 'better-auth/api';
+import { classifyApiError } from '../../../lib/server/api-errors';
 
 type AuditListingResponse = {
   logs: Array<{
@@ -252,9 +252,11 @@ type Props = {
 };
 
 export default async function AuditLogPage(props: Props) {
-  await requireAdmin();
+  const [searchParams, reqHeaders] = await Promise.all([
+    props.searchParams,
+    headers(),
+  ]);
 
-  const searchParams = await props.searchParams;
   const requestedPage =
     typeof searchParams.page === 'string'
       ? Number.parseInt(searchParams.page, 10)
@@ -267,25 +269,35 @@ export default async function AuditLogPage(props: Props) {
 
   const take = 50;
 
-  // Architecture B: the listing (user search, OR clauses, pagination and
-  // identity resolution) is computed by the API tier in one call.
-  // Rate limiting is per-IP, so heavy multi-tab use shares one bucket - a
-  // 429 here is transient and must render guidance, not a crash boundary.
-  let listing: Awaited<
-    ReturnType<typeof callInternalApi<AuditListingResponse>>
-  >;
-  try {
-    listing = await callInternalApi<AuditListingResponse>('/api/admin/audit-logs', {
-      requestHeaders: await headers(),
+  // Parallelize requireAdmin and audit log fetch. Both share the same request headers. If requireAdmin redirects
+  // (unauthenticated or non-admin), its redirect exception takes precedence
+  // because auditPromise catches its own error until auth settles.
+  const auditPromise = callInternalApi<AuditListingResponse>(
+    '/api/admin/audit-logs',
+    {
+      requestHeaders: reqHeaders,
       query: {
         q: q || undefined,
         action: filterAction,
         page,
       },
       timeoutMs: 10_000,
-    });
-  } catch (error) {
-    if (isAPIError(error) && error.status === 429) {
+    },
+  ).catch((err: unknown) => ({ __error: err }));
+
+  const [, auditResult] = await Promise.all([
+    requireAdmin(),
+    auditPromise,
+  ]);
+
+  let listing: AuditListingResponse;
+  if ('__error' in auditResult) {
+    const error = auditResult.__error;
+    // Use the centralized classifier. better-call APIError carries the
+    // string token in `status` ("TOO_MANY_REQUESTS") and the numeric code in
+    // `statusCode` (429) — a hand-rolled `error.status === 429` is always
+    // false and the inline card could never render.
+    if (classifyApiError(error) === 'rate-limited') {
       return (
         <div className="min-h-[60vh] flex items-center justify-center px-4">
           <div className="max-w-md w-full rounded-2xl border border-border/70 bg-card/70 p-6 shadow-sm text-center">
@@ -301,6 +313,8 @@ export default async function AuditLogPage(props: Props) {
       );
     }
     throw error;
+  } else {
+    listing = auditResult;
   }
 
   const { logs, total, page: currentPage, totalPages, usersById } = listing;

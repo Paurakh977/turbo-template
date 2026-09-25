@@ -1,6 +1,5 @@
 'use server';
 
-import { isAPIError } from 'better-auth/api';
 import { headers } from 'next/headers';
 import { getAdminUserFromApi, sendVerificationEmailFromApi } from '../../lib/server/auth-http';
 import { canActOn, getPrimaryRole } from '@repo/roles';
@@ -11,16 +10,16 @@ import {
   checkServerActionRateLimit,
   getServerActionRateLimitMessage,
 } from '../../lib/server/server-action-rate-limit';
+import { toActionErrorMessage } from '../../lib/server/api-errors';
 
 type ActionResult = { success: boolean } | { error: string };
 
-async function enforceRateLimit(
-  identifier: string,
-  action: string,
-): Promise<ActionResult | null> {
+async function checkResendRateLimit(): Promise<ActionResult | null> {
+  // No identifier — the limiter derives the bucket from the session
+  // (see server-action-rate-limit.ts), so callers can fire this in parallel
+  // with requireAdmin instead of waiting for the session first.
   const result = await checkServerActionRateLimit({
-    scope: `admin:${action}`,
-    identifier,
+    scope: 'admin:resend-verification',
     windowMs: 60_000,
     max: 5,
     failOpen: false,
@@ -49,9 +48,14 @@ async function enforceRateLimit(
 export async function resendVerificationEmailAction(
   userId: string,
 ): Promise<ActionResult> {
-  const session = await requireAdmin();
+  // requireAdmin (GET get-session) and the rate-check (POST rate-limit) are
+  // independent — same cookies, server-derived identity — so run them in
+  // parallel (~1 wall RTT saved).
+  const [session, rateLimitError] = await Promise.all([
+    requireAdmin(),
+    checkResendRateLimit(),
+  ]);
 
-  const rateLimitError = await enforceRateLimit(session.user.id, 'resend-verification');
   if (rateLimitError) return rateLimitError;
 
   if (!userId) return { error: 'Invalid user.' };
@@ -59,9 +63,11 @@ export async function resendVerificationEmailAction(
   // Admin-guarded lookup served by the API tier (Better Auth admin plugin).
   // getAdminUserFromApi maps 404 to null; other failures (API down, 403)
   // must NOT be reported as "User not found" - surface them honestly.
+  // One headers() read reused for the lookup AND getAppBaseUrl below.
+  const h = await headers();
   let target: Awaited<ReturnType<typeof getAdminUserFromApi>> = null;
   try {
-    target = await getAdminUserFromApi(userId, await headers());
+    target = await getAdminUserFromApi(userId, h);
   } catch (error) {
     console.error('[Admin] user lookup failed:', error);
     return {
@@ -87,7 +93,7 @@ export async function resendVerificationEmailAction(
     return { error: 'This user has already verified their email.' };
   }
 
-  const baseUrl = await getAppBaseUrl();
+  const baseUrl = await getAppBaseUrl(h);
 
   // IMPORTANT: call WITHOUT headers — the unauthenticated path is
   // enumeration-safe (returns the same response for unknown emails), while
@@ -101,10 +107,10 @@ export async function resendVerificationEmailAction(
     });
     return { success: true };
   } catch (error) {
-    const message =
-      isAPIError(error) && typeof error.message === 'string'
-        ? error.message
-        : 'Could not send the verification email. Please try again.';
+    const message = toActionErrorMessage(
+      error,
+      'Could not send the verification email. Please try again.',
+    );
     console.error('[Admin] resendVerificationEmailAction failed:', error);
     return { error: message };
   }
