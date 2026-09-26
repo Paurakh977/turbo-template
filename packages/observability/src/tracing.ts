@@ -23,15 +23,23 @@ export async function withSpan<T>(
   return tracer.startActiveSpan(name, options ?? {}, async (span) => {
     try {
       const result = await fn(span);
-      span.setStatus({ code: SpanStatusCode.OK });
+      // isRecording() guards — if the parent context ended first (client
+      // abort, upstream timeout under saturation), late mutations warn
+      // "ended Span". Skipped writes were never exported anyway; live-span
+      // output is unchanged.
+      if (span.isRecording()) {
+        span.setStatus({ code: SpanStatusCode.OK });
+      }
       return result;
     } catch (error) {
-      span.setStatus({
-        code: SpanStatusCode.ERROR,
-        message: error instanceof Error ? error.message : String(error),
-      });
-      if (error instanceof Error) {
-        span.recordException(error);
+      if (span.isRecording()) {
+        span.setStatus({
+          code: SpanStatusCode.ERROR,
+          message: error instanceof Error ? error.message : String(error),
+        });
+        if (error instanceof Error) {
+          span.recordException(error);
+        }
       }
       throw error;
     } finally {
@@ -46,7 +54,8 @@ export async function withSpan<T>(
  */
 export function recordError(error: Error | unknown, message?: string): void {
   const span = trace.getActiveSpan();
-  if (!span) return;
+  // Skip ended spans (see withSpan above) — same reasoning.
+  if (!span?.isRecording()) return;
   if (error instanceof Error) {
     span.recordException(error);
     span.setStatus({

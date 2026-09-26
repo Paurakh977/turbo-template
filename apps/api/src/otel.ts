@@ -17,6 +17,9 @@ import { NestInstrumentation } from '@opentelemetry/instrumentation-nestjs-core'
 import { IORedisInstrumentation } from '@opentelemetry/instrumentation-ioredis';
 import { PgInstrumentation } from '@opentelemetry/instrumentation-pg';
 import { createServiceResource } from '@repo/observability';
+import { Resource } from '@opentelemetry/resources';
+import { ATTR_SERVICE_INSTANCE_ID } from '@opentelemetry/semantic-conventions';
+import cluster from 'node:cluster';
 import fs from 'node:fs';
 import type { Span } from '@opentelemetry/api';
 
@@ -65,7 +68,21 @@ function bootTelemetry() {
     serviceNamespace,
     serviceVersion,
     environment,
-  });
+    // Per-worker instance identity (THE multi-worker metrics
+    // fix). With API_WORKERS > 1 every worker pushes identically-named
+    // cumulative counters; without an instance id Prometheus merges them into
+    // one jagged series and rate() misreads inter-worker decreases as counter
+    // resets — inflating request-rate panels ~7x (observed phantom 6.68K
+    // req/s vs ~930 RPS true k6 load). Distinct instance ids keep every
+    // worker's series separate so sums/rates/quantiles are exact, and
+    // traces/logs stay attributable per worker. Harmless at 1 worker.
+  }).merge(
+    new Resource({
+      [ATTR_SERVICE_INSTANCE_ID]: cluster.worker
+        ? `api-worker-${cluster.worker.id}`
+        : `api-single-${process.pid}`,
+    }),
+  );
 
   // ─── OTLP Endpoint ─────────────────────────────────────────────────────
   // Required from .env. Host runs rewrite the docker hostname to localhost.
@@ -178,6 +195,8 @@ function bootTelemetry() {
     }
   };
 
-  process.on('SIGTERM', shutdown);
-  process.on('SIGINT', shutdown);
+  // once (not on): Nest enableShutdownHooks + cluster worker drain also
+  // react to the same signal; double-invoking sdk.shutdown warns.
+  process.once('SIGTERM', shutdown);
+  process.once('SIGINT', shutdown);
 }

@@ -34,6 +34,11 @@ export class ObservabilityInterceptor implements NestInterceptor {
     const req = http.getRequest<Request>();
     const res = http.getResponse<Response>();
 
+    // The framework-owned server span may already be ended when these
+    // deferred callbacks run (slow PG/checkpoint, client abort, upstream
+    // timeout) — OTel keeps ended spans in context, so mutating without
+    // isRecording() spams "ended Span" warnings. Guarding drops only those
+    // invalid late writes; every live-span attribute is byte-identical.
     const activeSpan = trace.getActiveSpan();
 
     // Derive route template (e.g. /api/notes/:id) and feature name.
@@ -49,7 +54,7 @@ export class ObservabilityInterceptor implements NestInterceptor {
 
     const feature = this.extractFeature(rawPath);
 
-    if (activeSpan) {
+    if (activeSpan?.isRecording()) {
       activeSpan.setAttribute(HttpAttributes.ROUTE_TEMPLATE, routeTemplate);
       activeSpan.setAttribute(AppAttributes.FEATURE, feature);
     }
@@ -59,7 +64,7 @@ export class ObservabilityInterceptor implements NestInterceptor {
         next: () => {
           const statusCode = res.statusCode || 200;
 
-          if (activeSpan) {
+          if (activeSpan?.isRecording()) {
             activeSpan.setAttribute('http.response.status_code', statusCode);
             if (statusCode >= 400) {
               activeSpan.setStatus({
@@ -76,7 +81,7 @@ export class ObservabilityInterceptor implements NestInterceptor {
         const statusCode =
           error instanceof HttpException ? error.getStatus() : 500;
 
-        if (activeSpan) {
+        if (activeSpan?.isRecording()) {
           activeSpan.setAttribute('http.response.status_code', statusCode);
           activeSpan.setStatus({
             code: SpanStatusCode.ERROR,

@@ -25,9 +25,11 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
     const responseBody = this.normalizeMessage(exception, status);
 
-    // Enrich the active OpenTelemetry span
+    // Enrich the active OpenTelemetry span. P5: isRecording() guard — the
+    // server span may be ended by the time the filter runs under saturation;
+    // late writes would warn "ended Span" (see observability.interceptor.ts).
     const activeSpan = trace.getActiveSpan();
-    if (activeSpan) {
+    if (activeSpan?.isRecording()) {
       activeSpan.setAttribute('http.response.status_code', status);
       activeSpan.setAttribute(
         'error.type',
@@ -54,6 +56,24 @@ export class HttpExceptionFilter implements ExceptionFilter {
         err: exception instanceof Error ? exception : undefined,
         msg: `${request.method} ${request.url} ${status}`,
       });
+    }
+
+    // Late-filter guard: if headers/body already sent (SSE, proxied stream,
+    // auth middleware wrote first), writing again throws ERR_HTTP_HEADERS_SENT.
+    // Nest's BaseExceptionFilter checks isHeadersSent() the same way.
+    if (response.headersSent || response.writableEnded) {
+      this.logger.warn({
+        method: request.method,
+        url: request.url,
+        status,
+        msg: 'Skipping error response, headers already sent',
+      });
+      try {
+        response.end();
+      } catch {
+        // Socket already torn down — nothing left to do.
+      }
+      return;
     }
 
     response.status(status).json({

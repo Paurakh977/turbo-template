@@ -6,7 +6,27 @@ groups:
         expr: rate(http_server_request_duration_seconds_count[5m])
       - record: api:http_error_rate:5m
         expr: rate(http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[5m])
+      # Job-aggregated helpers so alerts + overview gauges share ONE
+      # definition (was copy-pasted in application.yml + 01 + 02).
+      - record: api:http_request_rate:job:5m
+        expr: sum by (job) (api:http_request_rate:5m)
+      - record: api:http_error_ratio:job:5m
+        expr: |
+          sum by (job) (api:http_error_rate:5m)
+          / (sum by (job) (api:http_request_rate:5m) > 0)
+      # sum by(le, ...) BEFORE quantile: per-series quantile without
+      # aggregation is NaN-prone and per-worker (not global). Preserves
+      # route/method dims for drilldown; aggregate alerts use sum by(job).
       - record: api:http_request_duration_p95:5m
-        expr: histogram_quantile(0.95, rate(http_server_request_duration_seconds_bucket[5m]))
+        expr: histogram_quantile(0.95, sum by (le, job, route, http_route, http_request_method) (rate(http_server_request_duration_seconds_bucket[5m])))
       - record: api:http_request_duration_p99:5m
-        expr: histogram_quantile(0.99, rate(http_server_request_duration_seconds_bucket[5m]))
+        expr: histogram_quantile(0.99, sum by (le, job, route, http_route, http_request_method) (rate(http_server_request_duration_seconds_bucket[5m])))
+      # Session-cache (Better Auth secondary storage) hit ratio.
+      # hits/(hits+misses); no samples -> no series (alerts guard with count).
+      - record: api:session_cache_hit_ratio:5m
+        expr: |
+          sum by (job) (rate(secondary_storage_hits_total[5m]))
+          / clamp_min(sum by (job) (rate(secondary_storage_hits_total[5m]) + rate(secondary_storage_misses_total[5m])), 0.0001)
+      # Audit DLQ growth rate (terminal drops after retries).
+      - record: api:audit_dlq_rate:5m
+        expr: sum by (job) (rate(audit_queue_dlq_total[5m]))

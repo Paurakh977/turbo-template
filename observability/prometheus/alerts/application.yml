@@ -2,9 +2,10 @@ groups:
   - name: application
     rules:
       - alert: HighErrorRate
+        # Consumes the recording rule (single definition in
+        # recording-rules.yml instead of a copy-pasted rate expression).
         expr: |
-          sum(rate(http_server_request_duration_seconds_count{job=~"turbo-template/api|api",http_response_status_code=~"5.."}[5m]))
-          / sum(rate(http_server_request_duration_seconds_count{job=~"turbo-template/api|api"}[5m]))
+          sum by (job) (api:http_error_ratio:job:5m{job=~"turbo-template/api|api"})
           > 0.05
         for: 5m
         labels:
@@ -16,8 +17,9 @@ groups:
           dashboard: "/d/api-performance"
 
       - alert: HighLatencyP95
+        # Consumes the recording rule.
         expr: |
-          histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{job=~"turbo-template/api|api"}[5m])))
+          max by (job) (api:http_request_duration_p95:5m{job=~"turbo-template/api|api"})
           > 0.5
         for: 5m
         labels:
@@ -27,8 +29,9 @@ groups:
           summary: "API p95 latency above 500ms"
 
       - alert: HighLatencyP99
+        # Consumes the recording rule.
         expr: |
-          histogram_quantile(0.99, sum by (le) (rate(http_server_request_duration_seconds_bucket{job=~"turbo-template/api|api"}[5m])))
+          max by (job) (api:http_request_duration_p99:5m{job=~"turbo-template/api|api"})
           > 1
         for: 5m
         labels:
@@ -56,3 +59,88 @@ groups:
           severity: warning
         annotations:
           summary: "Exporter {{ $labels.job }} is down"
+
+      # Throttler Redis fail-open alert.
+      # The throttler silently degrades to per-instance memory when Redis is
+      # unavailable. A single transient blip is tolerated for 2m before alerting.
+      - alert: ThrottlerRedisFailOpen
+        expr: |
+          rate(throttler_fallback_total{job=~"turbo-template/api|api"}[5m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+          service: api
+        annotations:
+          summary: "Throttler is failing open to per-instance memory (Redis unavailable)"
+          description: >
+            The Redis-backed NestJS throttler has fallen back to in-process
+            memory counting. Rate-limiting is now per-replica instead of global.
+            Check Redis connectivity and throttler_redis_errors_total for details.
+
+      # Event-loop saturation (per-worker ELU from metrics.service).
+      # Sustained utilization > 0.8 at the RPS ceiling means CPU-bound:
+      # scale API_WORKERS (cluster) or replicas — see cluster decision notes.
+      - alert: EventLoopSaturated
+        expr: |
+          max by (job) (nodejs_eventloop_utilization_ratio{job=~"turbo-template/api|api"}) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          service: api
+        annotations:
+          summary: "Node.js event loop saturated (>80% utilization)"
+          description: >
+            A worker event loop is CPU-bound. If RPS is at ceiling, scale
+            API_WORKERS or replicas. Check the 02 dashboard ELU-by-worker
+            panel and Pyroscope CPU profile.
+          dashboard: "/d/api-performance"
+
+      # Audit DLQ growing — terminal audit drops after retries.
+      # Any sustained DLQ rate means rows are being lost; check PG writes.
+      - alert: AuditQueueDLQGrowing
+        expr: |
+          sum by (job) (api:audit_dlq_rate:5m{job=~"turbo-template/api|api"}) > 0
+        for: 5m
+        labels:
+          severity: critical
+          service: api
+        annotations:
+          summary: "Audit queue DLQ is growing (audit rows being dropped)"
+          description: >
+            Terminal audit-write failures after retries. Check PostgreSQL
+            write latency, audit_queue_drain_duration_seconds, and the DLQ
+            error logs for dropped payloads.
+          dashboard: "/d/db-redis"
+
+      # Better Auth secondary-storage (Redis L1 session cache)
+      # falling back to DB/memory. Sustained fallback = Redis path broken.
+      - alert: SecondaryStorageFallback
+        expr: |
+          sum by (job) (rate(secondary_storage_fallback_total{job=~"turbo-template/api|api"}[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: api
+        annotations:
+          summary: "Session cache falling back to database (Redis path degraded)"
+          description: >
+            secondaryStorage get/set/delete is failing and falling back.
+            Check Redis connectivity, memory, and the api logs for
+            '[Redis Error] secondaryStorage' lines.
+          dashboard: "/d/auth-security"
+
+      # DB pool acquire errors — clients failing to get connections.
+      - alert: PoolAcquireErrors
+        expr: |
+          sum by (job) (rate(db_pool_acquire_errors_total{job=~"turbo-template/api|api"}[5m])) > 0
+        for: 2m
+        labels:
+          severity: warning
+          service: api
+        annotations:
+          summary: "Database pool acquire errors detected"
+          description: >
+            Connections failing to check out from the Prisma pool. Check
+            db_pool_waiting_requests, PgBouncer SHOW POOLS, and
+            POSTGRES_MAX_CONNECTIONS vs PGBOUNCER_DEFAULT_POOL_SIZE math.
+          dashboard: "/d/db-redis"

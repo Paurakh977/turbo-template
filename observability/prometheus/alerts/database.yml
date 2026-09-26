@@ -25,3 +25,46 @@ groups:
           severity: warning
         annotations:
           summary: "PostgreSQL cache hit ratio below 95%"
+
+      # Application-level pool saturation alert.
+      # Fires when clients are queuing for a connection — a leading indicator
+      # of pool exhaustion before pg_stat_activity-based alerts trigger.
+      - alert: PostgresPoolQueueSaturated
+        expr: |
+          sum by (job) (db_pool_waiting_requests{job=~"turbo-template/api|api"}) > 5
+        for: 2m
+        labels:
+          severity: warning
+          service: api
+        annotations:
+          summary: "Database connection pool queue has {{ $value }} waiting requests"
+          description: >
+            More than 5 requests are waiting for a database connection.
+            This indicates pool exhaustion — consider increasing DATABASE_POOL_MAX
+            or deploying PgBouncer to multiplex connections.
+          dashboard: "/d/db-redis"
+
+      # Audit queue backlog alert.
+      # A queue depth above 500 means the background drain is falling behind
+      # or PG is under sustained write pressure.
+      # Note: `max`, not `sum`. audit_queue_depth is a GLOBAL gauge: every
+      # API worker counts the same audit_outbox PENDING rows
+      # (refreshDepthGauge) and exports the identical value with only the
+      # per-worker instance labels differing. `sum by (job)` multiplies the
+      # true depth by the worker count (4 workers x 150 = 600 false fire).
+      # Counters/rates elsewhere in this file stay summed — they are
+      # additive per-worker series; this replicated gauge is not.
+      - alert: AuditQueueBacklogHigh
+        expr: |
+          max by (job) (audit_queue_depth{job=~"turbo-template/api|api"}) > 500
+        for: 5m
+        labels:
+          severity: warning
+          service: api
+        annotations:
+          summary: "Audit queue depth is {{ $value }} items"
+          description: >
+            The audit outbox backlog (global PENDING count, max across workers)
+            has exceeded 500 items.
+            Check PostgreSQL write latency and the audit_queue_drain_duration_seconds
+            histogram for processing stalls.

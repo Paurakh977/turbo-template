@@ -2,7 +2,11 @@ groups:
   - name: redis
     rules:
       - alert: RedisMemoryExhaustion
-        expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.9
+        # clamp_min guards ÷0 — redis_memory_max_bytes is 0 when no
+        # maxmemory policy is set (our prod default until REDIS_MAXMEMORY
+        # lands; see .env.example). Without the clamp the rule evaluates
+        # +Inf/NaN and pages spuriously on every fresh Redis.
+        expr: redis_memory_used_bytes / clamp_min(redis_memory_max_bytes, 1) > 0.9
         for: 5m
         labels:
           severity: critical

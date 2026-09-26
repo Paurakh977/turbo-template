@@ -9,6 +9,8 @@ import helmet from 'helmet';
 import compression from 'compression';
 
 import { AppModule } from './app.module';
+import { runWithCluster } from './cluster';
+import { requestContextMiddleware } from './common/request-context';
 import { HttpExceptionFilter } from './common/http-exception.filter';
 import {
   MetricsService,
@@ -32,6 +34,13 @@ async function bootstrap() {
   app.set('trust proxy', 1);
 
   const metricsService = app.get(MetricsService);
+
+  // ─── Request Context (ALS) — MUST be the first middleware ───────────────
+  // Establishes the per-request AsyncLocalStorage store (requestId + session
+  // memo) that the whole chain — guards, interceptors, handlers — runs
+  // inside. See common/request-context.ts. Read-only toward auth: it creates
+  // the store only; RequestContextInterceptor fills it after the guard.
+  app.use(requestContextMiddleware);
 
   // ─── Catch-All HTTP Metrics Middleware ─────────────────────────────────
   // Captures ALL responses including 404s (unmatched routes) and 502s that
@@ -174,4 +183,6 @@ async function bootstrap() {
   logger.info(`API running on http://${host}:${port}`);
 }
 
-void bootstrap();
+// API_WORKERS=1 (default) runs the single-process bootstrap exactly as
+// before; >1 forks cluster workers sharing the listen port (see cluster.ts).
+void runWithCluster(bootstrap);
