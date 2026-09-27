@@ -1,0 +1,14 @@
+# PgBouncer userlist.txt — managed by the entrypoint script
+#
+# SECURITY: This file is generated at container start from environment
+# variables (DB_USER / DB_PASSWORD) by the edoburu/pgbouncer image's
+# entrypoint. The actual file in the container is populated at runtime;
+# this placeholder is bind-mounted and overwritten by the entrypoint.
+#
+# Format: "username" "md5-hashed-or-plain-password"
+# Example (plain text, for local dev only):
+#   "myapp" "supersecretpassword"
+#
+# In production the edoburu/pgbouncer image reads DB_USER and DB_PASSWORD
+# environment variables and generates the md5 hash automatically.
+# You do NOT need to edit this file manually when using the compose setup.

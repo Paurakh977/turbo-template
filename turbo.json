@@ -22,6 +22,7 @@
         "WEB_PORT",
         "DATABASE_URL",
         "REDIS_URL",
+        "AUDIT_OUTBOX_POLL_DISABLED",
         "BETTER_AUTH_SECRET",
         "BETTER_AUTH_URL",
         "TRUSTED_ORIGINS",
@@ -71,7 +72,8 @@
         "NEXT_PUBLIC_FARO_COLLECTOR_URL",
         "NEXT_PUBLIC_FARO_APP_NAME",
         "NEXT_PUBLIC_FARO_APP_VERSION",
-        "NEXT_PUBLIC_FARO_ENVIRONMENT"
+        "NEXT_PUBLIC_FARO_ENVIRONMENT",
+        "API_WORKERS"
       ]
     },
     "start": {
@@ -82,6 +84,7 @@
         "PORT",
         "DATABASE_URL",
         "REDIS_URL",
+        "AUDIT_OUTBOX_POLL_DISABLED",
         "BETTER_AUTH_SECRET",
         "BETTER_AUTH_URL",
         "TRUSTED_ORIGINS",
@@ -104,7 +107,8 @@
         "NEXT_PUBLIC_FARO_COLLECTOR_URL",
         "NEXT_PUBLIC_FARO_APP_NAME",
         "NEXT_PUBLIC_FARO_APP_VERSION",
-        "NEXT_PUBLIC_FARO_ENVIRONMENT"
+        "NEXT_PUBLIC_FARO_ENVIRONMENT",
+        "API_WORKERS"
       ]
     },
     "build": {
@@ -143,6 +147,7 @@
       "passThroughEnv": [
         "DATABASE_URL",
         "REDIS_URL",
+        "AUDIT_OUTBOX_POLL_DISABLED",
         "BETTER_AUTH_SECRET",
         "BETTER_AUTH_URL",
         "APP_NAME"
@@ -152,6 +157,7 @@
       "passThroughEnv": [
         "DATABASE_URL",
         "REDIS_URL",
+        "AUDIT_OUTBOX_POLL_DISABLED",
         "BETTER_AUTH_SECRET",
         "BETTER_AUTH_URL",
         "APP_NAME",
@@ -178,6 +184,7 @@
         "NODE_OPTIONS",
         "DATABASE_URL",
         "REDIS_URL",
+        "AUDIT_OUTBOX_POLL_DISABLED",
         "REDIS_PREFIX",
         "BETTER_AUTH_SECRET",
         "BETTER_AUTH_URL",
@@ -202,6 +209,7 @@
         "NODE_OPTIONS",
         "DATABASE_URL",
         "REDIS_URL",
+        "AUDIT_OUTBOX_POLL_DISABLED",
         "REDIS_PREFIX",
         "BETTER_AUTH_SECRET",
         "BETTER_AUTH_URL",
@@ -232,12 +240,13 @@
     },
     "db:generate": {
       "cache": false,
-      "passThroughEnv": ["DATABASE_URL"]
+      "passThroughEnv": ["DATABASE_URL", "DIRECT_URL"]
     },
     "db:push": {
       "cache": false,
       "passThroughEnv": [
         "DATABASE_URL",
+        "DIRECT_URL",
         "NODE_TLS_REJECT_UNAUTHORIZED"
       ]
     },
@@ -246,17 +255,18 @@
       "persistent": true,
       "passThroughEnv": [
         "DATABASE_URL",
+        "DIRECT_URL",
         "NODE_TLS_REJECT_UNAUTHORIZED"
       ]
     },
     "db:migrate:deploy": {
       "cache": false,
-      "passThroughEnv": ["DATABASE_URL"]
+      "passThroughEnv": ["DATABASE_URL", "DIRECT_URL"]
     },
     "db:studio": {
       "cache": false,
       "persistent": true,
-      "passThroughEnv": ["DATABASE_URL"]
+      "passThroughEnv": ["DATABASE_URL", "DIRECT_URL"]
     },
     "auth:generate": {
       "cache": false

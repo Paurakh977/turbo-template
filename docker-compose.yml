@@ -16,6 +16,12 @@ x-proxy-base: &proxy-base
     NGINX_TRUSTED_PROXIES: ${NGINX_TRUSTED_PROXIES:-127.0.0.0/8}
     NGINX_REAL_IP_HEADER: ${NGINX_REAL_IP_HEADER:-X-Forwarded-For}
     NGINX_CONN_LIMIT: ${NGINX_CONN_LIMIT:-20}
+    NGINX_AUTH_RATE: ${NGINX_AUTH_RATE:-300r/m}
+    NGINX_API_RATE: ${NGINX_API_RATE:-10r/s}
+    NGINX_GENERAL_RATE: ${NGINX_GENERAL_RATE:-30r/s}
+    NGINX_AUTH_BURST: ${NGINX_AUTH_BURST:-10}
+    NGINX_API_BURST: ${NGINX_API_BURST:-20}
+    NGINX_GENERAL_BURST: ${NGINX_GENERAL_BURST:-50}
   ports:
     - '${PROXY_HTTP_PORT:?PROXY_HTTP_PORT is required}:80'
     - '${PROXY_HTTPS_PORT:?PROXY_HTTPS_PORT is required}:443'
@@ -41,6 +47,35 @@ services:
     profiles: ['prod', 'dev', 'local']
     image: postgres:16-alpine
     restart: unless-stopped
+    # P1 production tuning (env-driven): server-level `-c` flags interpolated
+    # from POSTGRES_* (documented in .env.example; k6 values in .env.k6).
+    # Replaces the image CMD only — the entrypoint (initdb, auth setup) still
+    # runs. Changing shared_buffers/max_connections/wal_buffers requires a
+    # container recreate (data volume is preserved). Wire protocol, auth, and
+    # storage layout are untouched, so Prisma 7, PgBouncer (transaction mode),
+    # migrations (DIRECT_URL), and exporters are all unaffected.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=${POSTGRES_SHARED_BUFFERS:-512MB}
+      - -c
+      - effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-4GB}
+      - -c
+      - max_connections=${POSTGRES_MAX_CONNECTIONS:-200}
+      - -c
+      - checkpoint_timeout=${POSTGRES_CHECKPOINT_TIMEOUT:-15min}
+      - -c
+      - max_wal_size=${POSTGRES_MAX_WAL_SIZE:-2GB}
+      - -c
+      - min_wal_size=${POSTGRES_MIN_WAL_SIZE:-512MB}
+      - -c
+      - wal_buffers=${POSTGRES_WAL_BUFFERS:-16MB}
+      - -c
+      - checkpoint_completion_target=${POSTGRES_CHECKPOINT_COMPLETION_TARGET:-0.9}
+      - -c
+      - work_mem=${POSTGRES_WORK_MEM:-8MB}
+      - -c
+      - maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-128MB}
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
@@ -77,7 +112,10 @@ services:
     profiles: ['prod', 'dev', 'local']
     image: redis:7-alpine
     restart: unless-stopped
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    # Maxmemory bound keeps the RedisMemoryExhaustion alert denominator non-zero
+    # and makes bursts evict (allkeys-lru, like the test profile) instead of OOM-killing.
+    # Evicted session rows fall back to Postgres via secondaryStorage (SecondaryStorageFallback alert).
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required} --maxmemory ${REDIS_MAXMEMORY:-256mb} --maxmemory-policy allkeys-lru
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
     expose:
@@ -125,6 +163,71 @@ services:
         aliases:
           - pgadmin
 
+  pgbouncer:
+    # PgBouncer connection pooler in transaction mode.
+    # Routes application database traffic through a shared server-connection
+    # pool, reducing Postgres connection count from O(replicas * pool_max) to
+    # a fixed default_pool_size (25). See pgbouncer/pgbouncer.ini for tuning.
+    #
+    # IMPORTANT: migrations MUST bypass PgBouncer (DIRECT_URL → postgres:5432)
+    # because `prisma migrate deploy` uses SET ROLE and advisory locks that
+    # require a dedicated non-pooled connection throughout the migration.
+    profiles: ['prod', 'dev']
+    # Pinned 2026-09: v1.25.1-p0 (PgBouncer 1.25.1, Alpine 3.22/3.23).
+    # Supports max_prepared_statements for Prisma Pg adapter extended protocol
+    # in transaction mode. `:latest` is intentionally not used — reproducible
+    # template requires a reviewed digest/tag. Healthcheck uses pg_isready
+    # (present at /usr/bin/pg_isready in this image, verified).
+    image: edoburu/pgbouncer:v1.25.1-p0
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # edoburu/pgbouncer reads these and generates /etc/pgbouncer/userlist.txt
+      DB_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:?POSTGRES_DB is required}
+      # Pool configuration — override here to keep pgbouncer.ini as a template.
+      # Values must match pgbouncer.ini; env takes precedence in edoburu image.
+      POOL_MODE: transaction
+      AUTH_TYPE: scram-sha-256
+      # Fallbacks match .env.example (500/25/10/5) so unset env still yields
+      # a consistent 25+5=30 < 200 peak. See .env.example pool-math header.
+      MAX_CLIENT_CONN: ${PGBOUNCER_MAX_CLIENT_CONN:-500}
+      DEFAULT_POOL_SIZE: ${PGBOUNCER_DEFAULT_POOL_SIZE:-25}
+      MIN_POOL_SIZE: ${PGBOUNCER_MIN_POOL_SIZE:-10}
+      RESERVE_POOL_SIZE: ${PGBOUNCER_RESERVE_POOL_SIZE:-5}
+      RESERVE_POOL_TIMEOUT: 2
+      MAX_PREPARED_STATEMENTS: 200
+      SERVER_IDLE_TIMEOUT: 600
+      CLIENT_IDLE_TIMEOUT: 0
+      QUERY_WAIT_TIMEOUT: 15
+      STATS_USERS: ${POSTGRES_USER:?POSTGRES_USER is required}
+    expose:
+      - '6432'
+    ports:
+      # Loopback-only: host-side tools can reach PgBouncer for debugging.
+      - '127.0.0.1:${PGBOUNCER_PORT:-6432}:6432'
+    volumes:
+      - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'pg_isready -h 127.0.0.1 -p 6432 -U $${DB_USER} -d $${DB_NAME} || exit 1',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      app-network:
+        aliases:
+          - pgbouncer
+
   migrate:
     profiles: ['prod']
     image: template-turbo-migrate:prod
@@ -138,6 +241,7 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=public
+      DIRECT_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=public
     networks:
       app-network:
         aliases:
@@ -155,6 +259,10 @@ services:
         # NOTE: no DATABASE_URL build arg - the builder never opens a DB
         # connection, so credentials stay out of build cache/provenance.
     restart: unless-stopped
+    # Grace budget: audit queue drains ≤20s + HTTP drain + Redis/Prisma close
+    # + OTel flush. Must exceed SHUTDOWN_DRAIN_TIMEOUT_MS (20s) or SIGKILL
+    # truncates the drain mid-flush on deploy.
+    stop_grace_period: 30s
     depends_on:
       postgres:
         condition: service_healthy
@@ -162,11 +270,27 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
+      pgbouncer:
+        condition: service_healthy
     environment:
       NODE_ENV: production
       HOST: ${HOST:?HOST is required}
       PORT: ${PORT:?PORT is required}
-      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=public
+      # Application queries go through PgBouncer (transaction pool).
+      # Prisma Migrate / Studio use DIRECT_URL (postgres:5432) for advisory
+      # locks and SET ROLE that require a dedicated non-pooled connection.
+      # Node.js cluster workers for the single api container
+      # (apps/api/src/cluster.ts). API_WORKERS=1 (default) = single process
+      # (current behavior); >1 forks that many event loops sharing the port.
+      # NOTE: the Prisma pool is PER WORKER — two budgets (see
+      # apps/api/src/cluster.ts): workers × DATABASE_POOL_MAX must stay
+      # within PGBOUNCER_MAX_CLIENT_CONN, and the PgBouncer server peak
+      # (DEFAULT_POOL_SIZE + RESERVE_POOL_SIZE) below POSTGRES_MAX_CONNECTIONS.
+      # Prefer horizontal replicas for multi-host scaling; cluster only
+      # removes single-loop CPU saturation (proven by ELU ≥0.8).
+      API_WORKERS: ${API_WORKERS:-1}
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@pgbouncer:6432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=public&pgbouncer=true
+      DIRECT_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=public
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:?BETTER_AUTH_URL is required}
       NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?NEXT_PUBLIC_APP_URL is required}
@@ -319,6 +443,16 @@ services:
       # set NGINX_TRUSTED_PROXIES to your LB/CDN CIDRs when one is added later.
       NGINX_TRUSTED_PROXIES: ${NGINX_TRUSTED_PROXIES:-127.0.0.0/8}
       NGINX_REAL_IP_HEADER: ${NGINX_REAL_IP_HEADER:-X-Forwarded-For}
+      # NOTE: this `environment:` block shadows x-proxy-base's (YAML merge is
+      # shallow), so NGINX_CONN_LIMIT must be repeated here or the proxy
+      # always falls back to the entrypoint default (20).
+      NGINX_CONN_LIMIT: ${NGINX_CONN_LIMIT:-20}
+      NGINX_AUTH_RATE: ${NGINX_AUTH_RATE:-300r/m}
+      NGINX_API_RATE: ${NGINX_API_RATE:-10r/s}
+      NGINX_GENERAL_RATE: ${NGINX_GENERAL_RATE:-30r/s}
+      NGINX_AUTH_BURST: ${NGINX_AUTH_BURST:-10}
+      NGINX_API_BURST: ${NGINX_API_BURST:-20}
+      NGINX_GENERAL_BURST: ${NGINX_GENERAL_BURST:-50}
       API_UPSTREAM_HOST: api
       API_UPSTREAM_PORT: ${PORT:?PORT is required}
       WEB_UPSTREAM_HOST: web
@@ -372,11 +506,17 @@ services:
         condition: service_healthy
       migrate-dev:
         condition: service_completed_successfully
+      pgbouncer:
+        condition: service_healthy
     environment:
       NODE_ENV: development
       HOST: ${HOST:?HOST is required}
       PORT: ${PORT:?PORT is required}
-      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=public
+      # Application queries → PgBouncer; migrations use DIRECT_URL.
+      # Cluster workers (see prod api service). 1 = single process.
+      API_WORKERS: ${API_WORKERS:-1}
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@pgbouncer:6432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=public&pgbouncer=true
+      DIRECT_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=public
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:?BETTER_AUTH_URL is required}
       NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?NEXT_PUBLIC_APP_URL is required}
@@ -558,6 +698,15 @@ services:
       # set NGINX_TRUSTED_PROXIES to your LB/CDN CIDRs when one is added later.
       NGINX_TRUSTED_PROXIES: ${NGINX_TRUSTED_PROXIES:-127.0.0.0/8}
       NGINX_REAL_IP_HEADER: ${NGINX_REAL_IP_HEADER:-X-Forwarded-For}
+      # NOTE: this `environment:` block shadows x-proxy-base's (YAML merge is
+      # shallow), so NGINX_CONN_LIMIT must be repeated here (see `proxy`).
+      NGINX_CONN_LIMIT: ${NGINX_CONN_LIMIT:-20}
+      NGINX_AUTH_RATE: ${NGINX_AUTH_RATE:-300r/m}
+      NGINX_API_RATE: ${NGINX_API_RATE:-10r/s}
+      NGINX_GENERAL_RATE: ${NGINX_GENERAL_RATE:-30r/s}
+      NGINX_AUTH_BURST: ${NGINX_AUTH_BURST:-10}
+      NGINX_API_BURST: ${NGINX_API_BURST:-20}
+      NGINX_GENERAL_BURST: ${NGINX_GENERAL_BURST:-50}
       API_UPSTREAM_HOST: api-dev
       API_UPSTREAM_PORT: ${PORT:?PORT is required}
       WEB_UPSTREAM_HOST: web-dev
@@ -576,6 +725,15 @@ services:
       # set NGINX_TRUSTED_PROXIES to your LB/CDN CIDRs when one is added later.
       NGINX_TRUSTED_PROXIES: ${NGINX_TRUSTED_PROXIES:-127.0.0.0/8}
       NGINX_REAL_IP_HEADER: ${NGINX_REAL_IP_HEADER:-X-Forwarded-For}
+      # NOTE: this `environment:` block shadows x-proxy-base's (YAML merge is
+      # shallow), so NGINX_CONN_LIMIT must be repeated here (see `proxy`).
+      NGINX_CONN_LIMIT: ${NGINX_CONN_LIMIT:-20}
+      NGINX_AUTH_RATE: ${NGINX_AUTH_RATE:-300r/m}
+      NGINX_API_RATE: ${NGINX_API_RATE:-10r/s}
+      NGINX_GENERAL_RATE: ${NGINX_GENERAL_RATE:-30r/s}
+      NGINX_AUTH_BURST: ${NGINX_AUTH_BURST:-10}
+      NGINX_API_BURST: ${NGINX_API_BURST:-20}
+      NGINX_GENERAL_BURST: ${NGINX_GENERAL_BURST:-50}
       API_UPSTREAM_HOST: host.docker.internal
       API_UPSTREAM_PORT: ${PORT:?PORT is required}
       WEB_UPSTREAM_HOST: host.docker.internal
@@ -654,6 +812,10 @@ services:
     environment:
       NODE_ENV: test
       DATABASE_URL: postgresql://${TEST_POSTGRES_USER:-test_user}:${TEST_POSTGRES_PASSWORD:-test_password}@postgres-test:5432/${TEST_POSTGRES_DB:-test_db}?schema=public
+      # prisma.config.ts prefers DIRECT_URL for migrate/deploy.
+      # Without this, dotenv backfills DIRECT_URL from the mounted root .env
+      # (localhost) and migrations target the wrong server.
+      DIRECT_URL: postgresql://${TEST_POSTGRES_USER:-test_user}:${TEST_POSTGRES_PASSWORD:-test_password}@postgres-test:5432/${TEST_POSTGRES_DB:-test_db}?schema=public
     volumes:
       - .:/app
       - root-node_modules:/app/node_modules
@@ -815,6 +977,10 @@ services:
     environment:
       NODE_ENV: test
       DATABASE_URL: postgresql://${POSTGRES_USER:-e2e_user}:${POSTGRES_PASSWORD:-e2e_password}@postgres-e2e:5432/${POSTGRES_DB:-e2e_db}?schema=public
+      # prisma.config.ts prefers DIRECT_URL for migrate/deploy.
+      # Without this, dotenv backfills DIRECT_URL from the mounted root .env
+      # (localhost) and migrations target the wrong server.
+      DIRECT_URL: postgresql://${POSTGRES_USER:-e2e_user}:${POSTGRES_PASSWORD:-e2e_password}@postgres-e2e:5432/${POSTGRES_DB:-e2e_db}?schema=public
     volumes:
       - .:/app
       - root-node_modules:/app/node_modules

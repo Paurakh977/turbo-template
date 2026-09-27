@@ -161,6 +161,51 @@ if [ "$NGINX_CONN_LIMIT" -lt 1 ] || [ "$NGINX_CONN_LIMIT" -gt 100000 ]; then
   fail "NGINX_CONN_LIMIT must be a whole number (1-100000), got: \"$NGINX_CONN_LIMIT\""
 fi
 
+# ── Rate-limit tuning (per-IP zones + bursts) ───────────────────────────────
+# Prod-safe defaults mirror the historical hardcoded nginx.conf values. k6
+# single-IP runs raise these via .env.k6 so traffic reaches the backend
+# instead of 429ing at the edge.
+NGINX_AUTH_RATE="${NGINX_AUTH_RATE:-300r/m}"
+NGINX_API_RATE="${NGINX_API_RATE:-10r/s}"
+NGINX_GENERAL_RATE="${NGINX_GENERAL_RATE:-30r/s}"
+NGINX_AUTH_BURST="${NGINX_AUTH_BURST:-10}"
+NGINX_API_BURST="${NGINX_API_BURST:-20}"
+NGINX_GENERAL_BURST="${NGINX_GENERAL_BURST:-50}"
+
+assert_rate() {
+  # $1 = var name, $2 = value — nginx limit_req rate ("<int>r/s" or "<int>r/m").
+  case "$2" in
+    *r/s) num=${2%r/s} ;;
+    *r/m) num=${2%r/m} ;;
+    *) fail "$1 must be an nginx rate like \"10r/s\" or \"300r/m\", got: \"$2\"" ;;
+  esac
+  case "$num" in
+    '' | *[!0-9]* | [0-9][0-9][0-9][0-9][0-9][0-9][0-9]*)
+      fail "$1 must be an nginx rate like \"10r/s\" or \"300r/m\", got: \"$2\"" ;;
+  esac
+  if [ "$num" -lt 1 ] || [ "$num" -gt 1000000 ]; then
+    fail "$1 must be an nginx rate like \"10r/s\" or \"300r/m\", got: \"$2\""
+  fi
+}
+
+assert_burst() {
+  # $1 = var name, $2 = value — nginx limit_req burst (whole number 0-100000).
+  case "$2" in
+    '' | *[!0-9]* | [0-9][0-9][0-9][0-9][0-9][0-9][0-9]*)
+      fail "$1 must be a whole number (0-100000), got: \"$2\"" ;;
+  esac
+  if [ "$2" -gt 100000 ]; then
+    fail "$1 must be a whole number (0-100000), got: \"$2\""
+  fi
+}
+
+assert_rate "NGINX_AUTH_RATE" "$NGINX_AUTH_RATE"
+assert_rate "NGINX_API_RATE" "$NGINX_API_RATE"
+assert_rate "NGINX_GENERAL_RATE" "$NGINX_GENERAL_RATE"
+assert_burst "NGINX_AUTH_BURST" "$NGINX_AUTH_BURST"
+assert_burst "NGINX_API_BURST" "$NGINX_API_BURST"
+assert_burst "NGINX_GENERAL_BURST" "$NGINX_GENERAL_BURST"
+
 # ── Build real_ip config ──────────────────────────────────────────────────
 # Direct mode (nothing in front of nginx): default 127.0.0.0/8 never matches a
 # real client IP, so real_ip is a no-op and $remote_addr/$binary_remote_addr
@@ -197,3 +242,6 @@ ${NGINX_CONN_LIMIT}
 ' < /opt/nginx/nginx.conf.template > /etc/nginx/nginx.conf
 
 sed -i "s/NGINX_CONN_LIMIT_PLACEHOLDER/${NGINX_CONN_LIMIT}/g" /etc/nginx/nginx.conf
+# Rates contain `/` (10r/s), so `|` is the sed delimiter for those. Bursts are
+# plain integers (default delimiter is fine).
+sed -i "s|NGINX_AUTH_RATE_PLACEHOLDER|${NGINX_AUTH_RATE}|g; s|NGINX_API_RATE_PLACEHOLDER|${NGINX_API_RATE}|g; s|NGINX_GENERAL_RATE_PLACEHOLDER|${NGINX_GENERAL_RATE}|g; s/NGINX_AUTH_BURST_PLACEHOLDER/${NGINX_AUTH_BURST}/g; s/NGINX_API_BURST_PLACEHOLDER/${NGINX_API_BURST}/g; s/NGINX_GENERAL_BURST_PLACEHOLDER/${NGINX_GENERAL_BURST}/g" /etc/nginx/nginx.conf
