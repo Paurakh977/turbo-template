@@ -5,28 +5,33 @@
 import { sleep } from 'k6';
 import { runEdgeCasesFlow } from '../scenarios/edge-cases-flow.js';
 import { signIn } from '../helpers/auth.js';
-import { USERS } from '../config.js';
+import { setupAdminSession } from '../helpers/setup.js';
+import { THRESHOLDS, THINK_TIME_S, USERS } from '../config.js';
+import { makeHandleSummary } from '../helpers/summary.js';
 
 export const options = {
   vus: 2,
   duration: '30s',
   insecureSkipTLSVerify: true,
-  thresholds: {
-    // In edge case tests, status 4xx are explicitly tested and expected
-    'http_req_failed{status:500}': ['rate<0.01'],
-  },
+  thresholds: THRESHOLDS.edge,
 };
 
 export function setup() {
-  const adminAuth = signIn(USERS.admin.email, USERS.admin.password);
+  // Admin session aborts loudly on dead backend; the plain user
+  // session degrades to its cookie-or-empty (edge flows assert 401s anyway).
+  const admin = setupAdminSession('edge-cases');
   const userAuth = signIn(USERS.user.email, USERS.user.password);
   return {
-    adminCookie: adminAuth.cookie,
+    adminCookie: admin.cookie,
     userCookie: userAuth.cookie,
   };
 }
 
 export default function (data) {
   runEdgeCasesFlow(data.adminCookie, data.userCookie);
-  sleep(1);
+  // Centralized think time (config.js): edge cadence.
+  sleep(THINK_TIME_S.edge);
 }
+
+
+export const handleSummary = makeHandleSummary('edge-cases');

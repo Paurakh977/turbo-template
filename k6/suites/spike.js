@@ -3,10 +3,11 @@
 // Validates 429 response handling and checks that 5xx errors remain low.
 
 import { sleep } from 'k6';
-import { THRESHOLDS, USERS } from '../config.js';
+import { THRESHOLDS, THINK_TIME_S } from '../config.js';
+import { setupAdminSession } from '../helpers/setup.js';
 import { runPublicFlow } from '../scenarios/public-flow.js';
 import { runNotesFlow } from '../scenarios/notes-flow.js';
-import { signIn } from '../helpers/auth.js';
+import { makeHandleSummary } from '../helpers/summary.js';
 
 export const options = {
   stages: [
@@ -23,10 +24,7 @@ export const options = {
 };
 
 export function setup() {
-  const auth = signIn(USERS.admin.email, USERS.admin.password);
-  return {
-    cookie: auth.cookie,
-  };
+  return setupAdminSession('spike');
 }
 
 export default function (data) {
@@ -39,6 +37,9 @@ export default function (data) {
     runPublicFlow();
   }
 
-  // Very short sleep during spike to maximize concurrent connection pressure
-  sleep(0.1);
+  // Centralized think time (config.js): spike minimal cadence.
+  sleep(THINK_TIME_S.spike);
 }
+
+
+export const handleSummary = makeHandleSummary('spike');

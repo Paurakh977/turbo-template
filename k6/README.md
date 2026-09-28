@@ -83,15 +83,25 @@ k6 run -e BASE_URL=https://localhost --insecure-skip-tls-verify k6/suites/smoke.
 
 ### Running with Docker Directly
 
+Prefer the runners (`k6/run.ps1` on Windows, `k6/run.sh` on Linux/macOS/CI),
+which handle host addressing and SUMMARY_PATH for you. Raw equivalent:
+
 ```bash
 docker run --rm -i \
   -v "${PWD}/k6:/scripts" \
-  --network host \
-  grafana/k6:latest run \
-  -e BASE_URL=https://localhost \
+  -v "${PWD}/k6/results:/results" \
+  --add-host host.docker.internal:host-gateway \
+  -e SUMMARY_PATH=/results/smoke.summary.json \
+  grafana/k6:0.57.0 run \
+  -e BASE_URL=https://host.docker.internal \
   --insecure-skip-tls-verify \
   /scripts/suites/smoke.js
 ```
+
+Notes: `--network host` is Linux-only (opt-in on Docker Desktop 4.34+), so
+the runners map `localhost`/`127.0.0.1` to `host.docker.internal` in Docker
+mode instead. The image is pinned to `grafana/k6:0.57.0` (`:latest` is not
+reproducible); summaries always land in `k6/results`.
 
 ### Loosening rate limits for k6 (host-run stacks)
 

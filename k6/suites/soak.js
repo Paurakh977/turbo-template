@@ -3,11 +3,12 @@
 // Monitored via Grafana Dashboards 01-system-overview (RAM usage) and 03-database-redis (PG connections).
 
 import { sleep } from 'k6';
-import { THRESHOLDS, USERS } from '../config.js';
+import { THRESHOLDS, THINK_TIME_S } from '../config.js';
+import { setupAdminSession } from '../helpers/setup.js';
 import { runPublicFlow } from '../scenarios/public-flow.js';
 import { runNotesFlow } from '../scenarios/notes-flow.js';
 import { runAuditFlow } from '../scenarios/audit-flow.js';
-import { signIn } from '../helpers/auth.js';
+import { makeHandleSummary } from '../helpers/summary.js';
 
 const DURATION = __ENV.SOAK_DURATION || '10m';
 
@@ -22,10 +23,7 @@ export const options = {
 };
 
 export function setup() {
-  const auth = signIn(USERS.admin.email, USERS.admin.password);
-  return {
-    cookie: auth.cookie,
-  };
+  return setupAdminSession('soak');
 }
 
 export default function (data) {
@@ -43,5 +41,9 @@ export default function (data) {
     }
   }
 
-  sleep(1);
+  // Centralized think time (config.js): soak steady cadence.
+  sleep(THINK_TIME_S.soak);
 }
+
+
+export const handleSummary = makeHandleSummary('soak');

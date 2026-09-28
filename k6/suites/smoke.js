@@ -7,41 +7,30 @@
 // The smoke test uses 2 VUs with 2s sleep to stay well within both limits.
 
 import { sleep } from 'k6';
-import { THRESHOLDS, USERS } from '../config.js';
+import { THRESHOLDS, THINK_TIME_S, USERS } from '../config.js';
 import { runPublicFlow } from '../scenarios/public-flow.js';
 import { runAuthFlow } from '../scenarios/auth-flow.js';
 import { runNotesFlow } from '../scenarios/notes-flow.js';
 import { runAuditFlow } from '../scenarios/audit-flow.js';
 import { runRateLimitFlow } from '../scenarios/rate-limit-flow.js';
 import { runWebFlow } from '../scenarios/web-flow.js';
-import { signIn } from '../helpers/auth.js';
+import { setupAdminSession } from '../helpers/setup.js';
+import { makeHandleSummary } from '../helpers/summary.js';
 
 export const options = {
   // 2 VUs with 2s think time = max ~1 req/s per VU = 2 req/s total - safely under 10r/s limit
   vus: 2,
   duration: '30s',
   insecureSkipTLSVerify: true,
-  thresholds: {
-    // 429 responses are expected behavior from the rate limiter under load tests.
-    // The smoke threshold only fails on 5xx server errors.
-    'http_req_failed{status:500}': ['rate<0.01'],
-    'http_req_failed{status:502}': ['rate<0.01'],
-    'http_req_failed{status:503}': ['rate<0.01'],
-    // Latency should be healthy for actual (non-rate-limited) requests
-    http_req_duration: ['p(95)<500', 'p(99)<1000'],
-  },
+  thresholds: THRESHOLDS.smoke,
 };
 
 // Authenticate ONCE per test run - not per VU iteration.
 // This prevents saturating the auth rate-limit zone during smoke validation.
+// Setup failure MUST abort (throw) — returning {cookie:null} would run the
+// public-only path and exit 0 on a dead backend.
 export function setup() {
-  const auth = signIn(USERS.admin.email, USERS.admin.password);
-  if (!auth.success || !auth.cookie) {
-    console.error('[smoke:setup] Admin sign-in failed - check credentials and stack health');
-    return { cookie: null };
-  }
-  console.log('[smoke:setup] Admin session established successfully');
-  return { cookie: auth.cookie };
+  return setupAdminSession('smoke');
 }
 
 export default function (data) {
@@ -70,6 +59,9 @@ export default function (data) {
     runWebFlow(data.cookie);
   }
 
-  // 2 second think time ensures we stay safely within the 10r/s Nginx API limit
-  sleep(2);
+  // Centralized think time (config.js) keeps suites from silently diverging.
+  sleep(THINK_TIME_S.smoke);
 }
+
+
+export const handleSummary = makeHandleSummary('smoke');

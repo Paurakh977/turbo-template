@@ -27,9 +27,19 @@
     "k6:smoke": "powershell -ExecutionPolicy Bypass -File k6/run.ps1 smoke",
     "k6:load": "powershell -ExecutionPolicy Bypass -File k6/run.ps1 load",
     "k6:stress": "powershell -ExecutionPolicy Bypass -File k6/run.ps1 stress",
+    "k6:capacity": "powershell -ExecutionPolicy Bypass -File k6/run.ps1 capacity",
     "k6:spike": "powershell -ExecutionPolicy Bypass -File k6/run.ps1 spike",
     "k6:soak": "powershell -ExecutionPolicy Bypass -File k6/run.ps1 soak",
-    "k6:edge": "powershell -ExecutionPolicy Bypass -File k6/run.ps1 edge-cases"
+    "k6:edge": "powershell -ExecutionPolicy Bypass -File k6/run.ps1 edge-cases",
+    "k6:smoke:sh": "sh k6/run.sh smoke",
+    "k6:load:sh": "sh k6/run.sh load",
+    "k6:stress:sh": "sh k6/run.sh stress",
+    "k6:capacity:sh": "sh k6/run.sh capacity",
+    "k6:spike:sh": "sh k6/run.sh spike",
+    "k6:soak:sh": "sh k6/run.sh soak",
+    "k6:edge:sh": "sh k6/run.sh edge-cases",
+    "k6:runner:test": "node k6/tests/runner-contract.mjs",
+    "k6:benchmark": "node scripts/benchmark-report.mjs"
   },
   "devDependencies": {
     "@repo/eslint-config": "workspace:*",

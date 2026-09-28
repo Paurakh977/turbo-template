@@ -10,8 +10,9 @@ export function runNotesFlow(sessionCookie) {
     throw new Error('runNotesFlow requires an authenticated sessionCookie');
   }
 
-  // 1. List Notes (GET /api/notes)
-  const listRes = get('/api/notes?limit=10&offset=0', {
+  // 1. List Notes (GET /api/notes). withTotal=false mirrors the real web
+  // client, which never renders totals (P2 read-amplification reduction).
+  const listRes = get('/api/notes?limit=10&offset=0&withTotal=false', {
     cookie: sessionCookie,
     tags: { name: 'GET /api/notes' },
   });

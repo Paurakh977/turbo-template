@@ -1,22 +1,23 @@
 // k6/suites/stress.js
-// Stress Test: Pushes concurrency beyond standard capacity (up to 200 VUs).
+// Stress Test: Pushes concurrency beyond standard capacity (up to 500 VUs).
 // Exercises PostgreSQL pool saturation, Redis command rate, and triggers Pyroscope CPU profiling.
 
 import { sleep } from 'k6';
-import { THRESHOLDS, USERS } from '../config.js';
+import { THRESHOLDS, THINK_TIME_S } from '../config.js';
+import { setupAdminSession } from '../helpers/setup.js';
 import { runPublicFlow } from '../scenarios/public-flow.js';
 import { runNotesFlow } from '../scenarios/notes-flow.js';
 import { runAuditFlow } from '../scenarios/audit-flow.js';
 import { runRateLimitFlow } from '../scenarios/rate-limit-flow.js';
-import { signIn } from '../helpers/auth.js';
+import { makeHandleSummary } from '../helpers/summary.js';
 
 export const options = {
   stages: [
-    { duration: '30s', target: 25 },   // Ramp to normal
-    { duration: '1m', target: 75 },    // Ramp beyond normal
-    { duration: '1m', target: 150 },   // Approaching saturation
-    { duration: '1m', target: 200 },   // Maximum stress target
-    { duration: '2m', target: 200 },   // Hold maximum stress
+    { duration: '30s', target: 50 },   // Ramp to normal
+    { duration: '1m', target: 150 },   // Ramp beyond normal
+    { duration: '1m', target: 300 },   // Approaching saturation
+    { duration: '1m', target: 500 },   // Maximum stress target
+    { duration: '2m', target: 500 },   // Hold maximum stress
     { duration: '1m', target: 0 },     // Ramp-down
   ],
   insecureSkipTLSVerify: true,
@@ -24,10 +25,7 @@ export const options = {
 };
 
 export function setup() {
-  const auth = signIn(USERS.admin.email, USERS.admin.password);
-  return {
-    cookie: auth.cookie,
-  };
+  return setupAdminSession('stress');
 }
 
 export default function (data) {
@@ -46,6 +44,9 @@ export default function (data) {
     runPublicFlow();
   }
 
-  // Under stress, fast requests to push concurrency
-  sleep(0.2 + Math.random() * 0.5);
+  // Centralized think time (config.js): stress fast-push cadence.
+  sleep(THINK_TIME_S.stressMin + Math.random() * THINK_TIME_S.stressJitter);
 }
+
+
+export const handleSummary = makeHandleSummary('stress');

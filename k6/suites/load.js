@@ -3,15 +3,15 @@
 // Validates RED metrics (Rate, Errors, Duration) in Grafana Dashboard 02-api-performance.
 
 import { sleep } from 'k6';
-import { THRESHOLDS } from '../config.js';
+import { THRESHOLDS, THINK_TIME_S, USERS } from '../config.js';
 import { runPublicFlow } from '../scenarios/public-flow.js';
 import { runAuthFlow } from '../scenarios/auth-flow.js';
 import { runNotesFlow } from '../scenarios/notes-flow.js';
 import { runAuditFlow } from '../scenarios/audit-flow.js';
 import { runRateLimitFlow } from '../scenarios/rate-limit-flow.js';
 import { runWebFlow } from '../scenarios/web-flow.js';
-import { signIn } from '../helpers/auth.js';
-import { USERS } from '../config.js';
+import { setupAdminSession } from '../helpers/setup.js';
+import { makeHandleSummary } from '../helpers/summary.js';
 
 const isQuick = __ENV.LOAD_QUICK === 'true';
 
@@ -37,10 +37,7 @@ export const options = {
 
 // Global session setup for sustained load without re-authenticating on every tick
 export function setup() {
-  const auth = signIn(USERS.admin.email, USERS.admin.password);
-  return {
-    cookie: auth.cookie,
-  };
+  return setupAdminSession('load');
 }
 
 export default function (data) {
@@ -69,6 +66,9 @@ export default function (data) {
     runAuthFlow(USERS.admin.email, USERS.admin.password, data.cookie);
   }
 
-  // Realistic user think time between 0.5s and 2s
-  sleep(0.5 + Math.random() * 1.5);
+  // Centralized think time (config.js): loadMin + jitter*rand.
+  sleep(THINK_TIME_S.loadMin + Math.random() * THINK_TIME_S.loadJitter);
 }
+
+
+export const handleSummary = makeHandleSummary('load');
