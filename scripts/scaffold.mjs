@@ -299,8 +299,7 @@ async function main() {
         skipValidation: false,
         verbose: !!opts.verbose,
       });
-      for (const r of results) console.log(`  ✓ ${r.name}`);
-      console.log('✓ Validation passed');
+      console.log(`✓ Validation passed (${results.length} checks)`);
     } catch (err) {
       fail('validation', err.message, destRoot);
     }

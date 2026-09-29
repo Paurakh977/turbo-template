@@ -43,11 +43,14 @@ export async function validateGenerated({
 }) {
   const results = [];
   const step = async (name, fn) => {
-    if (verbose) console.log(`  [validate] ${name}...`);
+    // Always announce step start: typecheck/lint/test/build each take
+    // minutes with no child output, which otherwise looks like a hang.
+    console.log(`  → ${name}...`);
+    const started = Date.now();
     try {
       const detail = await fn();
       results.push({ name, ok: true, detail });
-      if (verbose) console.log(`  [validate] ✓ ${name}`);
+      console.log(`  ✓ ${name} (${((Date.now() - started) / 1000).toFixed(1)}s)`);
     } catch (err) {
       results.push({ name, ok: false, error: err.message });
       throw new Error(`Validation step "${name}" failed: ${err.message}`);
