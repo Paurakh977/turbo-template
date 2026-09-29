@@ -39,7 +39,9 @@
     "k6:soak:sh": "sh k6/run.sh soak",
     "k6:edge:sh": "sh k6/run.sh edge-cases",
     "k6:runner:test": "node k6/tests/runner-contract.mjs",
-    "k6:benchmark": "node scripts/benchmark-report.mjs"
+    "k6:benchmark": "node scripts/benchmark-report.mjs",
+    "scaffold": "node scripts/scaffold.mjs",
+    "scaffold:test": "node --test scripts/scaffold/tests/scaffold.test.mjs"
   },
   "devDependencies": {
     "@repo/eslint-config": "workspace:*",
