@@ -8,6 +8,10 @@ with rate limiting).
 - Stack: Turborepo 2.x - pnpm 11.23.0 (repo-pinned) - Next.js 16 - NestJS 11 - Prisma 7 (driver adapters) - Better Auth 1.x
 - The Prisma client is generated **inside** `packages/database/src/generated/prisma` (Prisma v7 no longer uses `node_modules/.prisma`).
 
+> **Starting a new project from this template?** See [docs/SCAFFOLD.md](docs/SCAFFOLD.md):
+> `pnpm scaffold` creates a new directory with its own `@scope/*` namespace,
+> transplanted lockfile (frozen install), and a fresh Git repo.
+
 ---
 
 ## 1. Prerequisites
