@@ -24,13 +24,14 @@ template: true
 - Fact: `apps/api/src/common/audit-queue.service.ts:84-142` `enqueueSessionAudit` same-tx when tx passed; `apps/api/src/common/audit-outbox.ts:44-66` tuning POLL 250ms plus BATCH 50 plus CLAIM 30s plus MAX 5 plus DRAIN 20s below grace 30s.
 - Fact: `apps/api/src/common/audit-writer.ts` `buildAuditRowData` captures at emit; Global singleton `audit-queue.module.ts:1-16` timers unrefd never overlap.
 ### Folded INV-012 unforgeable attribution plus allowlist
-- Fact: `apps/api/src/common/audit-metadata.ts:16-25` strips server keys before merge; `apps/api/src/audit/audit.controller.ts:34-38` allowlist only 3 UX actions with 4096 cap; P2002 silent success.
+- Fact: `apps/api/src/common/audit-metadata.ts:16-25` strips server keys before merge; `apps/api/src/audit/audit.controller.ts:34-38` allowlist only 3 UX actions (4096 cap at :45, IsIn at :48); P2002 silent success.
 - Fact: Token redaction plus IP fail-closed plus no-FK survival plus `targetId` always NULL dead excluded from reads.
 ### Folded INV-016 DLQ-accumulates plus purge-predicate
 - Fact: DLQ accumulates by design via CAS plus terminal fail record; redrive canonical SELECT plus single-id UPDATE only; purge DONE-only 30d bounded 1000 via PK delete.
 - Fact: Alert uses max-not-sum `AuditQueueBacklogHigh`; depth gauge owned by refresh only never zeroed on enqueue.
 ## Consequences
-- Fact: Notes stay atomic with audit row; privilege rows stay ordered and visible even when queue lags or DLQ fills.
+- Fact: Notes stay atomic with audit row. Sync plane is ordered but LOSSY (catch-log, no retry — never compliance proof); outbox plane is DURABLE (same-tx plus retry plus DLQ).
+- Fact: `audit_log.createdAt` is delivery time, `audit_outbox.created_at` is enqueue time — expose both before asserting order (Q10).
 ## Naive failure mode
 - Interpretation: Enqueueing `role_changed` or awaiting `note_created` inline without tx breaks atomicity; branching on queue success misuses write-only contract.
 - Interpretation: Raising DRAIN above grace or purging without DONE predicate deletes PENDING plus DLQ evidence.

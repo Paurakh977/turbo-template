@@ -74,6 +74,9 @@ template: true
 - Uncertainty: MyBootstrap permissions shape adding orders key needs web plus API deploy order check. See .agent/wiki-discovery/FINAL-10-OPEN-QUESTIONS.md general plus 12 S20.
 - Uncertainty: FINAL-10 Q6 targetId always NULL. Hardcode null for order events, never assert forensic join. See FINAL-10 Q6.
 - Uncertainty: FINAL-10 Q10 delivery versus enqueue skew under backlog. Expose both timestamps in admin UI, never assert order. See FINAL-10 Q10.
+## Divergence checklist (second domain, e.g. Payments)
+- Fact: Before cloning, decide ownership scoping (authorId vs teamId), audit plane (outbox vs sync), retention, and DELETE semantics — Notes choices (author scope, outbox, superAdmin-delete, withTotal) are examples, not defaults.
+- Fact: New-domain lifecycle order: model plus migration, then SCOPES plus statement, then module plus controller plus service, then web route plus UI, then audit events plus metrics, then tests, then ADR-1000+ if architectural, then index plus reference updates.
 ## Naive risks
 - Interpretation: Starting at web UI before SCOPES lands produces scope-string mismatch that only surfaces in e2e 403 hint assertions.
 - Interpretation: Putting domain writes on sync plane loses durability on crash. Putting privilege writes on queue adds latency and ordering risk.

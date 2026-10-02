@@ -89,7 +89,7 @@ apps/api/src/main.ts, apps/api/src/app.module.ts, apps/api/src/cluster.ts, apps/
 | 6 | Shutdown, listen, cluster | main.ts:180-188 | enableShutdownHooks, listen host port, runWithCluster |
 ### Guard and interceptor contracts
 **Fact:** Nest order is middleware, guards, interceptors, handler; the interceptor comment (app.module.ts:201-203) confirms req.session is settled before RequestContextInterceptor copies it.
-**Fact:** ThrottlerGuard (APP_GUARD, Redis storage fail-open) runs before vendor AuthGuard; unauthenticated non-anonymous requests 401 after throttler accounting.
+**Fact:** ThrottlerGuard (APP_GUARD, Redis storage fail-open, owned by app.module.ts:196-199) runs before vendor AuthGuard; unauthenticated non-anonymous requests 401 after throttler accounting. RequestContextInterceptor (APP_INTERCEPTOR, app.module.ts:204-205) and ObservabilityInterceptor (APP_INTERCEPTOR, observability.module.ts:11-12) order across modules is unpinned (Q3).
 **Fact:** ObservabilityInterceptor sets ROUTE_TEMPLATE and FEATURE plus status on the active span only when isRecording; HTTP counts and durations stay in Express middleware so 404s and unmatched routes are captured.
 ### Shutdown and drain budgets
 | Budget | Value | Owner |

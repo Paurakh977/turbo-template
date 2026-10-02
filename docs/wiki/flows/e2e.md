@@ -34,7 +34,7 @@ seed.ts(TRUNCATE+signUpWithRetry+role UPDATE before sign-in+storageState)
 | 1 | Seed users | apps/web/e2e/scripts/seed.ts:signUpWithRetry | signup -> 4 tries + flush retry | Signup 429 handled by wait+retry so seed stays deterministic |
 | 2 | Role pin | apps/web/e2e/scripts/seed.ts:UPDATE role | user -> verified+role before sign-in | Role after sign-in hides admin until invalidate; must stay before |
 | 3 | Projects | apps/web/playwright.config.ts:projects | base -> 6 storageState roles | Workers 1 fullyParallel false; ipv4first avoids localhost flake |
-| 4 | Edge TLS | apps/web/src/proxy.ts:proxy | https 8443 -> api/web upstreams | Real TLS exercises XFF+CSP+traceparent; host-only misses nginx hop |
+| 4 | Edge TLS | nginx/nginx.conf:139-318 + compose proxy-e2e | https 8443 -> api-e2e/web-e2e upstreams | Real TLS exercises XFF+traceparent; host-only misses nginx hop (proxy.ts owns CSP/nonce only) |
 | 5 | Helpers | apps/web/e2e/helpers/database.helper.ts:TRUNCATE | test -> wipe safe tables only | Never wipes seeded users between tests; per-test tables only |
 | 6 | Suites | apps/web/e2e/tests/auth/auth.spec.ts:auth | storageState -> 15 specs | Rbac 403 plus proxy plus health plus a11y prove enforced not hidden |
 | 7 | Report | apps/web/playwright.config.ts:reporter | run -> html+list+trace retry | Trace on retry only keeps artifacts bounded under parallel flake |
@@ -42,7 +42,7 @@ seed.ts(TRUNCATE+signUpWithRetry+role UPDATE before sign-in+storageState)
 - Fact: `apps/web/e2e/scripts/seed.ts:86-151` owns flush plus TRUNCATE plus retry plus `buildStorageState` writeFile.
 - Fact: `apps/web/playwright.config.ts:48-71` owns 6 projects plus globalSetup/teardown plus ipv4first plus 8443 baseURL.
 - Fact: `apps/web/e2e/helpers/*` plus `e2e/config/users.ts` plus `routes.ts` plus `playwright.env.ts` own fixtures.
-- Fact: `apps/web/src/proxy.ts` owns edge proxy exercised by proxy plus security plus health specs.
+- Fact: `nginx/nginx.conf` plus compose `proxy-e2e` own edge TLS/upstreams; `apps/web/src/proxy.ts` owns CSP/nonce only, exercised by proxy plus security plus health specs.
 ## Failure branches
 - Fact: Seed 429 -> flush Redis instantly and retry; signup window exhausted no longer flakes suite.
 - Fact: Parallel workers -> config forces 1 worker; flake under parallel remains known limit.

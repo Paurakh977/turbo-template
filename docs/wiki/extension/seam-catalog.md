@@ -74,6 +74,8 @@ template: true
 - Fact: Each anti-pattern passes lint yet breaks fork, from 14 S17 plus 20 gaps: pooled migrate, session role, frontend-only, bypass headers, SkipThrottle health, Number fallback, ALS in workers.
 - Recommendation: Link 14 S17 checklist as PR gate. Require second review if touched area overlaps Stays rows.
 - Uncertainty: OTel Alloy Tempo Pyroscope compat plus retention plus arm64 unverified. See .agent/wiki-discovery/FINAL-10-OPEN-QUESTIONS.md Q11. Never guess versions.
+## Fork lifecycle (new domain)
+- Fact: Keep template invariants plus flows plus ADRs unchanged; extend subsystems plus workflows plus reference tables with app rows; add app ADRs as ADR-1000+; append consumer task rows to 00-INDEX without editing template rows; mark replaced demo docs (notes rows, seed mailboxes) as superseded, never silently overwrite.
 ## Verification
 - Fact: Transplant preserves dashboard data-testid stability plus k6 threshold shape plus pooler runtime path by construction.
 - Recommendation: Verify with guards plus specs in reference/test-matrix.md before merge. Never read whole wiki, follow one task row.

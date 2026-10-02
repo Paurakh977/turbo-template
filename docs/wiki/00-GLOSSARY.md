@@ -61,7 +61,7 @@ template: true
 
 ## Baked vs runtime env
 
-- Fact: Baked values are inlined at image build time and need rebuild to change. Runtime values are injected at process start and validated fail-fast at boot. See .agent/wiki-discovery/01-repository-platform.md S6 plus apps/web/next.config.js for public-value inlining and apps/api/src/app.module.ts for Joi validation.
+- Fact: Baked values are inlined at image build time and need rebuild to change. Runtime values are injected at process start and validated fail-fast at boot. See .agent/wiki-discovery/01-repository-platform.md S6 plus apps/web/next.config.js validation plus Dockerfile.prod builder ARG inlining for public-value inlining and apps/api/src/app.module.ts for Joi validation.
 - Interpretation: Editing a baked value without rebuild silently keeps the old value in production, while treating a required secret as optional lets containers boot into silent downgrade.
 - Recommendation: Pointer: read [env invariant](invariants/09-env.md) plus [env-config subsystem](subsystems/env-config.md) plus [docker-environments subsystem](subsystems/docker-environments.md).
 - Uncertainty: Web package still lists unused data and cache client dependencies that look required but are not imported. See .agent/wiki-discovery/FINAL-10-OPEN-QUESTIONS.md Q12. Never assert install presence equals runtime use.

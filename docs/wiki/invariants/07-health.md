@@ -28,7 +28,7 @@ template: true
 ## Naive failure mode
 - Interpretation: Adding limit_req to `/api/health/` location or pointing LB at ready or adding SkipThrottle to health controller breaks deploy topology.
 ## Guards-tests
-- Fact: Run `health` live plus ready specs plus 210-to-429 contract plus compose healthcheck interval 15 timeout 5 retries 10 start 15.
+- Fact: Run `health` live plus ready specs plus 210-to-429 contract (Nest-throttled) plus api healthcheck interval 10 timeout 5 retries 12 start 30 on `/api/health/live`; proxy healthz probe is interval 15 retries 10 start 15. Health is Nest-throttled but edge-exempt — every sentence about throttling needs its layer prefix.
 - Fact: For rate-limit layers see [06-rate-limits.md](06-rate-limits.md) INV-006 pointer only; this file owns only probe split plus topology.
 ## Related ADRs
 - Recommendation: See [ADR-0005 Live Only](../decisions/ADR-0005-live-only-healthcheck.md) for deadlock versus degraded-serve trade-off.

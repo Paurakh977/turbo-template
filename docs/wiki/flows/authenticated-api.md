@@ -21,7 +21,7 @@ template: true
 ## Diagram
 ```text
 browser(cookie) -> nginx(api_limit) -> web fetch-internal/internal-api/bootstrap
-  -> main.ts(ALS first->metrics->helmet->prefix api->ValidationPipe->CORS)
+  -> main.ts(ALS first->catch-all metrics->auth-event metrics (auth paths 73-104)->helmet->compression->prefix api->ValidationPipe->filter->CORS)
   -> ThrottlerGuard -> AuthGuard(session once) -> RequestContextInterceptor
   -> ObservabilityInterceptor(span-only) -> @Session once
   -> authorization.service(getFreshRoleRaw) -> notes.service(tx)

@@ -21,8 +21,9 @@ template: true
 - Fact: Pooled migrate breaks advisory locks and SET ROLE on shared sessions, stalls deploy, and boots app on old schema (FINAL-07 Critical-04 plus Medium-02).
 ## Code
 - Fact: `packages/database/prisma.config.ts` snapshot-before-dotenv prefers DIRECT_URL, prod fail-fast if unset; `packages/database/src/client.ts` Prisma pool max 10 plus 5s plus 30s plus `disposeExternalPool`.
-- Fact: `pgbouncer/pgbouncer.ini` default 25 plus reserve 5 below Postgres max 200; `docker-compose.yml:283-293` injects DIRECT_URL to migrate and pooler URL to api.
-- Fact: `apps/api/src/cluster.ts:21-52` two independent budgets workers-times-POOL_MAX below client max and server default-plus-reserve below Postgres max; cap workers at 8.
+- Fact: `pgbouncer/pgbouncer.ini` default 25 plus reserve 5 below Postgres max 200; `docker-compose.yml` migrate service env injects DIRECT_URL to direct postgres 5432 while the api service env injects pooler DATABASE_URL (`pgbouncer:6432?pgbouncer=true`) plus DIRECT_URL for admin use.
+- Fact: `apps/api/src/cluster.ts:33-53` two independent budgets workers-times-POOL_MAX below client max and server default-plus-reserve below Postgres max (`getWorkerCount` 56-66); cap workers at 8.
+- Fact: `prisma.config.ts:36-42` DATABASE_URL fallback exists for local `generate`/`push` only; prod/test/e2e containers MUST use DIRECT_URL (never deploy via the pooler).
 ### Folded INV-015 migrate-isolation plus snapshot-plus-fail-fast
 - Fact: `apps/migrate/Dockerfile` owns trimmed workspace plus lockfile plus boot gate; batch `$transaction` in `apps/api/src/common/audit-queue.service.ts:293-297` stays PgBouncer-safe.
 - Fact: Turbo passes DIRECT_URL for db tasks; app DATABASE_URL carries `pgbouncer=true` so interactive tx stays out of batch path.

@@ -21,7 +21,7 @@ template: true
 - Fact: Browser checks are bypassable via curl; unifying display and verdict endpoints confuses chrome visibility with enforcement principal (FINAL-07 Critical-03).
 ## Code
 - Fact: `apps/web/src/lib/server/require-admin.ts` redirect plus `DashboardShell.tsx` hide plus `AdminUserTable.tsx` row gating are presentational only with debounced 60s fresh-role poll.
-- Fact: `apps/api/src/users/users.controller.ts:47-155` keeps `me/role` session-user display separate from `me/permissions` effective-user verdict; `apps/api/src/common/authorization.service.ts` asserts every mutation deny-by-default.
+- Fact: `apps/api/src/users/users.controller.ts:47-155` keeps `me/role` (session user, display) separate from `me/permissions` (effective user, verdict); `apps/api/src/common/authorization.service.ts` asserts every mutation deny-by-default.
 - Fact: `apps/api/src/notes/notes.service.ts` permission plus ownership plus superAdmin-delete plus `apps/api/src/audit/audit.service.ts:244-255` admin gate enforce server-side.
 ## Consequences
 - Fact: Hidden buttons stay hidden for UX but curl without permission still gets 401 or 403; impersonated views never leak admin chrome as authority.

@@ -35,6 +35,7 @@ template: true
 - Recommendation: See [ADR-0004 Fresh Role](../decisions/ADR-0004-fresh-role-not-snapshot.md) for ALS-memoized fresh read rationale.
 ## Related flows-subsystems
 - Recommendation: Enforced in [authenticated-api](../flows/authenticated-api.md) plus audit flow; owned by [api-runtime](../subsystems/api-runtime.md).
-- Fact: `apps/api/src/app.module.ts:193-207` registers global ThrottlerGuard then RequestContextInterceptor in that order; vendor AuthGuard settles `req.session` before interceptor copies.
+- Fact: `apps/api/src/app.module.ts:193-207` registers global ThrottlerGuard then RequestContextInterceptor; vendor AuthGuard settles `req.session` before any interceptor copies (guard-before-interceptor is pinned; RequestContext-vs-Observability interceptor order across modules is unpinned per Q3).
+- Fact: Once-per-request means one `@Session()` param per handler, never re-resolving downstream within the same request.
 - Fact: For fresh-role verdicts see [02-fresh-role.md](02-fresh-role.md) INV-002 pointer only; never branch on ALS-cached display role.
 - Fact: Timers in queue and health use `unref` so per-request stores garbage-collect after response without keeping loop hot.

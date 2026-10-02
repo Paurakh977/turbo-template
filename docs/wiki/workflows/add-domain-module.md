@@ -27,7 +27,7 @@ template: true
 - [ ] Read `../extension/notes-canonical-example.md` plus seam catalog entry for domain clone.
 - Fact: Skipping INV-002 reproduces stale-role elevation; skipping INV-005 loses atomicity.
 ## Steps checklist
-- [ ] 1. Extend `packages/roles/src/index.ts` SCOPES first with `orders:create,list,update,delete` plus hierarchy weight.
+- [ ] 1. Extend `packages/roles/src/index.ts` SCOPES first with `orders:create-order`, `orders:update-order` (exact literals matching call-site scope strings — unknown scopes 400 via IsIn, never mint ad-hoc keys) plus hierarchy weight.
 - [ ] 2. Extend `packages/auth/src/shared/permissions.ts` statement plus `ADMIN_PLUGIN_ROLES` mapping.
 - [ ] 3. Add `packages/database/prisma/models/order.prisma` fragment copying `note.prisma` shape plus index.
 - [ ] 4. Run migrate plus generate before writing service code so Prisma client has the model.

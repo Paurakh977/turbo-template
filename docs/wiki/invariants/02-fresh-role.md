@@ -25,7 +25,7 @@ template: true
 - Fact: `packages/auth/src/server/pending-storage.ts:285-318` `invalidateUserCache` deletes bare token plus active-sessions on success only.
 ### Folded INV-013 invalidate-success-only plus exactly-once stop
 - Fact: Invalidate runs after `isSuccess` gate only, never on failure; stop-impersonation uses before-store plus GETDEL pop plus after-write for exactly one row.
-- Fact: No module-level role or JWKS or session TTL caches exist; ALS memo only per request plus `disableSettingJwtHeader` skips per-session sign.
+- Fact: No module-level role or JWKS or session TTL caches exist; ALS memo only per request plus `disableSettingJwtHeader` skips per-session sign. Sole exception: `hierarchy.ts` reads `session.user.role` for the ACTOR side of hierarchy comparison only, paired with a fresh-DB target read plus `invalidateUserCache` — all verdicts still use fresh role. Pending-storage 15–30s stashes are operation state, not verdict caches.
 ## Consequences
 - Fact: Demotion, ban, and revoke take effect on next request; repeated checks in one request collapse to one PG read via memo.
 ## Naive failure mode

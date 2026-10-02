@@ -20,7 +20,9 @@ template: true
 ## Why
 - Fact: Bypass equals unlimited flood; skipping throttle on health breaks contract; removing zones for k6 hides production flood shape (FINAL-07 Medium-04 plus High-03).
 ## Code
-- Fact: `nginx/nginx.conf:82-88` zones auth 300r-per-m plus api 10r-per-s plus general 30r-per-s plus conn 20; `@ratelimited` generic JSON plus Retry-After 10; `/api/auth/` passes Better Auth 429 through.
+- Fact: `nginx/nginx.conf:82-84` zone placeholders (values via NGINX_* env + `nginx/entrypoint.sh` defaults: auth 300r-per-m, api 10r-per-s, general 30r-per-s, bursts 10/20/50; conn cap placeholder at :148, default 20); `@ratelimited` generic JSON plus Retry-After 10; `/api/auth/` passes Better Auth 429 through. All rate statements below mean Nest-throttled unless marked edge-exempt.
+- Fact: Fail-open is per-scope, not global: throttler falls back to bounded memory while server-action scopes decide per scope via failOpen (e.g. delete-account CLOSED, fresh-role OPEN in `server-action-rate-limit.ts`).
+- Fact: Namespace inventory lives in [redis-keys](../reference/redis-keys.md) (9 rows); code lists key shapes in `pending-storage.ts:252-278`.
 - Fact: `packages/auth/src/server/auth.ts:430-478` customRules get-session 60-per-300 plus admin 2-to-6 plus challenge 2-to-5; storage redis ternary secondary versus database.
 - Fact: `apps/api/src/app.module.ts:40-51` throttler ttl plus limit via `parseThrottleInt`; `apps/api/src/rate-limit/redis-throttler.storage.ts:29-127` fail-open MEMORY_FALLBACK 5000; SCOPES `packages/roles/src/index.ts:152-162` IsIn gated.
 ### Folded INV-011 bare-token plus disjoint keys plus fail-open

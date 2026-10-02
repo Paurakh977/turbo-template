@@ -30,7 +30,7 @@ template: true
 | Nest global throttler | all api incl /api/health/* throttled | 60s/200 | throttle:{tracker}:hits Redis | 429 Nest JSON, fail-open memory 5000 |
 | Server-action Lua | 9 SCOPES notes:*, settings:*, admin:resend, dashboard:fresh-role | per-scope windowMs+max | server-action:<scope>:<id> | 429+retryAfter PTTL; 400 unknown scope |
 ## Notes
-- Fact: Sources nginx.conf:82-88,244-281; auth.ts:430-477; app.module.ts:156-170; roles/index.ts:152-162.
+- Fact: Sources nginx.conf:82-88,244-260 auth, 263-278 health exempt, 280-299 api, 301-318 general; auth.ts:430-477; app.module.ts:156-170; roles/index.ts:152-162.
 - Fact: No bypass header, no SkipThrottle on health; 210 sequential health hits must yield 429 (contracted).
 - Fact: Nginx empty-key = unlimited, so no client-controlled key; k6 treats 429 as expected, never bypass.
 - Fact: Redis blip = fail-open (memory window); availability preserved, alert on warn log.

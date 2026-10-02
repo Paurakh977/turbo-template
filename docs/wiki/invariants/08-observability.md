@@ -16,7 +16,7 @@ template: true
 > Up: ../00-INDEX.md
 **ID:** INV-008
 ## Invariant
-- Fact: Routes MUST be normalized with triple-synced normalizer, workers MUST carry per-worker instance identity, and telemetry MUST fail open with baked RUM only.
+- Fact: Routes MUST be normalized with triple-synced normalizer (call-sites main.ts:55 plus metrics.service.ts:258/283; interceptor sets ROUTE_TEMPLATE span-only, Q3 order unpinned), workers MUST carry per-worker instance identity, and telemetry MUST fail open with baked RUM only.
 ## Why
 - Fact: Normalizer drift explodes cardinality and trips Alloy guard; missing instance id merges workers into phantom rates; second registry or CSP splits series or breaks beacons silently (FINAL-07 Medium-03).
 ## Code

@@ -21,7 +21,7 @@ template: true
 - Fact: Leaked secret mints arbitrary sessions; direct DB skips guards, authz, and audit in one edit (FINAL-07 Critical-01).
 - Interpretation: Blast radius is full tenant compromise from one web-container read.
 ## Code
-- Fact: `docker-compose.yml:388-412` web env injects only INTERNAL_API_URL plus NEXT_PUBLIC_* plus OTel, never secrets.
+- Fact: `docker-compose.yml:web service env block (compose web service, INTERNAL_API_URL plus NEXT_PUBLIC plus OTel only)` web env injects only INTERNAL_API_URL plus NEXT_PUBLIC_* plus OTel, never secrets.
 - Fact: `apps/web/src/lib/server/fetch-internal.ts` plus `internal-api.ts` plus `auth-http.ts` forward cookies with 5s timeout mapping to 503 or 504.
 - Fact: Pure subpaths only `packages/auth/src/shared/permissions.ts` plus `packages/roles/src/index.ts`; erased `import type { Auth }` is allowed.
 ## Consequences

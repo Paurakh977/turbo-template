@@ -15,8 +15,8 @@ template: true
 # Subsystem: Auth (Better Auth Session, Persistence, Lifecycle)
 > Up: ../00-INDEX.md | Depends on: INV-01 (secret-free web), INV-02 (fresh role), INV-06 (rate limits). Rules live in invariants, never copied here.
 ## 1. Ownership
-**Fact:** Single authoritative instance is betterAuth export auth from packages/auth/src/server/auth.ts (663 lines); no other file constructs a Better Auth runtime.
-**Fact:** Mechanism owners: infra/redis.ts (shared client singleton), pending-storage.ts (335 lines, hook stashes plus invalidation), audit-plugin.ts (739 lines, admin before-guards plus after-audit), database-hooks.ts (305 lines, lifecycle audit plus canonicalization), hierarchy.ts (66 lines, comparison primitive).
+**Fact:** Single authoritative instance is betterAuth export auth from packages/auth/src/server/auth.ts (662 lines); no other file constructs a Better Auth runtime.
+**Fact:** Mechanism owners: infra/redis.ts (shared client singleton), pending-storage.ts (334 lines, hook stashes plus invalidation), audit-plugin.ts (739 lines, admin before-guards plus after-audit), database-hooks.ts (304 lines, lifecycle audit plus canonicalization), hierarchy.ts (66 lines, comparison primitive).
 **Fact:** Policy companions live elsewhere: role tokens in packages/roles/src/index.ts, AC registry in shared/permissions.ts, verdicts in subsystems/rbac-rules-users.md; this file owns session mechanics, not verdict semantics.
 ## 2. Runtime
 **Fact:** Session lookup is Redis L1 then Postgres: secondaryStorage in auth.ts:174-287 does GET bare-token (no session prefix in 1.6.29), falling back to the Session table via prismaAdapter with storeSessionInDatabase true; updateAge 1d throttles rewrites, expiry 7d, freshAge 15min gates destructive delete-user.
