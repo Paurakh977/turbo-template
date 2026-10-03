@@ -68,6 +68,17 @@ function runCapture(cmd, args, cwd) {
   return res;
 }
 
+/**
+ * Human summary of what validation will actually do. Without this the plan
+ * claimed "full" even under `--skip-install`, where only the dependency-free
+ * checks (structure, namespace, git independence) can run.
+ */
+function describeValidation(opts) {
+  if (opts.skipValidation) return 'skipped (--skip-validation)';
+  if (opts.skipInstall) return 'structure + namespace only (no install; scripts deferred)';
+  return opts.skipBuild ? 'all but build' : 'full';
+}
+
 async function main() {
   let opts;
   try {
@@ -97,7 +108,7 @@ async function main() {
   if (!opts.yes && (!opts.projectName || !opts.scope || !opts.destination)) {
     // Only prompt when attached to a TTY; otherwise require flags/--yes.
     if (process.stdin.isTTY) {
-      await promptMissing(opts);
+      await promptMissing(opts, { preferLocalCwd: RUNNING_INSTALLED });
     }
   }
 
@@ -174,7 +185,7 @@ async function main() {
     `  install:      ${opts.skipInstall ? 'no (--skip-install)' : 'yes'}`,
     `  git:          ${opts.noGit ? 'no (--no-git)' : 'yes (fresh init)'}`,
     `  generator:    ${opts.keepScaffolder ? 'kept in output (--keep-scaffolder)' : 'removed from output'}`,
-    `  validation:   ${opts.skipValidation ? 'skipped' : opts.skipBuild ? 'without build' : 'full'}`,
+    `  validation:   ${describeValidation(opts)}`,
     '',
   ].join('\n');
 
@@ -187,7 +198,21 @@ async function main() {
     console.log(`Would transplant pnpm-lock.yaml (rename workspace importer keys only; zero resolutions edited) + copy apps/migrate/pnpm-lock.yaml verbatim`);
     console.log(`Would run: pnpm install --frozen-lockfile (root + apps/migrate)`);
     if (!opts.noGit) console.log('Would run: git init -b main (no remote, no template history)');
-    console.log(`Would run validation: namespace scan, pnpm ls -r, turbo graph, typecheck, lint, guard:web-auth-imports, test${opts.skipBuild ? '' : ', build'}`);
+    if (opts.skipInstall) {
+      console.log('Would run validation: structure, namespace scan, git independence (script checks deferred — no install)');
+    } else {
+      const scriptChecks = [
+        'pnpm ls -r',
+        'turbo graph',
+        'typecheck',
+        'lint',
+        'guard:web-auth-imports',
+        'test',
+        opts.skipBuild ? null : 'build',
+        opts.skipBuild ? null : 'guard:web-secrets',
+      ].filter(Boolean);
+      console.log(`Would run validation: structure, namespace scan, git independence, ${scriptChecks.join(', ')}`);
+    }
     if (!opts.keepScaffolder) {
       console.log('Would REMOVE the generator from the output (scripts/scaffold*, docs/SCAFFOLD.md, scaffold npm scripts)');
       console.log('Would prune the generated CI + README so nothing references the removed files');
@@ -247,7 +272,7 @@ async function main() {
       dryRun: false,
       verbose: !!opts.verbose,
     });
-    console.log(`  manifests: ${t.manifestsChanged}/${t.manifests} changed; text files: ${t.textChanged} changed; env examples: ${t.envExamplesChanged}/${t.envExamples} changed`);
+    console.log(`  manifests: ${t.manifestsChanged}/${t.manifests} changed; text files: ${t.textChanged} changed; env examples: ${t.envExamplesChanged}/${t.envExamples} changed; brand files: ${t.brandFiles} changed`);
     // Provenance (no machine paths, no secrets).
     const provenance = {
       template: TEMPLATE_NAME,

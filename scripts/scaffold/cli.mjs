@@ -86,8 +86,9 @@ Examples:
 `;
 }
 
-export async function promptMissing(opts) {
+export async function promptMissing(opts, { preferLocalCwd = false } = {}) {
   const rl = readline.createInterface({ input, output });
+  const destinationHint = preferLocalCwd ? './<normalized-name>' : '../<normalized-name>';
   try {
     if (!opts.projectName) {
       const answer = (await rl.question('Project name (e.g. My Awesome App): ')).trim();
@@ -98,7 +99,7 @@ export async function promptMissing(opts) {
       if (answer) opts.scope = answer;
     }
     if (!opts.destination) {
-      const answer = (await rl.question('Destination (ENTER for ../<normalized-name>): ')).trim();
+      const answer = (await rl.question(`Destination (ENTER for ${destinationHint}): `)).trim();
       if (answer) opts.destination = answer;
     }
     if (!opts.yes) {
