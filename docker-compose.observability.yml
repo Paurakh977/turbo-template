@@ -300,7 +300,7 @@ services:
       # Prod gap #3 decision: KEEP store_container_labels=false. Dropping the
       # compose labels (com.docker.compose.service=api, ...) saves index
       # footprint on every cAdvisor series. Cost: per-service PromQL must use
-      # the `name` label (e.g. {name="template-turbo-repo-api-1"}) — which is
+      # the `name` label (e.g. {name="turbo-template-api-1"}) — which is
       # exactly what 01-system-overview.json already does
       # (container_memory_usage_bytes{name!=""}). Revisit only if per-service
       # alerting ever needs label selectors.

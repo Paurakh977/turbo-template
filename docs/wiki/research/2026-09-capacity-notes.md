@@ -4,7 +4,7 @@ type: research
 status: stable
 authority: expired
 owners: ["subsystems/k6-performance.md"]
-sources: ["k6/suites/capacity.js", "k6/config.js", "apps/api/src/cluster.ts", "docker-compose.yml", "pgbouncer/pgbouncer.ini", "GETTING_STARTED.md", "scripts/benchmark-report.mjs"]
+sources: ["k6/suites/capacity.js", "k6/config.js", "apps/api/src/cluster.ts", "docker-compose.yml", "pgbouncer/pgbouncer.ini", "docs/GETTING_STARTED.md", "scripts/benchmark-report.mjs"]
 depends_on: ["subsystems/k6-performance.md", "subsystems/database-package.md", "subsystems/api-runtime.md"]
 guards: []
 updated: 2026-09-30
@@ -23,7 +23,7 @@ template: true
 ## Source / Version
 - Fact: Sources `k6/suites/capacity.js` plus `k6/config.js:96-104` capacity thresholds plus `apps/api/src/cluster.ts:21-52` worker fork plus `pgbouncer/pgbouncer.ini` pools.
 - Fact: Versions: repo 8e9cce7, k6 0.57.0, `.env.k6.example:75-86` pools 50/1000/50/20/15, PG 200, checkpoint 15min/0.9, WAL 4GB/1GB.
-- Fact: Commit 8e9cce7 pool math from `GETTING_STARTED.md` pool section plus `docker-compose.yml:283-293` pooler comments; code wins over prose.
+- Fact: Commit 8e9cce7 pool math from `docs/GETTING_STARTED.md` pool section plus `docker-compose.yml:283-293` pooler comments; code wins over prose.
 ## Methodology
 - Fact: Recreate api only per step (`compose --env-file .env.k6 up -d api`), no rebuild; run `pnpm k6:capacity` with `.env.k6` flood gates RATE 2M THROTTLE 2M.
 - Fact: Capacity gates `checks>0.95 5xx<10pct dropped==0 429 count>=0`; breaking point expected slow, so no p95/p99 gate unlike load.
@@ -52,4 +52,4 @@ template: true
 - Fact: Expires 2027-03-30 (6mo); superseded-by null; supersede by adding new dated file on next capacity run, never editing in place.
 - Fact: Route T9 last, never default; code plus report JSON win over prose.
 ## Refs
-- Fact: Refs `k6/suites/capacity.js` plus `k6/config.js` plus `apps/api/src/cluster.ts` plus `pgbouncer/pgbouncer.ini` plus `GETTING_STARTED.md` plus `scripts/benchmark-report.mjs` plus `subsystems/k6-performance.md`.
+- Fact: Refs `k6/suites/capacity.js` plus `k6/config.js` plus `apps/api/src/cluster.ts` plus `pgbouncer/pgbouncer.ini` plus `docs/GETTING_STARTED.md` plus `scripts/benchmark-report.mjs` plus `subsystems/k6-performance.md`.

@@ -32,12 +32,86 @@
 
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D20-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![pnpm](https://img.shields.io/badge/pnpm-11.23.0-F69220?logo=pnpm&logoColor=white)](https://pnpm.io)
-[![Turborepo](https://img.shields.io/badge/Turborepo-2.x-EF4444?logo=turborepo&logoColor=white)](https://turbo.build)
+[![Turborepo](https://img.shields.io/badge/Turborepo-2.x-EF4444?logo=turbo&logoColor=white)](https://turbo.build)
 [![Better Auth](https://img.shields.io/badge/Better_Auth-1.6-5046E4)](https://www.better-auth.com)
 [![Prisma](https://img.shields.io/badge/Prisma-7-2D3748?logo=prisma&logoColor=white)](https://www.prisma.io)
-[![License](https://img.shields.io/badge/license-UNLICENSED-red)](#)
+[![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 
 </div>v>
+
+---
+
+## Start here
+
+Scaffold a new project with one command. No clone, no GitHub, no setup:
+
+```bash
+npx create-turbo-template-app my-app
+```
+
+That's it. You get a working full-stack app with authentication, RBAC, rate
+limiting, audit logging, a database, Redis, nginx, and a full Grafana
+observability stack — plus the `docs/wiki/` knowledge base so an AI coding
+agent (Claude Code, Cursor, Codex, opencode…) can work in it from day one.
+
+```
+my-app/
+├── apps/
+│   ├── api/         NestJS 11 — Better Auth, RBAC, rate limits, audit
+│   ├── web/         Next.js 16 — auth pages, dashboard, admin panel
+│   └── migrate/     Isolated migration runner
+├── packages/        auth · database · roles · api · ui · observability · configs
+├── docs/wiki/       10 invariants · 7 flows · 17 subsystems · 9 workflows
+├── observability/   Alloy · Prometheus · Loki · Tempo · Pyroscope · Grafana
+├── k6/              7 load-test suites
+└── AGENTS.md        AI agent entry point → docs/wiki/00-INDEX.md
+```
+
+Everything is renamed to your project: npm scope (`@my-app/*`), root package
+name, Postgres user/database, `APP_NAME`, and the Docker Compose project name.
+`.env.example` arrives with your identity already filled in.
+
+<details>
+<summary>Options and flags</summary>
+
+```bash
+npx create-turbo-template-app                       # interactive
+npx create-turbo-template-app my-app                # non-interactive name
+npx create-turbo-template-app "My Awesome App"      # normalized to my-awesome-app
+npx create-turbo-template-app my-app --scope @acme  # custom internal scope
+npx create-turbo-template-app my-app --skip-install # copy only, no pnpm install
+npx create-turbo-template-app my-app --dry-run      # show the plan, change nothing
+```
+
+| Flag | Meaning |
+|------|---------|
+| `--project-name <name>` | directory + root `package.json` name |
+| `--scope <scope>` | internal workspace scope (default `@<name>`) |
+| `--destination <path>` | output directory (default `./<name>`) |
+| `--yes`, `-y` | skip all prompts |
+| `--skip-install` | copy + transform, skip `pnpm install` |
+| `--no-git` | skip `git init` |
+| `--allow-existing` | write into a non-empty directory (never deletes) |
+| `--dry-run` | print the plan, make no changes |
+| `--skip-validation` | skip post-generation validation |
+| `--skip-build` | validate everything except `build` |
+| `--verbose` | log every transformed file |
+
+After scaffolding:
+
+```bash
+cd my-app
+cp .env.example .env        # fill in BETTER_AUTH_SECRET, passwords, SEED_ADMIN_*
+docker compose --profile local up -d
+pnpm db:generate && pnpm db:migrate:dev
+pnpm dev                    # https://localhost
+```
+
+The scaffolder runs `pnpm install --frozen-lockfile`, then validates the result
+(typecheck, lint, unit tests, build, both architecture guards) before reporting
+success. Full policy and rationale: [docs/SCAFFOLD.md](docs/SCAFFOLD.md).
+
+</details>
 
 ---
 
@@ -125,17 +199,20 @@ flowchart TD
 | [docs/GUIDE.md](docs/GUIDE.md) | Developer guide — monorepo structure, packages, RBAC, rate limiting, audit, observability |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Architecture diagrams, Docker profiles, service startup order, security boundaries |
 | [docs/CODEBASE.md](docs/CODEBASE.md) | AI agent reference — file-by-file breakdown, API endpoints, env vars, business logic |
-| [docs/wiki/00-INDEX.md](docs/wiki/00-INDEX.md) | LLM wiki entry point — task router for AI agents |
+| [docs/wiki/00-INDEX.md](docs/wiki/00-INDEX.md) | **LLM wiki entry point** — task router for AI agents |
 | [docs/wiki/00-GLOSSARY.md](docs/wiki/00-GLOSSARY.md) | Glossary — homonym pairs and disambiguation |
-| [docs/SCAFFOLD.md](docs/SCAFFOLD.md) | Creating a new project from this template |
+| [docs/SCAFFOLD.md](docs/SCAFFOLD.md) | How the npm package and the scaffolder work |
 
 ---
 
-## Quick start
+## Quick start (working on the template itself)
+
+> Most people should use `npx create-turbo-template-app my-app` instead — see
+> **Start here** above. The steps below are for developing the template itself.
 
 ### Prerequisites
 
-- Node.js >= 20
+- Node.js >= 20 (`engines`), 22 in CI
 - pnpm 11 (`corepack enable`)
 - Docker Desktop
 - mkcert (for local TLS)
@@ -220,7 +297,7 @@ nginx/          Reverse proxy config and TLS certs
 observability/  Grafana stack configs (Alloy, Prometheus, Loki, Tempo, Pyroscope, Grafana)
 pgbouncer/      Connection pooler config
 docs/           Documentation and LLM wiki
-scripts/        Architecture guards and utilities
+scripts/        Scaffolder, architecture guards, publish tooling
 ```
 
 ---
@@ -257,6 +334,11 @@ pnpm k6:stress                    # stress test
 # Guards (run before committing)
 pnpm guard:web-secrets
 pnpm guard:web-auth-imports
+pnpm guard:publish-contents   # audits the npm tarball: no secrets, no artifacts
+
+# Scaffold tooling
+pnpm scaffold                 # generate a new project from this checkout
+pnpm scaffold:test            # scaffolder test suite (also runs in CI)
 ```
 
 ---
@@ -632,6 +714,42 @@ Additional env files:
 
 ---
 
+## Publishing a new version (maintainer)
+
+The npm package **is** this repository. `scripts/scaffold.mjs` is wired as the
+package `bin`, and the monorepo is the payload.
+
+```bash
+# 1. Verify the tarball is clean (stages the npm-safe filename aliases,
+#    audits the real tarball, then removes them again)
+pnpm guard:publish-contents
+
+# 2. Bump version in package.json, update CHANGELOG if you keep one, commit
+git add -A && git commit -m "chore: release 1.1.0"
+
+# 3. Publish — prepack/postpack run automatically
+npm publish --access public
+```
+
+`prepack` runs `scripts/stage-template.mjs` (copies `.gitignore` and
+`pnpm-lock.yaml` to names npm does not strip) and then
+`scripts/check-publish-contents.mjs`, which aborts the publish if the tarball
+contains a live `.env`, TLS key material, a build artifact, a machine-specific
+path, or is missing something required. CI runs the same gate on every PR.
+
+Consumers then run:
+
+```bash
+npx create-turbo-template-app my-app
+```
+
+Nothing about GitHub is involved — the payload is entirely inside the npm
+tarball. See [docs/SCAFFOLD.md](docs/SCAFFOLD.md) for the full rationale,
+including the experiments behind the filename aliases.
+
+---
+
 ## License
 
-UNLICENSED — private template.
+MIT — see [LICENSE](./LICENSE). Generated projects inherit MIT and are yours to
+use commercially without attribution.

@@ -14,9 +14,20 @@ import {
   validateProjectName,
   parseScopeInput,
   resolveDestination,
+  toDisplayName,
+  toEnvSlug,
+  isRunningAsInstalledPackage,
 } from '../names.mjs';
 import { copyTemplate } from '../copy.mjs';
-import { discoverInternalSuffixes, transformTree, findStaleRepoRefs } from '../transform.mjs';
+import {
+  discoverInternalSuffixes,
+  transformTree,
+  transformEnvExample,
+  findStaleRepoRefs,
+} from '../transform.mjs';
+import { restoreDottedFilenames } from '../restore.mjs';
+import { validateStructure } from '../validate.mjs';
+import { isExcludedRelPath, UNDOTTED_ALIASES, PUBLISH_ONLY_MANIFEST_FIELDS } from '../constants.mjs';
 import { readWorkspaceNames, checkDangling } from '../graph.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -26,6 +37,21 @@ const nodeExe = process.execPath;
 
 async function mkTemp() {
   return fs.mkdtemp(path.join(os.tmpdir(), 'scaffold-test-'));
+}
+
+/** Full copy -> restore -> transform pipeline against a throwaway destination. */
+async function generateInto(destRoot, { projectName, newScope }) {
+  await copyTemplate({ srcRoot: TEMPLATE_ROOT, destRoot });
+  await restoreDottedFilenames(destRoot);
+  const suffixSet = new Set([...(await discoverInternalSuffixes(TEMPLATE_ROOT)), 'k6-load-testing', 'migrate']);
+  return transformTree({
+    destRoot,
+    newScope,
+    suffixSet,
+    projectName,
+    envSlug: toEnvSlug(projectName),
+    displayName: toDisplayName(projectName),
+  });
 }
 
 describe('names', () => {
@@ -49,6 +75,203 @@ describe('names', () => {
     assert.equal(parseScopeInput('@company').scope, '@company');
     assert.equal(parseScopeInput('company').scope, '@company');
     assert.equal(parseScopeInput('@company/foo').ok, false);
+  });
+
+  it('display name and Postgres-safe slug derivation', () => {
+    assert.equal(toDisplayName('my-awesome-app'), 'My Awesome App');
+    assert.equal(toDisplayName('acme'), 'Acme');
+    // Acronyms and bare numbers must not be exploded into letters.
+    assert.equal(toDisplayName('api2'), 'Api2');
+    // Dashes are illegal in an unquoted Postgres identifier.
+    assert.equal(toEnvSlug('my-awesome-app'), 'my_awesome_app');
+    assert.equal(toEnvSlug('acme.shop'), 'acme_shop');
+    assert.equal(toEnvSlug(''), 'app');
+    // Never empty, never trailing underscore, within the 63-byte limit.
+    assert.ok(!toEnvSlug('---').startsWith('_'));
+    assert.ok(toEnvSlug('x'.repeat(100)).length <= 63);
+  });
+
+  it('installed-package detection and local destination default', () => {
+    assert.equal(isRunningAsInstalledPackage(TEMPLATE_ROOT), false);
+    const installed = path.join(path.sep, 'x', 'node_modules', 'create-turbo-template-app');
+    assert.equal(isRunningAsInstalledPackage(installed), true);
+    // `npx` semantics: default into the CWD, not its parent.
+    const npxDest = resolveDestination(undefined, installed, 'my-app', { preferLocalCwd: true });
+    assert.ok(npxDest.ok);
+    assert.equal(path.basename(npxDest.path), 'my-app');
+    assert.equal(path.dirname(npxDest.path), path.resolve('.'));
+    // Local checkout semantics: default outside the checkout, resolved from cwd.
+    const localDest = resolveDestination(undefined, TEMPLATE_ROOT, 'my-app');
+    assert.ok(localDest.ok);
+    assert.equal(path.basename(localDest.path), 'my-app');
+    const relToTemplate = path.relative(TEMPLATE_ROOT, localDest.path);
+    assert.ok(
+      relToTemplate.startsWith('..') || path.isAbsolute(relToTemplate),
+      'the default destination must never land inside the template checkout',
+    );
+    // Writing inside an installed package is always refused.
+    assert.equal(resolveDestination(path.join(installed, 'out'), installed, 'my-app').ok, false);
+  });
+});
+
+describe('exclusion policy', () => {
+  it('never copies secrets, key material, local caches, or generated trees', () => {
+    for (const p of [
+      '.env',
+      '.env.local',
+      '.env.k6',
+      'apps/api/.env',
+      '.npmrc',
+      '.netrc',
+      'nginx/certs/localhost.key',
+      'nginx/certs/localhost.crt',
+      'secrets/prod.pem',
+      'apps/api/dist/main.js',
+      'node_modules/foo/index.js',
+      '.next/server/app.js',
+      '.turbo/cache/x',
+      '.agent/wiki-discovery/01-repository-platform.md',
+      'apps/web/.vscode/settings.json',
+      'apps/api/.idea/workspace.xml',
+      'packages/database/src/generated/prisma/client.ts',
+      'k6/results/capacity.summary.json',
+      'packages/coverage/lcov.info',
+      'logs/dev.log',
+      'apps/api/foo.tsbuildinfo',
+      '.DS_Store',
+    ]) {
+      assert.equal(isExcludedRelPath(p), true, `${p} must be excluded`);
+    }
+    // Everything a generated project genuinely needs must survive.
+    for (const p of [
+      '.env.example',
+      '.env.e2e.example',
+      '.env.k6.example',
+      '.env.test.example',
+      '.gitignore',
+      'apps/api/.gitignore',
+      'apps/web/.gitignore',
+      'nginx/certs/.gitignore',
+      'nginx/certs/README.md',
+      'pnpm-lock.yaml',
+      'apps/migrate/pnpm-lock.yaml',
+      'patches/better-auth@1.6.29.patch',
+      'docs/wiki/00-INDEX.md',
+      'AGENTS.md',
+      '.agents/skills/turborepo/SKILL.md',
+      '.github/workflows/ci.yml',
+      'apps/api/src/main.ts',
+      'observability/alloy/config.alloy',
+    ]) {
+      assert.equal(isExcludedRelPath(p), false, `${p} must be copied`);
+    }
+  });
+
+  it('every undotted alias has a real counterpart that must ship', () => {
+    for (const { dotted } of UNDOTTED_ALIASES) {
+      assert.equal(isExcludedRelPath(dotted), false, `${dotted} must be part of the payload`);
+    }
+    assert.ok(PUBLISH_ONLY_MANIFEST_FIELDS.includes('bin'));
+    assert.ok(PUBLISH_ONLY_MANIFEST_FIELDS.includes('files'));
+  });
+});
+
+describe('env identity transform', () => {
+  it('rewrites identity keys and leaves secrets untouched (LF and CRLF)', () => {
+    const lf = [
+      'POSTGRES_USER=myapp',
+      'POSTGRES_DB=myapp_db',
+      'DATABASE_URL=postgresql://myapp:supersecretpassword@localhost:5432/myapp_db?schema=public',
+      'DIRECT_URL=postgresql://myapp:supersecretpassword@localhost:5432/myapp_db?schema=public',
+      'APP_NAME=MyApp',
+      'EMAIL_FROM=MyApp <onboarding@resend.dev>',
+      'BETTER_AUTH_SECRET=',
+      'GOOGLE_CLIENT_SECRET=',
+      'SEED_ADMIN_EMAIL=admin@yourapp.com',
+    ].join('\n');
+    for (const input of [lf, lf.replace(/\n/g, '\r\n')]) {
+      const { content, changed } = transformEnvExample(input, { slug: 'acme_shop', display: 'Acme Shop' });
+      assert.equal(changed, true);
+      assert.ok(content.includes('POSTGRES_USER=acme_shop'));
+      assert.ok(content.includes('POSTGRES_DB=acme_shop_db'));
+      assert.ok(content.includes('postgresql://acme_shop:supersecretpassword@localhost:5432/acme_shop_db'));
+      assert.ok(content.includes('APP_NAME=Acme Shop'));
+      assert.ok(content.includes('EMAIL_FROM=Acme Shop <onboarding@resend.dev>'));
+      // Secrets and user-supplied values are never invented or overwritten.
+      assert.ok(content.includes('BETTER_AUTH_SECRET=\n') || content.includes('BETTER_AUTH_SECRET=\r'));
+      assert.ok(content.includes('GOOGLE_CLIENT_SECRET=\n') || content.includes('GOOGLE_CLIENT_SECRET=\r'));
+      assert.ok(content.includes('SEED_ADMIN_EMAIL=admin@yourapp.com'));
+      // No `myapp` placeholder survives.
+      assert.equal(/myapp/.test(content), false);
+    }
+  });
+
+  it('preserves the original line terminator', () => {
+    const crlf = 'APP_NAME=MyApp\r\nPOSTGRES_USER=myapp\r\n';
+    const { content } = transformEnvExample(crlf, { slug: 'acme_shop', display: 'Acme Shop' });
+    assert.equal(content, 'APP_NAME=Acme Shop\r\nPOSTGRES_USER=acme_shop\r\n');
+  });
+
+  it('is a no-op when there is nothing to rewrite', () => {
+    const input = 'POSTGRES_USER=acme_shop\nAPP_NAME=Acme Shop\n';
+    const { changed } = transformEnvExample(input, { slug: 'acme_shop', display: 'Acme Shop' });
+    assert.equal(changed, false);
+  });
+});
+
+describe('npm-mangled filename restore', () => {
+  it('renames undotted aliases back to their real names', async () => {
+    const tmp = await mkTemp();
+    await fs.writeFile(path.join(tmp, 'gitignore'), 'node_modules\n', 'utf8');
+    await fs.mkdir(path.join(tmp, 'apps', 'api'), { recursive: true });
+    await fs.writeFile(path.join(tmp, 'apps', 'api', 'gitignore'), 'dist\n', 'utf8');
+    await fs.writeFile(path.join(tmp, 'pnpm-lock.template.yaml'), 'lockfileVersion: 9.0\n', 'utf8');
+    // A file that must not be touched.
+    await fs.writeFile(path.join(tmp, 'keep.txt'), 'keep', 'utf8');
+
+    const { restored } = await restoreDottedFilenames(tmp);
+    assert.ok(restored.includes('.gitignore'));
+    assert.ok(restored.includes('apps/api/.gitignore'));
+    assert.ok(restored.includes('pnpm-lock.yaml'));
+    assert.equal(await fs.readFile(path.join(tmp, '.gitignore'), 'utf8'), 'node_modules\n');
+    assert.equal(await fs.readFile(path.join(tmp, 'pnpm-lock.yaml'), 'utf8'), 'lockfileVersion: 9.0\n');
+    assert.equal(await fs.stat(path.join(tmp, 'keep.txt')).then(() => true).catch(() => false), true);
+
+    // Idempotent: running again on an already-restored tree changes nothing.
+    const second = await restoreDottedFilenames(tmp);
+    assert.deepEqual(second.restored, []);
+    assert.equal(second.alreadyPresent, 0);
+    assert.deepEqual(second.normalized, []);
+
+    // The publish-staging block is stripped from ignore rules, so the result is
+    // identical from a git checkout and from an npm tarball.
+    const dest2 = path.join(await mkTemp(), 'strip-check');
+    await fs.mkdir(dest2, { recursive: true });
+    await fs.writeFile(
+      path.join(dest2, '.gitignore'),
+      'node_modules\n.env*\n# >>> npm publish staging (x) >>>\ngitignore\npnpm-lock.template.yaml\n# <<< npm publish staging (x) <<<\ncoverage\n',
+      'utf8',
+    );
+    const normalized = await restoreDottedFilenames(dest2);
+    assert.deepEqual(normalized.normalized, ['.gitignore']);
+    const cleaned = await fs.readFile(path.join(dest2, '.gitignore'), 'utf8');
+    assert.equal(cleaned.includes('npm publish staging'), false);
+    assert.ok(cleaned.includes('node_modules'));
+    assert.ok(cleaned.includes('coverage'));
+
+    await fs.rm(tmp, { recursive: true, force: true });
+    await fs.rm(path.dirname(dest2), { recursive: true, force: true });
+  });
+
+  it('never overwrites a real file with an alias', async () => {
+    const tmp = await mkTemp();
+    await fs.writeFile(path.join(tmp, '.gitignore'), 'REAL\n', 'utf8');
+    await fs.writeFile(path.join(tmp, 'gitignore'), 'ALIAS\n', 'utf8');
+    const { restored, alreadyPresent } = await restoreDottedFilenames(tmp);
+    assert.deepEqual(restored, []);
+    assert.equal(alreadyPresent, 1);
+    assert.equal(await fs.readFile(path.join(tmp, '.gitignore'), 'utf8'), 'REAL\n');
+    await fs.rm(tmp, { recursive: true, force: true });
   });
 });
 
@@ -139,6 +362,83 @@ describe('copy + transform (Case 1/6/10)', () => {
 
     await fs.rm(path.dirname(dest), { recursive: true, force: true });
   });
+});
+
+describe('publishable-payload guarantees (npx path)', () => {
+  it('generates a project that is safe to git-commit and frozen-installable', async () => {
+    const dest = path.join(await mkTemp(), 'Acme Shop Gen');
+    await fs.mkdir(path.dirname(dest), { recursive: true });
+    const t = await generateInto(dest, { projectName: 'acme-shop-gen', newScope: '@acme-shop-gen' });
+    assert.ok(t.envExamplesChanged >= 1, 'the *.env.example identity pass must run');
+
+    // 1. Ignore rules restored (npm strips .gitignore; the scaffolder then
+    //    runs `git add -A`, so a missing .gitignore leaks .env + node_modules).
+    for (const f of ['.gitignore', 'apps/api/.gitignore', 'apps/web/.gitignore', 'nginx/certs/.gitignore']) {
+      assert.ok(
+        await fs.stat(path.join(dest, f)).then(() => true).catch(() => false),
+        `${f} must exist in the generated project`,
+      );
+    }
+    // The publish-staging marker block must not leak into the shipped rules.
+    const rootIgnore = await fs.readFile(path.join(dest, '.gitignore'), 'utf8');
+    assert.equal(rootIgnore.includes('npm publish staging'), false);
+    assert.ok(rootIgnore.includes('node_modules'));
+    assert.ok(rootIgnore.includes('.env*'));
+
+    // 2. Root manifest carries NO publish-only fields and is private again.
+    const root = JSON.parse(await fs.readFile(path.join(dest, 'package.json'), 'utf8'));
+    assert.equal(root.name, 'acme-shop-gen');
+    assert.equal(root.private, true);
+    for (const field of PUBLISH_ONLY_MANIFEST_FIELDS) {
+      assert.equal(field in root, false, `root package.json must not carry "${field}"`);
+    }
+    // The template's own workflow must survive.
+    assert.equal(typeof root.scripts.dev, 'string');
+    assert.equal(typeof root.scripts.build, 'string');
+    assert.ok(root.devDependencies['@acme-shop-gen/eslint-config'] === 'workspace:*');
+
+    // 3. Lockfiles present so `pnpm install --frozen-lockfile` can work.
+    assert.ok(await fs.stat(path.join(dest, 'pnpm-lock.yaml')).then(() => true).catch(() => false));
+    assert.ok(
+      await fs.stat(path.join(dest, 'apps', 'migrate', 'pnpm-lock.yaml')).then(() => true).catch(() => false),
+    );
+
+    // 4. The LLM wiki ships intact — it is a headline feature of the template.
+    for (const doc of ['AGENTS.md', 'docs/wiki/00-INDEX.md', 'docs/wiki/_meta/registry.json']) {
+      assert.ok(await fs.stat(path.join(dest, doc)).then(() => true).catch(() => false), `${doc} must ship`);
+    }
+    const registry = JSON.parse(await fs.readFile(path.join(dest, 'docs', 'wiki', '_meta', 'registry.json'), 'utf8'));
+    const entries = Array.isArray(registry) ? registry : registry.files || registry.entries || [];
+    if (entries.length > 0) {
+      for (const entry of entries) {
+        const rel = typeof entry === 'string' ? entry : entry.path;
+        if (!rel || typeof rel !== 'string') continue;
+        const full = path.join(dest, 'docs', 'wiki', rel);
+        assert.ok(
+          await fs.stat(full).then(() => true).catch(() => false),
+          `wiki registry references ${rel}, which is missing from the generated project`,
+        );
+      }
+    }
+
+    // 5. `.env.example` reflects the new project's identity, not `myapp`.
+    const envExample = await fs.readFile(path.join(dest, '.env.example'), 'utf8');
+    assert.ok(envExample.includes('POSTGRES_USER=acme_shop_gen'));
+    assert.ok(envExample.includes('APP_NAME=Acme Shop Gen'));
+    assert.equal(/myapp/.test(envExample), false);
+
+    // 6. Structure validation passes on the generated tree.
+    const checked = await validateStructure({ destRoot: dest });
+    assert.ok(checked.includes('.gitignore'));
+    assert.ok(checked.includes('AGENTS.md'));
+
+    // 7. validateStructure actually fails when a guarantee is broken.
+    await fs.writeFile(path.join(dest, '.env'), 'BETTER_AUTH_SECRET=leaked\n', 'utf8');
+    await assert.rejects(() => validateStructure({ destRoot: dest }), /forbidden files in output/);
+    await fs.rm(path.join(dest, '.env'), { force: true });
+
+    await fs.rm(path.dirname(dest), { recursive: true, force: true });
+  }, { timeout: 120000 });
 });
 
 describe('CLI', () => {

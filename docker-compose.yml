@@ -1,3 +1,9 @@
+# Explicit Compose project name. Without this, Docker derives the name from the
+# checkout directory, so every documented `docker wait <project>-api-test-1`
+# command would only work in a folder literally named `turbo-template`.
+# Override per-machine with the standard COMPOSE_PROJECT_NAME env var.
+name: ${COMPOSE_PROJECT_NAME:-turbo-template}
+
 x-proxy-base: &proxy-base
   image: nginx:1.27-alpine
   restart: unless-stopped
@@ -745,7 +751,7 @@ services:
   # Run (detached + wait — NOT --abort-on-container-exit: migrate-test's
   # clean exit 0 would abort the suite before api-test finishes):
   #   docker compose --profile test up --build -d
-  #   docker wait template-turbo-repo-api-test-1  # exit code = suite result
+  #   docker wait ${COMPOSE_PROJECT_NAME:-turbo-template}-api-test-1  # exit code = suite result
   # ───────────────────────────────────────────────────────────────────────────
 
   postgres-test:

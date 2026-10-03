@@ -12,9 +12,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # No `version:` pin here on purpose — reading the root `packageManager`
+      # field is the single source of truth. A hardcoded `version: 9` silently
+      # disagreed with the repo's pnpm 11 and was the reason this workflow was
+      # not equivalent to CI.
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
 
       - uses: actions/setup-node@v4
         with:

@@ -1,5 +1,14 @@
-*
-!.gitignore
-!README.md
+# TLS material for local HTTPS (mkcert). Never commit — the generated project
+# must not carry a private key, and npm would strip the file anyway.
 localhost.crt
 localhost.key
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+
+# Registry credentials, if anyone ever drops one here.
+.npmrc
+.netrc

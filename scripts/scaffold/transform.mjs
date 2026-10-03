@@ -13,7 +13,10 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
   TEMPLATE_SCOPE,
-  TEMPLATE_ROOT_NAME,
+  TEMPLATE_ENV_SLUG,
+  TEMPLATE_ENV_DB,
+  TEMPLATE_ENV_APP_NAME,
+  PUBLISH_ONLY_MANIFEST_FIELDS,
   NEVER_TRANSFORM_PREFIXES,
   LOCKFILE_NAMES,
   OTEL_PRESERVE_FILES,
@@ -99,14 +102,102 @@ function renameDepKey(key, newScope, suffixSet) {
   return `${newScope}/${suffix}`;
 }
 
+/**
+ * `.env.example` identity pass.
+ *
+ * `.env*` files are not text-transformable (they are env syntax, not source),
+ * so the `@repo/` pass never touches them — which would leave every generated
+ * project advertising `POSTGRES_USER=myapp` and `APP_NAME=MyApp`. This rewrites
+ * exactly the identity-bearing keys, line by line, and never touches values the
+ * user must supply themselves (BETTER_AUTH_SECRET, OAuth ids, API keys).
+ *
+ * `slug` is Postgres-safe (dashes -> underscores); `display` is the
+ * human-readable form used for APP_NAME and the Resend From name.
+ */
+export function transformEnvExample(content, { slug, display }) {
+  let changed = false;
+  const dbName = `${slug}_db`;
+  const out = content
+    .split('\n')
+    .map((rawLine) => {
+      // Preserve the exact line terminator. Several `*.env.example` files in the
+      // template are CRLF, and JS `.` does not match `\r` — so a naive `(.*)$`
+      // regex silently matches nothing on a CRLF file.
+      const hadCR = rawLine.endsWith('\r');
+      const line = hadCR ? rawLine.slice(0, -1) : rawLine;
+
+      // `KEY=value` (also tolerates `export KEY=`, used by some compose files).
+      const m = /^(\s*(?:export\s+)?)([A-Za-z_][A-Za-z0-9_]*)(=)(.*)$/.exec(line);
+      if (!m) return rawLine;
+      const [, lead, key, eq, rest] = m;
+      // Preserve any trailing comment.
+      const hashIndex = rest.indexOf(' #');
+      const value = (hashIndex === -1 ? rest : rest.slice(0, hashIndex)).trim();
+      const comment = hashIndex === -1 ? '' : rest.slice(hashIndex);
+
+      let next = value;
+      switch (key) {
+        case 'POSTGRES_USER':
+          next = slug;
+          break;
+        case 'POSTGRES_DB':
+          next = dbName;
+          break;
+        case 'DATABASE_URL':
+        case 'DIRECT_URL':
+          // Rewrite the user and database segments only; the password segment
+          // is a placeholder the user replaces in their own `.env`.
+          next = value.split(`${TEMPLATE_ENV_SLUG}:`).join(`${slug}:`).split(TEMPLATE_ENV_SLUG).join(slug);
+          break;
+        case 'APP_NAME':
+          next = display;
+          break;
+        case 'EMAIL_FROM':
+          // `<Display Name> <onboarding@resend.dev>` — replace the name only.
+          next = value.includes('<') ? value.replace(TEMPLATE_ENV_APP_NAME, display) : value;
+          break;
+        default:
+          return rawLine;
+      }
+      if (next === value) return rawLine;
+      changed = true;
+      return `${lead}${key}${eq}${next}${comment}${hadCR ? '\r' : ''}`;
+    })
+    .join('\n');
+  return { content: out, changed };
+}
+
 function transformManifestObject(json, { newScope, suffixSet, projectName, isRoot }) {
   let changed = false;
   const out = { ...json };
 
-  if (typeof out.name === 'string') {
-    if (isRoot && out.name === TEMPLATE_ROOT_NAME) {
-      out.name = projectName;
+  // The root manifest is BOTH the published npm package manifest and the
+  // template for the generated project's root manifest. Strip the publishing
+  // concerns so a business app never inherits a `bin` pointing at the
+  // scaffolder, a `files` allowlist hiding its own source, or the template's
+  // repository URL. `private` is restored because the generated project is a
+  // workspace root that must never itself be published.
+  if (isRoot) {
+    for (const field of PUBLISH_ONLY_MANIFEST_FIELDS) {
+      if (field in out) {
+        delete out[field];
+        changed = true;
+      }
+    }
+    if (out.private !== true) {
+      out.private = true;
       changed = true;
+    }
+  }
+
+  if (typeof out.name === 'string') {
+    // The root package is renamed unconditionally: it is the workspace root,
+    // so its name can never be an internal dependency and is always identity.
+    if (isRoot) {
+      if (out.name !== projectName) {
+        out.name = projectName;
+        changed = true;
+      }
     } else if (out.name.startsWith(`${TEMPLATE_SCOPE}/`)) {
       const suffix = out.name.slice(TEMPLATE_SCOPE.length + 1);
       if (suffixSet.has(suffix) || out.name === `${TEMPLATE_SCOPE}/migrate` || out.name === `${TEMPLATE_SCOPE}/k6-load-testing`) {
@@ -179,12 +270,14 @@ export function transformTextContent(content, { newScope, relPosix }) {
   return { content: working, changed };
 }
 
-export async function transformTree({ destRoot, newScope, suffixSet, projectName, dryRun = false, verbose = false }) {
+export async function transformTree({ destRoot, newScope, suffixSet, projectName, envSlug, displayName, dryRun = false, verbose = false }) {
   const stats = {
     manifests: 0,
     manifestsChanged: 0,
     textFiles: 0,
     textChanged: 0,
+    envExamples: 0,
+    envExamplesChanged: 0,
     skippedNeverTransform: 0,
     skippedLockfile: 0,
     skippedBinary: 0,
@@ -236,6 +329,24 @@ export async function transformTree({ destRoot, newScope, suffixSet, projectName
             await fs.writeFile(full, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
           }
           if (verbose) console.log(`  manifest: ${relPosix}`);
+        }
+        continue;
+      }
+      // `*.env.example` identity pass — runs BEFORE the generic text pass so the
+      // placeholder `myapp` / `MyApp` tokens are replaced exactly once, by key,
+      // and never by a blind repo-wide replace.
+      if (base.endsWith('.env.example') || (base.startsWith('.env.') && base.endsWith('.example'))) {
+        stats.envExamples += 1;
+        const raw = await fs.readFile(full, 'utf8');
+        const { content: next, changed } = transformEnvExample(raw, {
+          slug: envSlug,
+          display: displayName,
+        });
+        if (changed) {
+          stats.envExamplesChanged += 1;
+          if (stats.changedPaths.length < 500) stats.changedPaths.push(relPosix);
+          if (!dryRun) await fs.writeFile(full, next, 'utf8');
+          if (verbose) console.log(`  env: ${relPosix}`);
         }
         continue;
       }

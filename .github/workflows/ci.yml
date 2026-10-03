@@ -59,6 +59,13 @@ jobs:
       - name: Unit tests
         run: pnpm test
 
+      # The scaffolder is the product. Its contract (name/scope normalization,
+      # destination guards, copy exclusions, npm-mangled filename restore,
+      # lockfile transplant) is exercised on every PR, not just at release time.
+      - name: Scaffold tests
+        run: pnpm scaffold:test
+
+      # E2E
       - name: E2E tests
         run: pnpm test:e2e
 
@@ -66,3 +73,20 @@ jobs:
       # DB credentials (they were removed in the Phase 2 commit).
       - name: Guard - web bundle carries no DB secrets
         run: node scripts/check-web-secrets.mjs --strict
+
+  publish-contents:
+    name: publish gate - npm tarball is clean
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Stages the npm-safe filename aliases (npm strips .gitignore and the
+      # root pnpm-lock.yaml), then audits the real tarball for secrets, build
+      # artifacts, and machine-specific paths. Fails the publish closed.
+      - name: Audit npm tarball contents
+        run: pnpm guard:publish-contents

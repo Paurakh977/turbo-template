@@ -435,7 +435,7 @@ pnpm test
 
 ```bash
 docker compose --profile test up --build -d
-docker wait template-turbo-repo-api-test-1
+docker wait ${COMPOSE_PROJECT_NAME:-turbo-template}-api-test-1
 docker compose --profile test logs api-test
 docker compose --profile test down
 ```
@@ -563,7 +563,7 @@ pnpm auth:generate && pnpm db:migrate:dev && pnpm db:generate
 
 # Testing
 pnpm test
-docker compose --profile test up -d --build && docker wait template-turbo-repo-api-test-1
+docker compose --profile test up -d --build && docker wait ${COMPOSE_PROJECT_NAME:-turbo-template}-api-test-1
 pnpm --filter web test:e2e
 
 # Quality gates

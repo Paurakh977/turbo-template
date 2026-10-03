@@ -25,7 +25,7 @@
 ## 1. Monorepo structure
 
 ```text
-template-turbo-repo/
+turbo-template/
 ├── apps/
 │   ├── api/                      NestJS REST API + Better Auth handler
 │   │   ├── src/                  modules, guards, interceptors

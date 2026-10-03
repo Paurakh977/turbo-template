@@ -74,7 +74,42 @@ pnpm-debug.log*
 # TypeScript incremental build state
 *.tsbuildinfo
 
+# Local AI-agent caches. `.agents/` (plural) is the vendored skill set that
+# ships with the template; `.agent/` (singular) is per-machine scratch.
+.agent/
+
 # Misc
 .DS_Store
+Thumbs.db
+
+# TLS / certificate material. `nginx/certs/` has its own nested .gitignore,
+# but these must be ignored repo-wide so a stray key dropped anywhere else
+# can never be committed (and therefore never reach an npm tarball).
 *.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# Registry credentials — never commit, never publish.
+.npmrc
+.netrc
+
+# npm pack output from `npm pack` / `npm publish` runs.
+*.tgz
+
+# >>> npm publish staging (turbo-template) >>>
+# Copies made by scripts/stage-template.mjs at prepack time, because npm
+# strips .gitignore and the root pnpm-lock.yaml from published tarballs.
+# scripts/stage-template.mjs removes this block from the COPY that ships, so
+# generated projects receive clean ignore rules.
+gitignore
+pnpm-lock.template.yaml
+apps/api/gitignore
+apps/web/gitignore
+nginx/certs/gitignore
+# <<< npm publish staging (turbo-template) <<<
 

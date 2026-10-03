@@ -1,18 +1,38 @@
 .git
 .gitignore
+gitignore
 .turbo
 out
-.env
-.env.local
-.env.*.local
 node_modules
 pnpm-store
+.agent
 *.log
+*.err
 *.tsbuildinfo
 .DS_Store
 Thumbs.db
+blob-report
+playwright-report
+test-results
+coverage
+
+# Secrets never enter the build context. Every `*.env.example` is excluded too:
+# no Dockerfile COPYs one, and omitting them keeps the context small.
+.env
+.env.*
+*.env
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+.npmrc
+.netrc
+
 nginx/certs/*
 !nginx/certs/.gitignore
+!nginx/certs/gitignore
 !nginx/certs/README.md
 
 **/.turbo
@@ -20,3 +40,4 @@ nginx/certs/*
 **/.next
 **/dist
 **/coverage
+**/generated

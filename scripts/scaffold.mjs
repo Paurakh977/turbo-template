@@ -21,14 +21,21 @@ import {
   deriveScope,
   validateDestinationName,
   resolveDestination,
+  toDisplayName,
+  toEnvSlug,
+  isRunningAsInstalledPackage,
 } from './scaffold/names.mjs';
 import { copyTemplate } from './scaffold/copy.mjs';
-import { discoverInternalSuffixes, transformTree } from './scaffold/transform.mjs';
-import { validateGenerated, pnpmCmd } from './scaffold/validate.mjs';
-import { SCAFFOLD_VERSION, TEMPLATE_NAME } from './scaffold/constants.mjs';
+import { discoverInternalSuffixes, transformTree, findStaleRepoRefs } from './scaffold/transform.mjs';
+import { restoreDottedFilenames } from './scaffold/restore.mjs';
+import { validateGenerated, validateStructure, pnpmCmd } from './scaffold/validate.mjs';
+import { TEMPLATE_NAME, readTemplateVersion } from './scaffold/constants.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const TEMPLATE_ROOT = path.resolve(here, '..');
+// True when running from `node_modules/<pkg>` (i.e. `npx create-...`), false
+// when running `pnpm scaffold` from a template checkout. Drives CLI defaults.
+const RUNNING_INSTALLED = isRunningAsInstalledPackage(TEMPLATE_ROOT);
 
 function fail(phase, message, destHint) {
   console.error(`\nScaffolding failed during ${phase}.`);
@@ -128,7 +135,9 @@ async function main() {
     ? validateDestinationName(path.basename(path.resolve(opts.destination)))
     : { valid: true };
   if (!destNameCheck.valid) fail('destination-validation', destNameCheck.error);
-  const destRes = resolveDestination(opts.destination, TEMPLATE_ROOT, projectName);
+  const destRes = resolveDestination(opts.destination, TEMPLATE_ROOT, projectName, {
+    preferLocalCwd: RUNNING_INSTALLED,
+  });
   if (!destRes.ok) fail('destination-validation', destRes.error);
   const destRoot = destRes.path;
   console.log(`Destination: ${destRoot}`);
@@ -171,7 +180,8 @@ async function main() {
   if (opts.dryRun) {
     console.log(plan);
     console.log('Dry run — no changes made.');
-    console.log(`Would copy template (excluding .git/node_modules/.next/dist/build/out/coverage/.turbo/.env/live certs/logs).`);
+    console.log(`Would copy template (excluding .git/.agent/node_modules/.next/dist/build/out/coverage/.turbo/.env/live certs/credentials/logs).`);
+    console.log(`Would restore npm-mangled ignore files (.gitignore) so the generated repo never commits .env or node_modules`);
     console.log(`Would rename ${suffixSet.size} internal packages: ${[...suffixSet].map((s) => `${scope}/${s}`).join(', ')}`);
     console.log(`Would transplant pnpm-lock.yaml (rename workspace importer keys only; zero resolutions edited) + copy apps/migrate/pnpm-lock.yaml verbatim`);
     console.log(`Would run: pnpm install --frozen-lockfile (root + apps/migrate)`);
@@ -205,6 +215,20 @@ async function main() {
   }
   console.log(`  copied ${copyStats.copied} files (${copyStats.dirs} dirs), excluded ${copyStats.excluded}`);
 
+  // Restore filenames npm mangles (`.gitignore` -> `gitignore` in the tarball).
+  // MUST happen before transform and long before `git add -A`: a generated
+  // project without ignore rules would commit node_modules/ and a live .env.
+  try {
+    const { restored, alreadyPresent } = await restoreDottedFilenames(destRoot);
+    if (restored.length > 0) {
+      console.log(`  restored ${restored.length} npm-mangled filename(s): ${restored.join(', ')}`);
+    } else if (alreadyPresent > 0) {
+      console.log(`  ${alreadyPresent} ignore file(s) already present`);
+    }
+  } catch (err) {
+    fail('filename-restore', err.message, destRoot);
+  }
+
   // Transform.
   console.log('✓ Applying project identity...');
   try {
@@ -213,14 +237,16 @@ async function main() {
       newScope: scope,
       suffixSet,
       projectName,
+      envSlug: toEnvSlug(projectName),
+      displayName: toDisplayName(projectName),
       dryRun: false,
       verbose: !!opts.verbose,
     });
-    console.log(`  manifests: ${t.manifestsChanged}/${t.manifests} changed; text files: ${t.textChanged} changed`);
+    console.log(`  manifests: ${t.manifestsChanged}/${t.manifests} changed; text files: ${t.textChanged} changed; env examples: ${t.envExamplesChanged}/${t.envExamples} changed`);
     // Provenance (no machine paths, no secrets).
     const provenance = {
       template: TEMPLATE_NAME,
-      templateVersion: SCAFFOLD_VERSION,
+      templateVersion: readTemplateVersion(TEMPLATE_ROOT),
       generatedAt: new Date().toISOString(),
       projectName,
       packageScope: scope,
@@ -289,34 +315,64 @@ async function main() {
   }
 
   // Validation.
-  if (!opts.skipValidation && !opts.skipInstall) {
-    console.log('✓ Validating generated project...');
-    try {
-      const results = await validateGenerated({
-        destRoot,
-        newScope: scope,
-        skipBuild: !!opts.skipBuild,
-        skipValidation: false,
-        verbose: !!opts.verbose,
-      });
-      console.log(`✓ Validation passed (${results.length} checks)`);
-    } catch (err) {
-      fail('validation', err.message, destRoot);
+  //
+  // Structure + namespace checks are cheap and need no `node_modules`, so they
+  // run even under `--skip-install`. Previously `--skip-install` skipped
+  // validation entirely, which meant a packaging regression (a missing
+  // `.gitignore`, a leaked `.env`, a stale `@repo/`) could ship unnoticed.
+  const wantValidation = !opts.skipValidation;
+  if (wantValidation) {
+    if (opts.skipInstall) {
+      console.log('✓ Verifying project structure (no install performed)...');
+      try {
+        const checked = await validateStructure({ destRoot });
+        console.log(`  ✓ structure (${checked.length} required files, ignore rules intact, no secrets present)`);
+        const stale = await findStaleRepoRefs(destRoot);
+        if (stale.length > 0) {
+          fail(
+            'validation',
+            `stale @repo/ references in: ${stale.slice(0, 20).join(', ')}${stale.length > 20 ? ` (+${stale.length - 20} more)` : ''}`,
+            destRoot,
+          );
+        }
+        console.log('  ✓ no-stale-namespace');
+        console.log('  validation deferred (no install; run pnpm install then pnpm lint/typecheck/test/build in the output).');
+      } catch (err) {
+        fail('validation', err.message, destRoot);
+      }
+    } else {
+      console.log('✓ Validating generated project...');
+      try {
+        const results = await validateGenerated({
+          destRoot,
+          newScope: scope,
+          skipBuild: !!opts.skipBuild,
+          skipValidation: false,
+          verbose: !!opts.verbose,
+        });
+        console.log(`✓ Validation passed (${results.length} checks)`);
+      } catch (err) {
+        fail('validation', err.message, destRoot);
+      }
     }
-  } else if (opts.skipValidation) {
-    console.log('  validation skipped (--skip-validation).');
   } else {
-    console.log('  validation deferred (no install; run pnpm install then pnpm lint/typecheck/test/build in the output).');
+    console.log('  validation skipped (--skip-validation).');
   }
 
   console.log('\nProject created successfully.');
-  console.log(`  directory: ${destRoot}`);
-  console.log(`  scope:     ${scope}`);
-  console.log('Next steps:');
+  console.log(`  directory:  ${destRoot}`);
+  console.log(`  name:       ${projectName}`);
+  console.log(`  scope:      ${scope}`);
+  console.log(`  template:   ${TEMPLATE_NAME} v${readTemplateVersion(TEMPLATE_ROOT)}`);
+  console.log('\nNext steps:');
   console.log(`  cd ${destRoot}`);
-  console.log('  cp .env.example .env   # then fill in secrets (never copied by the scaffolder)');
-  console.log('  pnpm db:generate');
-  console.log('  pnpm dev');
+  console.log('  cp .env.example .env      # then fill in BETTER_AUTH_SECRET, passwords, SEED_ADMIN_*');
+  console.log('  mkcert -install && mkcert -key-file nginx/certs/localhost.key \\');
+  console.log('               -cert-file nginx/certs/localhost.crt localhost 127.0.0.1');
+  console.log('  docker compose --profile local up -d');
+  console.log('  pnpm db:generate && pnpm db:migrate:dev');
+  console.log('  pnpm dev                   # https://localhost');
+  console.log('\nDocs: docs/GETTING_STARTED.md · docs/GUIDE.md · docs/wiki/00-INDEX.md (AI agents: AGENTS.md)');
 }
 
 main().catch((err) => {

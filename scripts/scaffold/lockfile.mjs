@@ -26,11 +26,36 @@ import { TEMPLATE_SCOPE } from './constants.mjs';
 
 const KEY_PREFIX = `'${TEMPLATE_SCOPE}/`;
 
+/**
+ * Locate the template's root lockfile.
+ *
+ * npm hard-strips a ROOT `pnpm-lock.yaml` from any tarball, so when the
+ * scaffolder runs from an installed package the lockfile is present under the
+ * staged alias `pnpm-lock.template.yaml` instead (see constants.UNDOTTED_ALIASES
+ * and scripts/stage-template.mjs). A git checkout has the real name.
+ */
+async function resolveTemplateLockfile(templateRoot) {
+  for (const name of ['pnpm-lock.yaml', 'pnpm-lock.template.yaml']) {
+    const candidate = path.join(templateRoot, name);
+    try {
+      await fs.access(candidate);
+      return candidate;
+    } catch {
+      // try next
+    }
+  }
+  throw new Error(
+    `no pnpm-lock.yaml found in the template root (${templateRoot}) — neither the real name nor the staged alias ` +
+      '`pnpm-lock.template.yaml` is present. The published package is incomplete; reinstall it from the registry.',
+  );
+}
+
 export async function transplantLockfiles(templateRoot, destRoot, newScope) {
   const stats = { rootKeys: 0, migrate: 'copied-unchanged' };
 
   // Root lockfile: scoped key rewrite only.
-  const src = await fs.readFile(path.join(templateRoot, 'pnpm-lock.yaml'), 'utf8');
+  const sourcePath = await resolveTemplateLockfile(templateRoot);
+  const src = await fs.readFile(sourcePath, 'utf8');
   let count = 0;
   let idx = src.indexOf(KEY_PREFIX);
   while (idx !== -1) {

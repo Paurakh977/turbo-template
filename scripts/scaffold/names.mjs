@@ -43,6 +43,36 @@ function npmNameProblems(name) {
   return problems;
 }
 
+/**
+ * Human-facing display form: `my-awesome-app` -> `My Awesome App`.
+ * Used for APP_NAME / EMAIL_FROM in generated `.env.example` files and in the
+ * post-scaffold summary. Falls back to the slug when a segment is an acronym
+ * or a bare number, so `api2` stays `Api2` rather than `A P I 2`.
+ */
+export function toDisplayName(projectName) {
+  if (!projectName) return '';
+  return projectName
+    .split(/[-_.~]+/)
+    .filter(Boolean)
+    .map((seg) => (/^[a-z]/.test(seg) ? seg[0].toUpperCase() + seg.slice(1) : seg))
+    .join(' ');
+}
+
+/**
+ * Postgres-safe identifier: lowercase, dashes/dots replaced with underscores,
+ * truncated to 63 bytes. Postgres identifiers cannot contain `-` unquoted, and
+ * DATABASE_URL would otherwise need percent-encoding in the password position.
+ */
+export function toEnvSlug(projectName, maxLength = 63) {
+  const slug = String(projectName || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, maxLength)
+    .replace(/_+$/g, '');
+  return slug || 'app';
+}
+
 export function validateProjectName(name) {
   const problems = npmNameProblems(name);
   const warnings = [];
@@ -97,9 +127,16 @@ export function validateDestinationName(name) {
 /**
  * Resolve + guard the destination directory.
  * Rejects: template root itself, anything inside template root, dangerous roots.
+ *
+ * `preferLocalCwd` switches the default from `../<name>` to `./<name>`. That is
+ * the right default when the scaffolder runs as an installed package
+ * (`npx create-turbo-template-app`), because the user's cwd is where they
+ * intend to work — create-react-app / create-next-app behave the same way.
+ * Running `pnpm scaffold` inside the template keeps `../<name>` so the output
+ * lands beside the checkout rather than inside it.
  */
-export function resolveDestination(destinationInput, templateRoot, fallbackProjectName) {
-  const raw = destinationInput || `../${fallbackProjectName}`;
+export function resolveDestination(destinationInput, templateRoot, fallbackProjectName, { preferLocalCwd = false } = {}) {
+  const raw = destinationInput || (preferLocalCwd ? `./${fallbackProjectName}` : `../${fallbackProjectName}`);
   const resolved = path.resolve(raw);
   const templateResolved = path.resolve(templateRoot);
   if (resolved === templateResolved) {
@@ -114,5 +151,22 @@ export function resolveDestination(destinationInput, templateRoot, fallbackProje
   if (resolved === parsed.root) {
     return { ok: false, error: 'destination must not be a filesystem root' };
   }
+  // Never write inside an installed package (npx cache / node_modules).
+  const templateInsideNodeModules = templateResolved.split(path.sep).includes('node_modules');
+  if (templateInsideNodeModules) {
+    const relToTemplate = path.relative(templateResolved, resolved);
+    if (!relToTemplate.startsWith('..') && !path.isAbsolute(relToTemplate)) {
+      return { ok: false, error: 'destination must be outside the installed package directory' };
+    }
+  }
   return { ok: true, path: resolved };
+}
+
+/**
+ * True when this scaffolder is executing from an installed npm package
+ * (`node_modules/<pkg>`) rather than from a template checkout. Used to pick
+ * CLI defaults (destination layout, messaging) appropriate for `npx`.
+ */
+export function isRunningAsInstalledPackage(templateRoot) {
+  return path.resolve(templateRoot).split(path.sep).includes('node_modules');
 }

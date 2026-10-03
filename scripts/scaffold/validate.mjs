@@ -34,6 +34,171 @@ function run(cmd, args, cwd, { allowFail = false, env } = {}) {
   return res;
 }
 
+/**
+ * Normalize one gitignore rule for comparison: drop comments/negations, strip
+ * the leading `/` anchor and trailing `/`. Ignore files in this template use
+ * every style — `/node_modules`, `node_modules/`, `/.next/`, `dist/` — so a
+ * naive string equality check reports false negatives.
+ * @returns {string|null} null when the line carries no rule.
+ */
+function normalizeIgnoreRule(line) {
+  let rule = line.trim();
+  if (!rule || rule.startsWith('#') || rule.startsWith('!')) return null;
+  rule = rule.replace(/^\/+/, '').replace(/\/+$/, '');
+  return rule || null;
+}
+
+/** True when `rules` covers `pattern` (exact, directory-prefix, or glob prefix). */
+function ruleCovers(rules, pattern) {
+  const bare = pattern.replace(/^\/+/, '').replace(/\/+$/, '');
+  if (pattern.endsWith('*')) {
+    const stem = bare.slice(0, -1);
+    return rules.some((r) => r.startsWith(stem));
+  }
+  return rules.some((r) => r === bare || r.startsWith(`${bare}/`));
+}
+
+/**
+ * Files that must exist as `.gitignore` in a generated project, and the
+ * patterns each must contain.
+ *
+ * npm strips `.gitignore` from published tarballs (nested copies are dropped;
+ * a root copy is renamed to `.npmignore` on install), so the scaffolder
+ * restores them from undotted aliases. If that ever regresses, the scaffolder's
+ * own `git add -A` would commit `node_modules/` and a live `.env` full of
+ * credentials. This check turns that silent failure into a hard error.
+ */
+const REQUIRED_IGNORE_FILES = [
+  { file: '.gitignore', mustIgnore: ['node_modules', '.env*'] },
+  { file: 'apps/api/.gitignore', mustIgnore: ['node_modules', 'dist'] },
+  { file: 'apps/web/.gitignore', mustIgnore: ['node_modules', '.next'] },
+  { file: 'nginx/certs/.gitignore', mustIgnore: ['localhost.key', 'localhost.crt'] },
+];
+
+/**
+ * Files that must never appear in a generated project, checked independently
+ * of the copy denylist so a policy regression is caught here rather than after
+ * a user has already committed credentials.
+ *
+ * Only rules that the scaffolder and the install could never legitimately
+ * produce are listed. `node_modules/`, `dist/`, `.next/` and friends are NOT:
+ * `pnpm install` and `turbo build` create them inside the generated project, so
+ * flagging them would be a false positive. Their provenance is covered by the
+ * copy denylist (EXCLUDE_DIR_NAMES) and by the publish gate instead.
+ */
+const FORBIDDEN_IN_OUTPUT = [
+  { matcher: (p) => p === '.env' || (p.startsWith('.env.') && !p.endsWith('.example')), reason: 'live env file' },
+  { matcher: (p) => /\.(pem|key|crt|cer|p12|pfx|keystore)$/i.test(p), reason: 'TLS key material' },
+  { matcher: (p) => p === '.npmrc' || p === '.netrc', reason: 'registry credentials' },
+  { matcher: (p) => p === '.agent' || p.startsWith('.agent/'), reason: 'local agent cache' },
+  { matcher: (p) => p === 'k6/results' || p.startsWith('k6/results/'), reason: 'k6 run artifact' },
+  { matcher: (p) => p === 'packages/coverage' || p.startsWith('packages/coverage/'), reason: 'committed coverage artifact' },
+  { matcher: (p) => p === 'logs' || p.startsWith('logs/'), reason: 'debug log dump' },
+];
+
+/** Directories the install or build legitimately creates — never descended into. */
+const SCAN_SKIP_DIRS = new Set([
+  'node_modules',
+  '.git',
+  '.next',
+  '.turbo',
+  'coverage',
+  'dist',
+  'build',
+  'playwright-report',
+  'test-results',
+]);
+
+/**
+ * Structural checks that need neither `node_modules` nor a package manager, so
+ * they can run even when the install was skipped (`--skip-install`).
+ * This is what makes `--skip-install` safe: the namespace and ignore-rule
+ * guarantees are verified regardless of whether dependencies were installed.
+ */
+export async function validateStructure({ destRoot }) {
+  const problems = [];
+  const checked = [];
+
+  // 1. Ignore rules exist and cover the dangerous paths.
+  for (const { file, mustIgnore } of REQUIRED_IGNORE_FILES) {
+    const full = path.join(destRoot, file);
+    let content;
+    try {
+      content = await fs.readFile(full, 'utf8');
+    } catch {
+      problems.push(`missing ${file} — npm strips .gitignore from published packages, so it must be restored from its alias`);
+      continue;
+    }
+    const rules = content.split('\n').map(normalizeIgnoreRule).filter(Boolean);
+    for (const pattern of mustIgnore) {
+      // A negated rule (`!.env.example`) does not count as coverage.
+      if (!ruleCovers(rules, pattern)) problems.push(`${file} does not ignore "${pattern}"`);
+    }
+    checked.push(file);
+  }
+
+  // 2. Nothing forbidden survived the copy.
+  const offenders = [];
+  async function walk(dir) {
+    let entries;
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      const rel = path.relative(destRoot, full).split(path.sep).join('/');
+      if (entry.isDirectory()) {
+        if (SCAN_SKIP_DIRS.has(entry.name)) continue;
+        await walk(full);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      for (const rule of FORBIDDEN_IN_OUTPUT) {
+        if (rule.matcher(rel)) {
+          offenders.push(`${rel} (${rule.reason})`);
+          break;
+        }
+      }
+    }
+  }
+  await walk(destRoot);
+  if (offenders.length > 0) {
+    problems.push(`forbidden files in output: ${offenders.slice(0, 10).join(', ')}${offenders.length > 10 ? ` (+${offenders.length - 10} more)` : ''}`);
+  }
+
+  // 3. Publish-only manifest fields must not leak into the generated project.
+  const rootPkg = JSON.parse(await fs.readFile(path.join(destRoot, 'package.json'), 'utf8'));
+  for (const field of ['bin', 'files', 'keywords', 'publishConfig', 'repository', 'homepage']) {
+    if (field in rootPkg) problems.push(`root package.json still carries the publish-only field "${field}"`);
+  }
+  if (rootPkg.private !== true) problems.push('root package.json should be private:true (a workspace root is never published)');
+
+  // 4. The lockfile must exist for `--frozen-lockfile` to work.
+  try {
+    await fs.access(path.join(destRoot, 'pnpm-lock.yaml'));
+    checked.push('pnpm-lock.yaml');
+  } catch {
+    problems.push('pnpm-lock.yaml missing — the generated project cannot run `pnpm install --frozen-lockfile`');
+  }
+
+  // 5. The AI-agent knowledge base must have shipped intact.
+  for (const doc of ['AGENTS.md', 'docs/wiki/00-INDEX.md', 'docs/wiki/_meta/registry.json']) {
+    try {
+      await fs.access(path.join(destRoot, doc));
+      checked.push(doc);
+    } catch {
+      problems.push(`${doc} missing — the LLM wiki is part of the template and must ship`);
+    }
+  }
+
+  if (problems.length > 0) {
+    throw new Error(problems.join('\n  - '));
+  }
+  return checked;
+}
+
 export async function validateGenerated({
   destRoot,
   newScope,
@@ -58,6 +223,13 @@ export async function validateGenerated({
   };
 
   if (skipValidation) return results;
+
+  // 0. Structure, ignore rules, and forbidden files. Runs first and cheaply so
+  //    a packaging regression fails before any multi-minute script runs.
+  await step('structure', async () => {
+    const checked = await validateStructure({ destRoot });
+    return `verified ${checked.length} required files, ignore rules intact, no secrets present`;
+  });
 
   // 1. No stale @repo/ refs (outside documented allowlist).
   await step('no-stale-namespace', async () => {
@@ -136,7 +308,8 @@ export async function validateGenerated({
       return 'lint passed';
     });
   }
-  // Architecture guard must pass under the NEW scope.
+  // Architecture guards must pass under the NEW scope. Both are cheap and
+  // scope-sensitive, so they run before the expensive scripts.
   if (scripts['guard:web-auth-imports']) {
     await step('guard:web-auth-imports', async () => {
       run(pnpm, ['run', 'guard:web-auth-imports'], destRoot);
@@ -167,6 +340,16 @@ export async function validateGenerated({
         },
       );
       return 'build passed';
+    });
+  }
+
+  // Architecture B: the web tier must carry zero DB/secret references in its
+  // standalone bundle. Runs LAST because it inspects the build output, so it is
+  // skipped when the build itself was skipped.
+  if (scripts['guard:web-secrets'] && !skipBuild) {
+    await step('guard:web-secrets', async () => {
+      run(pnpm, ['run', 'guard:web-secrets', '--strict'], destRoot);
+      return 'web bundle carries no DB secrets';
     });
   }
 
