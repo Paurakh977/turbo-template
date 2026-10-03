@@ -78,6 +78,53 @@ export const PUBLISH_ONLY_MANIFEST_FIELDS = Object.freeze([
 export const STRIP_BLOCK_START = '# >>> npm publish staging';
 export const STRIP_BLOCK_END = '# <<< npm publish staging';
 
+/**
+ * Root-manifest scripts that exist only to publish *this template* as an npm
+ * package. They are removed from the generated project.
+ *
+ * This is not cosmetic: a generated business app that inherits `prepack` will,
+ * on its own `npm publish`, run the template's staging step (leaving a stray
+ * `gitignore` next to its `.gitignore`) and then fail the template's publish
+ * gate, which asserts template-only paths like `pnpm-lock.template.yaml`. The
+ * user's publish would break for a reason that has nothing to do with their app.
+ */
+export const TEMPLATE_ONLY_SCRIPTS = Object.freeze([
+  'prepack',
+  'postpack',
+  'prepare',
+  'prepublishOnly',
+  'guard:publish-contents',
+]);
+
+/**
+ * Paths that exist only to publish this template as an npm package. They are
+ * never copied into a generated project.
+ *
+ * `stage-template.mjs` is not merely useless there — it renames the user's own
+ * `.gitignore` and `pnpm-lock.yaml` to npm aliases, which would corrupt their
+ * repo the moment they ran it.
+ */
+export const TEMPLATE_ONLY_PATHS = Object.freeze([
+  'scripts/stage-template.mjs',
+  'scripts/check-publish-contents.mjs',
+]);
+
+/**
+ * Paths removed from a generated project BY DEFAULT: the generator itself and
+ * the document describing how to publish the template. `--keep-scaffolder`
+ * retains them, for when the generated project is itself meant to become a
+ * template. A business app does not want 12 files of generator code plus a
+ * 400-line guide to releasing someone else's package.
+ */
+export const SCAFFOLDER_PATHS = Object.freeze([
+  'scripts/scaffold.mjs',
+  'scripts/scaffold',
+  'docs/SCAFFOLD.md',
+]);
+
+/** Scripts removed alongside SCAFFOLDER_PATHS unless --keep-scaffolder. */
+export const SCAFFOLDER_SCRIPTS = Object.freeze(['scaffold', 'scaffold:test']);
+
 export const UNDOTTED_ALIASES = Object.freeze([
   { dotted: '.gitignore', undotted: 'gitignore' },
   { dotted: 'pnpm-lock.yaml', undotted: 'pnpm-lock.template.yaml' },
@@ -175,6 +222,8 @@ export function isExcludedRelPath(relPosix) {
     if (EXCLUDE_DIR_NAMES.has(p)) return true;
   }
   if (EXCLUDE_FILES.has(relPosix)) return true;
+  // npm-publishing tooling for the template itself never reaches a generated app.
+  if (TEMPLATE_ONLY_PATHS.includes(relPosix)) return true;
   for (const prefix of EXCLUDE_PATH_PREFIXES) {
     if (relPosix === prefix || relPosix.startsWith(`${prefix}/`)) return true;
   }

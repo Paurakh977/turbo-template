@@ -26,8 +26,15 @@ import {
   findStaleRepoRefs,
 } from '../transform.mjs';
 import { restoreDottedFilenames } from '../restore.mjs';
+import { removeScaffolder } from '../strip.mjs';
 import { validateStructure } from '../validate.mjs';
-import { isExcludedRelPath, UNDOTTED_ALIASES, PUBLISH_ONLY_MANIFEST_FIELDS } from '../constants.mjs';
+import {
+  isExcludedRelPath,
+  UNDOTTED_ALIASES,
+  PUBLISH_ONLY_MANIFEST_FIELDS,
+  TEMPLATE_ONLY_SCRIPTS,
+  TEMPLATE_ONLY_PATHS,
+} from '../constants.mjs';
 import { readWorkspaceNames, checkDangling } from '../graph.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -174,6 +181,156 @@ describe('exclusion policy', () => {
     assert.ok(PUBLISH_ONLY_MANIFEST_FIELDS.includes('bin'));
     assert.ok(PUBLISH_ONLY_MANIFEST_FIELDS.includes('files'));
   });
+
+  it('never copies the template npm-publishing tooling', () => {
+    // These rename the user's own .gitignore / pnpm-lock.yaml and assert
+    // template-only paths. Harmless here, corrupting anywhere else.
+    for (const p of TEMPLATE_ONLY_PATHS) {
+      assert.equal(isExcludedRelPath(p), true, `${p} must not reach a generated project`);
+    }
+    for (const script of TEMPLATE_ONLY_SCRIPTS) {
+      assert.ok(TEMPLATE_ONLY_SCRIPTS.includes(script));
+    }
+    assert.ok(TEMPLATE_ONLY_SCRIPTS.includes('prepack'));
+    assert.ok(TEMPLATE_ONLY_SCRIPTS.includes('postpack'));
+  });
+
+  it('a generated project cannot inherit prepack/postpack', async () => {
+    const dest = path.join(await mkTemp(), 'no-prepack');
+    await generateInto(dest, { projectName: 'no-prepack', newScope: '@no-prepack' });
+    const pkg = JSON.parse(await fs.readFile(path.join(dest, 'package.json'), 'utf8'));
+    for (const name of TEMPLATE_ONLY_SCRIPTS) {
+      assert.equal(name in pkg.scripts, false, `"${name}" must not survive into a generated project`);
+    }
+    // The template's own workflow must survive.
+    for (const name of ['dev', 'build', 'test', 'lint', 'typecheck', 'db:generate']) {
+      assert.equal(typeof pkg.scripts[name], 'string', `"${name}" must survive`);
+    }
+    // The publishing tooling files are gone, not just unreferenced.
+    for (const rel of TEMPLATE_ONLY_PATHS) {
+      assert.equal(
+        await fs.stat(path.join(dest, rel)).then(() => true).catch(() => false),
+        false,
+        `${rel} must not be copied`,
+      );
+    }
+    await fs.rm(path.dirname(dest), { recursive: true, force: true });
+  }, { timeout: 120000 });
+
+  it('--keep-scaffolder=false strips the generator by default', async () => {
+    const dest = path.join(await mkTemp(), 'bare-app');
+    await generateInto(dest, { projectName: 'bare-app', newScope: '@bare-app' });
+    // Provenance is written by the CLI, not the transform; emulate it here.
+    await fs.writeFile(
+      path.join(dest, '.template.json'),
+      `${JSON.stringify({ template: 'turbo-template', templateVersion: '1.0.0', projectName: 'bare-app' }, null, 2)}\n`,
+      'utf8',
+    );
+
+    const { paths, scripts } = await removeScaffolder({ destRoot: dest, displayName: 'Bare App' });
+    assert.deepEqual(paths.sort(), ['docs/SCAFFOLD.md', 'scripts/scaffold', 'scripts/scaffold.mjs']);
+    assert.deepEqual(scripts.sort(), ['scaffold', 'scaffold:test']);
+
+    for (const rel of ['scripts/scaffold.mjs', 'scripts/scaffold', 'docs/SCAFFOLD.md']) {
+      assert.equal(
+        await fs.stat(path.join(dest, rel)).then(() => true).catch(() => false),
+        false,
+        `${rel} must be removed`,
+      );
+    }
+    const pkg = JSON.parse(await fs.readFile(path.join(dest, 'package.json'), 'utf8'));
+    assert.equal('scaffold' in pkg.scripts, false);
+    assert.equal('scaffold:test' in pkg.scripts, false);
+    assert.equal(typeof pkg.scripts.dev, 'string');
+
+    // Nothing left behind that references the removed generator.
+    const readme = await fs.readFile(path.join(dest, 'README.md'), 'utf8');
+    assert.equal(readme.includes('pnpm scaffold'), false, 'README must not advertise a removed command');
+    assert.equal(readme.includes('docs/SCAFFOLD.md'), false, 'README must not link the deleted guide');
+    // Rebranded: a business app must not introduce itself as the template.
+    assert.ok(readme.includes('# Bare App'), 'README H1 must carry the project name');
+    assert.equal(/#\s*Template/m.test(readme), false, 'README must not keep the template title');
+    assert.equal(/\bmonorepo template\b/i.test(readme), false, 'README tagline must not say "template"');
+    // ...and it gained an actionable entry point instead.
+    assert.ok(readme.includes('## Getting started'));
+    assert.ok(readme.includes('docs/GETTING_STARTED.md'));
+    const ci = await fs.readFile(path.join(dest, '.github', 'workflows', 'ci.yml'), 'utf8');
+    assert.ok(
+      ci.includes("if: ${{ hashFiles('scripts/scaffold/tests/scaffold.test.mjs') != '' }}"),
+      'the generated CI must skip the scaffold test step when the file is absent',
+    );
+
+    // Provenance survives and points back at the generator.
+    const provenance = JSON.parse(await fs.readFile(path.join(dest, '.template.json'), 'utf8'));
+    assert.match(provenance.regenerateWith, /npx create-turbo-template-app@1\.0\.0/);
+
+    // Architecture guards the app actually depends on are untouched.
+    for (const rel of ['scripts/check-web-secrets.mjs', 'scripts/check-web-auth-imports.mjs', 'scripts/benchmark-report.mjs']) {
+      assert.ok(
+        await fs.stat(path.join(dest, rel)).then(() => true).catch(() => false),
+        `${rel} must survive generator removal`,
+      );
+    }
+    // And the app still validates.
+    await validateStructure({ destRoot: dest });
+    // The knowledge base is untouched.
+    assert.ok(await fs.stat(path.join(dest, 'docs', 'wiki', '00-INDEX.md')).then(() => true).catch(() => false));
+
+    await fs.rm(path.dirname(dest), { recursive: true, force: true });
+  }, { timeout: 120000 });
+
+  it('--keep-scaffolder retains the generator', async () => {
+    const tmp = await mkTemp();
+    const dest = path.join(tmp, 'fork-app');
+    const r = spawnSync(
+      nodeExe,
+      [SCAFFOLD, '--project-name', 'fork-app', '--destination', dest, '--yes', '--skip-install', '--no-git', '--keep-scaffolder'],
+      { encoding: 'utf8' },
+    );
+    assert.equal(r.status, 0, r.stderr + r.stdout);
+    assert.ok(
+      await fs.stat(path.join(dest, 'scripts', 'scaffold.mjs')).then(() => true).catch(() => false),
+      '--keep-scaffolder must retain the generator',
+    );
+    assert.ok(await fs.stat(path.join(dest, 'docs', 'SCAFFOLD.md')).then(() => true).catch(() => false));
+    const pkg = JSON.parse(await fs.readFile(path.join(dest, 'package.json'), 'utf8'));
+    assert.equal(typeof pkg.scripts.scaffold, 'string');
+    await fs.rm(tmp, { recursive: true, force: true });
+  }, { timeout: 120000 });
+
+  it('default (no flag) removes the generator from the CLI output', async () => {
+    const tmp = await mkTemp();
+    const dest = path.join(tmp, 'default-app');
+    const r = spawnSync(
+      nodeExe,
+      [SCAFFOLD, '--project-name', 'default-app', '--destination', dest, '--yes', '--skip-install', '--no-git'],
+      { encoding: 'utf8' },
+    );
+    assert.equal(r.status, 0, r.stderr + r.stdout);
+    assert.match(r.stdout, /Removed generator/);
+    assert.equal(
+      await fs.stat(path.join(dest, 'scripts', 'scaffold.mjs')).then(() => true).catch(() => false),
+      false,
+      'the default output must not contain the generator',
+    );
+    assert.equal(
+      await fs.stat(path.join(dest, 'scripts', 'scaffold')).then(() => true).catch(() => false),
+      false,
+    );
+    assert.equal(
+      await fs.stat(path.join(dest, 'docs', 'SCAFFOLD.md')).then(() => true).catch(() => false),
+      false,
+    );
+    // The npm-publishing tooling is absent either way.
+    for (const rel of TEMPLATE_ONLY_PATHS) {
+      assert.equal(
+        await fs.stat(path.join(dest, rel)).then(() => true).catch(() => false),
+        false,
+        `${rel} must never be copied`,
+      );
+    }
+    await fs.rm(tmp, { recursive: true, force: true });
+  }, { timeout: 120000 });
 });
 
 describe('env identity transform', () => {

@@ -62,7 +62,10 @@ jobs:
       # The scaffolder is the product. Its contract (name/scope normalization,
       # destination guards, copy exclusions, npm-mangled filename restore,
       # lockfile transplant) is exercised on every PR, not just at release time.
+      # Guarded on the file existing so generated projects — which strip the
+      # generator by default — run a valid workflow.
       - name: Scaffold tests
+        if: ${{ hashFiles('scripts/scaffold/tests/scaffold.test.mjs') != '' }}
         run: pnpm scaffold:test
 
       # E2E

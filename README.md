@@ -23,9 +23,13 @@
 <br/>
 
 <!-- Testing & tooling -->
+<img src="https://skillicons.dev/icons?i=tailwind" alt="Tailwind CSS" height="36" />
 <img src="https://skillicons.dev/icons?i=jest" height="36" title="Jest" />&nbsp;
 <img src="https://playwright.dev/img/playwright-logo.svg" height="36" title="Playwright" />&nbsp;
 <img src="https://skillicons.dev/icons?i=pnpm" height="36" title="pnpm 11" />&nbsp;
+<img src="https://skillicons.dev/icons?i=npm" alt="npm" height="36" />
+<img src="https://skillicons.dev/icons?i=git" alt="Git" height="36" />
+<img src="https://turbo.build/images/docs/repo/repo-hero-logo-dark.svg" alt="Turborepo" height="36" />
 <img src="https://skillicons.dev/icons?i=github" height="36" title="GitHub Actions" />
 
 <br/><br/>
@@ -37,7 +41,7 @@
 [![Prisma](https://img.shields.io/badge/Prisma-7-2D3748?logo=prisma&logoColor=white)](https://www.prisma.io)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 
-</div>v>
+</div>
 
 ---
 
@@ -80,6 +84,7 @@ npx create-turbo-template-app my-app                # non-interactive name
 npx create-turbo-template-app "My Awesome App"      # normalized to my-awesome-app
 npx create-turbo-template-app my-app --scope @acme  # custom internal scope
 npx create-turbo-template-app my-app --skip-install # copy only, no pnpm install
+npx create-turbo-template-app my-app --keep-scaffolder   # keep the generator in the output
 npx create-turbo-template-app my-app --dry-run      # show the plan, change nothing
 ```
 
@@ -95,6 +100,7 @@ npx create-turbo-template-app my-app --dry-run      # show the plan, change noth
 | `--dry-run` | print the plan, make no changes |
 | `--skip-validation` | skip post-generation validation |
 | `--skip-build` | validate everything except `build` |
+| `--keep-scaffolder` | keep the generator in the output (default: remove it) |
 | `--verbose` | log every transformed file |
 
 After scaffolding:

@@ -16,6 +16,7 @@ export function parseArgs(argv) {
     dryRun: false,
     skipValidation: false,
     skipBuild: false,
+    keepScaffolder: false,
     verbose: false,
   };
   const positional = [];
@@ -34,6 +35,7 @@ export function parseArgs(argv) {
     else if (a === '--dry-run') opts.dryRun = true;
     else if (a === '--skip-validation') opts.skipValidation = true;
     else if (a === '--skip-build') opts.skipBuild = true;
+    else if (a === '--keep-scaffolder') opts.keepScaffolder = true;
     else if (a === '--verbose') opts.verbose = true;
     else if (a === '--help' || a === '-h') opts.help = true;
     else if (!a.startsWith('--')) positional.push(a);
@@ -68,6 +70,9 @@ Options:
   --dry-run               Show plan only; change nothing
   --skip-validation       Skip post-generation validation pipeline
   --skip-build            Skip the full build step during validation
+  --keep-scaffolder       Keep the generator in the output (scripts/scaffold*, docs/SCAFFOLD.md).
+                          Default is to remove it — a business app does not need the code
+                          that generated it. Pass this when the new project is itself a template.
   --verbose               Verbose logging
   -h, --help              Show this help
 
@@ -77,7 +82,7 @@ Examples:
   pnpm scaffold --project-name "My Awesome App" --yes
   pnpm scaffold --project-name my-app --scope @my-company --yes
   pnpm scaffold --project-name my-app --skip-install --no-git
-  pnpm scaffold --project-name my-app --dry-run
+  pnpm scaffold --project-name my-app --keep-scaffolder --yes
 `;
 }
 

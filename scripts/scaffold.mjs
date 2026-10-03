@@ -173,6 +173,7 @@ async function main() {
     `  destination:  ${destRoot}`,
     `  install:      ${opts.skipInstall ? 'no (--skip-install)' : 'yes'}`,
     `  git:          ${opts.noGit ? 'no (--no-git)' : 'yes (fresh init)'}`,
+    `  generator:    ${opts.keepScaffolder ? 'kept in output (--keep-scaffolder)' : 'removed from output'}`,
     `  validation:   ${opts.skipValidation ? 'skipped' : opts.skipBuild ? 'without build' : 'full'}`,
     '',
   ].join('\n');
@@ -187,6 +188,10 @@ async function main() {
     console.log(`Would run: pnpm install --frozen-lockfile (root + apps/migrate)`);
     if (!opts.noGit) console.log('Would run: git init -b main (no remote, no template history)');
     console.log(`Would run validation: namespace scan, pnpm ls -r, turbo graph, typecheck, lint, guard:web-auth-imports, test${opts.skipBuild ? '' : ', build'}`);
+    if (!opts.keepScaffolder) {
+      console.log('Would REMOVE the generator from the output (scripts/scaffold*, docs/SCAFFOLD.md, scaffold npm scripts)');
+      console.log('Would prune the generated CI + README so nothing references the removed files');
+    }
     process.exit(0);
   }
 
@@ -254,6 +259,23 @@ async function main() {
     await fs.writeFile(path.join(destRoot, '.template.json'), `${JSON.stringify(provenance, null, 2)}\n`, 'utf8');
   } catch (err) {
     fail('transformation', err.stack || err.message, destRoot);
+  }
+
+  // The generator is REMOVED by default. A business app has no use for the code
+  // that generated it, nor for a guide to releasing someone else's npm package —
+  // and leaving `prepack`-style hooks or a stale `pnpm scaffold` in a business
+  // repo is worse than leaving nothing. `--keep-scaffolder` retains both, for
+  // when the new project is itself meant to become a template.
+  // Runs before `git init`, so removed files are never committed.
+  if (!opts.keepScaffolder) {
+    const { removeScaffolder } = await import('./scaffold/strip.mjs');
+    const removed = await removeScaffolder({ destRoot, displayName: toDisplayName(projectName) });
+    console.log(
+      `✓ Removed generator (${removed.paths.length} path(s), ${removed.scripts.length} script(s), ` +
+        `README: ${removed.rebranded} line(s) rebranded, ${removed.readmeSectionsRemoved} template-only section(s), ` +
+        `${removed.readmeLinesRemoved} dangling link(s))`,
+    );
+    console.log('  keep it next time with --keep-scaffolder');
   }
 
   // Lockfile transplant + frozen install (generated outputs only).

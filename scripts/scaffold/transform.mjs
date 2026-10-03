@@ -17,6 +17,7 @@ import {
   TEMPLATE_ENV_DB,
   TEMPLATE_ENV_APP_NAME,
   PUBLISH_ONLY_MANIFEST_FIELDS,
+  TEMPLATE_ONLY_SCRIPTS,
   NEVER_TRANSFORM_PREFIXES,
   LOCKFILE_NAMES,
   OTEL_PRESERVE_FILES,
@@ -187,6 +188,19 @@ function transformManifestObject(json, { newScope, suffixSet, projectName, isRoo
     if (out.private !== true) {
       out.private = true;
       changed = true;
+    }
+    // Drop the template's own npm-publishing lifecycle scripts. See
+    // TEMPLATE_ONLY_SCRIPTS for why inheriting `prepack` actively breaks a
+    // generated app's own `npm publish`.
+    if (out.scripts && typeof out.scripts === 'object') {
+      const kept = { ...out.scripts };
+      for (const name of TEMPLATE_ONLY_SCRIPTS) {
+        if (name in kept) {
+          delete kept[name];
+          changed = true;
+        }
+      }
+      out.scripts = kept;
     }
   }
 

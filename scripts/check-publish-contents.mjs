@@ -95,6 +95,8 @@ const REQUIRED_PATHS = [
   'scripts/scaffold/constants.mjs',
   'scripts/scaffold/transform.mjs',
   'scripts/scaffold/restore.mjs',
+  'scripts/scaffold/strip.mjs',
+  'scripts/scaffold/cli.mjs',
   'scripts/scaffold/lockfile.mjs',
   'docker-compose.observability.yml',
   'nginx/nginx.conf',

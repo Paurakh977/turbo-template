@@ -20,6 +20,38 @@ tarball, so `npx` needs nothing but the registry.
 
 ---
 
+## What the output contains
+
+By default the generated project is a **plain business app**:
+
+| Path | In the output? |
+|---|---|
+| `apps/`, `packages/`, `k6/`, `observability/`, `nginx/`, `pgbouncer/`, `patches/` | yes |
+| `docs/` including the full `docs/wiki/` knowledge base, plus `AGENTS.md` | yes |
+| `.github/workflows/` (CI, guarded so it stays valid either way) | yes |
+| `scripts/check-web-secrets.mjs`, `scripts/check-web-auth-imports.mjs`, `scripts/benchmark-report.mjs` | yes |
+| `scripts/scaffold.mjs`, `scripts/scaffold/`, `docs/SCAFFOLD.md`, `scaffold` + `scaffold:test` npm scripts | **no** — removed by default |
+| `prepack`, `postpack`, `scripts/stage-template.mjs`, `scripts/check-publish-contents.mjs` | **no** — never copied |
+
+A business app has no use for the code that generated it, nor for a guide to
+releasing someone else's npm package. `--keep-scaffolder` retains the generator
+for when the new project is itself meant to become a template.
+
+Removal also cleans up after itself so nothing dangles: the README is
+rebranded to the project name and gains a `## Getting started` section in place
+of the template-only ones, and the generated CI scaffold step is guarded with
+`if: ${{ hashFiles('scripts/scaffold/tests/scaffold.test.mjs') != '' }}` so it
+skips cleanly when the file is absent.
+
+The npm `prepack`/`postpack` hooks are removed **unconditionally**, not behind
+the flag: inheriting them would make the user's own `npm publish` rename their
+`.gitignore` and then fail a gate asserting template-only paths like
+`pnpm-lock.template.yaml`. See `TEMPLATE_ONLY_SCRIPTS` in
+`scripts/scaffold/constants.mjs`.
+
+`.template.json` keeps provenance either way — what it was generated from, which
+template version, and the `npx` command to regenerate.
+
 ## Concepts (kept separate)
 
 - **Project name** — filesystem directory + root `package.json:name`.
@@ -234,7 +266,7 @@ because they need neither `node_modules` nor a package manager. Previously
 
 `--project-name`, `--scope`, `--destination`, `--yes`, `--skip-install`,
 `--no-git`, `--allow-existing`, `--dry-run`, `--skip-validation`,
-`--skip-build`, `--verbose`.
+`--skip-build`, `--keep-scaffolder`, `--verbose`.
 
 Destination default differs by entry point: `./<name>` when installed as a
 package (npx semantics — create-react-app/create-next-app behave the same),
