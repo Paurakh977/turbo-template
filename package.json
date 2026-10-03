@@ -1,6 +1,6 @@
 {
   "name": "create-turbo-template-app",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Production-grade full-stack Turborepo monorepo template — Next.js 16, NestJS 11, Better Auth, Prisma 7, PostgreSQL, Redis, nginx, Grafana observability. Scaffold your own business app with one npx command.",
   "keywords": [
     "turborepo",
