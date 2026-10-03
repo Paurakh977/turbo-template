@@ -105,8 +105,8 @@ CLI looks for `auth.ts` in: `./`, `./lib`, `./utils`, or under `./src`. Use `--c
 
 **In `advanced`:**
 - `useSecureCookies` - Force HTTPS cookies
-- `disableCSRFCheck` - ⚠️ Security risk
-- `disableOriginCheck` - ⚠️ Security risk  
+- `disableCSRFCheck` - WARNING: security risk
+- `disableOriginCheck` - WARNING: security risk  
 - `crossSubDomainCookies.enabled` - Share cookies across subdomains
 - `ipAddress.ipAddressHeaders` - Custom IP headers for proxies
 - `database.generateId` - Custom ID generation or `"serial"`/`"uuid"`/`false`
