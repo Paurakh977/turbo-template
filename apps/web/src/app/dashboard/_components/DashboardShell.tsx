@@ -160,12 +160,12 @@ export function DashboardShell({
               <div className="w-9 h-9 border border-border/80 bg-white rounded-xl flex items-center justify-center shadow-sm shrink-0">
                 <img
                   src="/logo.svg"
-                  alt="Ozon"
+                  alt="MyApp"
                   className="w-6 h-6 object-contain"
                 />
               </div>
               <span className="font-bold text-[17px] tracking-tight truncate">
-                Ozon
+                MyApp
               </span>
             </Link>
             <div className="flex items-center gap-3 sm:gap-4 shrink-0">

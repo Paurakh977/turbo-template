@@ -73,7 +73,7 @@ export default function ForgotPasswordPage() {
             <div className="w-16 h-16 bg-white text-primary border border-border/60 rounded-full flex items-center justify-center mx-auto mb-6 shadow-sm">
               <img
                 src="/logo.svg"
-                alt="Ozon"
+                alt="MyApp"
                 className="w-10 h-10 object-contain"
               />
             </div>
@@ -110,7 +110,7 @@ export default function ForgotPasswordPage() {
             <div className="w-14 h-14 bg-white text-secondary-foreground border border-border/60 rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-sm">
               <img
                 src="/logo.svg"
-                alt="Ozon"
+                alt="MyApp"
                 className="w-8 h-8 object-contain"
               />
             </div>

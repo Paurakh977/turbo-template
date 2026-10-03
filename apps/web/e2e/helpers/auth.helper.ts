@@ -246,7 +246,7 @@ export async function enableTwoFactor(
         }
       }
       if (!totpURI && rows[0]?.secret) {
-        totpURI = `otpauth://totp/Ozon:${email}?secret=${rows[0].secret}&issuer=Ozon`;
+        totpURI = `otpauth://totp/MyApp:${email}?secret=${rows[0].secret}&issuer=MyApp`;
       }
     }
   }

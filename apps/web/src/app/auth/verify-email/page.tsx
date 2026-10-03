@@ -122,7 +122,7 @@ function VerifyEmailContent() {
                 <div className="w-20 h-20 bg-white border border-border/60 rounded-full flex items-center justify-center mx-auto mb-6 shadow-sm">
                   <img
                     src="/logo.svg"
-                    alt="Ozon"
+                    alt="MyApp"
                     className="w-12 h-12 object-contain"
                   />
                 </div>
@@ -147,7 +147,7 @@ function VerifyEmailContent() {
                 <div className="w-20 h-20 bg-white border border-border/60 rounded-full flex items-center justify-center mx-auto mb-6 shadow-sm">
                   <img
                     src="/logo.svg"
-                    alt="Ozon"
+                    alt="MyApp"
                     className="w-12 h-12 object-contain"
                   />
                 </div>

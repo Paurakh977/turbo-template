@@ -53,7 +53,7 @@ jobs:
         env:
           NEXT_PUBLIC_API_URL: /api
           NEXT_PUBLIC_APP_URL: http://localhost:3000
-          APP_NAME: Ozon CI
+          APP_NAME: MyApp CI
           EMAIL_FROM: noreply@example.com
 
       - name: Unit tests

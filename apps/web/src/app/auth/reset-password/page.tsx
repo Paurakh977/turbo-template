@@ -69,7 +69,7 @@ function ResetPasswordForm() {
             <div className="w-12 h-12 bg-white border border-border/60 rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-sm">
               <img
                 src="/logo.svg"
-                alt="Ozon"
+                alt="MyApp"
                 className="w-8 h-8 object-contain"
               />
             </div>

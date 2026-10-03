@@ -16,6 +16,8 @@ import {
   TEMPLATE_ENV_SLUG,
   TEMPLATE_ENV_DB,
   TEMPLATE_ENV_APP_NAME,
+  BRAND_TOKEN,
+  BRAND_PLACEHOLDER_FILES,
   PUBLISH_ONLY_MANIFEST_FIELDS,
   TEMPLATE_ONLY_SCRIPTS,
   NEVER_TRANSFORM_PREFIXES,
@@ -292,6 +294,7 @@ export async function transformTree({ destRoot, newScope, suffixSet, projectName
     textChanged: 0,
     envExamples: 0,
     envExamplesChanged: 0,
+    brandFiles: 0,
     skippedNeverTransform: 0,
     skippedLockfile: 0,
     skippedBinary: 0,
@@ -363,6 +366,22 @@ export async function transformTree({ destRoot, newScope, suffixSet, projectName
           if (verbose) console.log(`  env: ${relPosix}`);
         }
         continue;
+      }
+      // `MyApp` brand placeholder -> the project's display name. Scoped to an
+      // explicit allowlist (BRAND_PLACEHOLDER_FILES) because `MyApp` also
+      // appears legitimately in the scaffolder's own docs, tests and
+      // `*.env.example`. Covers page metadata, logo alt text, the dashboard
+      // brand, the Better Auth TOTP issuer, and email subjects.
+      if (BRAND_PLACEHOLDER_FILES.includes(relPosix)) {
+        const raw = await fs.readFile(full, 'utf8');
+        if (raw.includes(BRAND_TOKEN)) {
+          const next = raw.split(BRAND_TOKEN).join(displayName);
+          stats.brandFiles += 1;
+          if (stats.changedPaths.length < 500) stats.changedPaths.push(relPosix);
+          if (!dryRun) await fs.writeFile(full, next, 'utf8');
+          if (verbose) console.log(`  brand: ${relPosix} (${raw.split(BRAND_TOKEN).length - 1}x)`);
+        }
+        // Fall through: these files may also carry `@repo/` references.
       }
       if (!isTextTransformable(relPosix)) continue;
       const buffer = await fs.readFile(full);

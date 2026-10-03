@@ -319,7 +319,7 @@ function TwoFactorPageInner() {
             <motion.div className="w-16 h-16 bg-white border border-border/60 rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-sm">
               <img
                 src="/logo.svg"
-                alt="Ozon"
+                alt="MyApp"
                 className="w-10 h-10 object-contain"
               />
             </motion.div>

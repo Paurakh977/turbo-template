@@ -312,7 +312,7 @@ return v`,
     sendResetPassword: async ({ user, url }) => {
       void sendEmail({
         to: user.email,
-        subject: 'Reset your password — Ozon',
+        subject: 'Reset your password — MyApp',
         html: `
           <div style="font-family:system-ui,sans-serif;max-width:480px;margin:0 auto;padding:32px">
             <h2 style="color:#1e293b">Reset your password</h2>
@@ -341,7 +341,7 @@ return v`,
     sendVerificationEmail: async ({ user, url }) => {
       void sendEmail({
         to: user.email,
-        subject: 'Verify your email — Ozon',
+        subject: 'Verify your email — MyApp',
         html: `
           <div style="font-family:system-ui,sans-serif;max-width:480px;margin:0 auto;padding:32px">
             <h2 style="color:#1e293b">Verify your email</h2>
@@ -536,7 +536,7 @@ return v`,
   // -------------------------------------------------------------------------
   plugins: [
     twoFactor({
-      issuer: 'Ozon',
+      issuer: 'MyApp',
       totpOptions: {
         digits: 6,
         period: parseIntEnv('TWO_FACTOR_TOTP_PERIOD', 30),
@@ -545,7 +545,7 @@ return v`,
         sendOTP: async ({ user, otp }) => {
           void sendEmail({
             to: user.email,
-            subject: 'Your verification code — Ozon',
+            subject: 'Your verification code — MyApp',
             html: `
               <div style="font-family:system-ui,sans-serif;max-width:480px;margin:0 auto;padding:32px">
                 <h2 style="color:#1e293b">Your verification code</h2>

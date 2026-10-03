@@ -28,6 +28,13 @@ export const TEMPLATE_ENV_DB = 'myapp_db';
 export const TEMPLATE_ENV_APP_NAME = 'MyApp';
 
 /**
+ * Brand placeholder compiled into user-visible surfaces (page metadata, logo alt
+ * text, dashboard brand, TOTP issuer, email subjects). Rewritten to the
+ * generated project display name in BRAND_PLACEHOLDER_FILES only.
+ */
+export const BRAND_TOKEN = 'MyApp';
+
+/**
  * Root-manifest fields that exist ONLY to make the template publishable as an
  * npm package. They are stripped from the generated project's package.json —
  * a business app must not inherit a `bin` that points at the scaffolder, a
@@ -124,6 +131,43 @@ export const SCAFFOLDER_PATHS = Object.freeze([
 
 /** Scripts removed alongside SCAFFOLDER_PATHS unless --keep-scaffolder. */
 export const SCAFFOLDER_SCRIPTS = Object.freeze(['scaffold', 'scaffold:test']);
+
+/**
+ * Files carrying the `MyApp` brand placeholder, which the scaffolder rewrites
+ * to the generated project's display name.
+ *
+ * SCOPED, not global. `MyApp` also appears in the scaffolder's own docs and
+ * tests (where it illustrates name normalization) and in `*.env.example` (which
+ * the key-aware env pass handles). A repo-wide replace would corrupt all three.
+ * An explicit allowlist keeps the policy auditable — same philosophy as
+ * NEVER_TRANSFORM_PREFIXES and NAMESPACE_ALLOWLIST.
+ *
+ * Covers user-visible branding: page metadata, logo `alt` text, the dashboard
+ * brand, the Better Auth TOTP `issuer`, email subjects and the Resend From
+ * name. The TOTP issuer and the E2E helper that reconstructs the
+ * `otpauth://` URI MUST be listed together — if they disagree, every TOTP
+ * enrolment in E2E fails to validate.
+ */
+export const BRAND_PLACEHOLDER_FILES = Object.freeze([
+  // Next.js document metadata.
+  'apps/web/src/app/layout.tsx',
+  // User-visible brand in the app shell.
+  'apps/web/src/app/dashboard/_components/DashboardShell.tsx',
+  // Logo alt text on the public auth pages.
+  'apps/web/src/app/auth/page.tsx',
+  'apps/web/src/app/auth/forgot-password/page.tsx',
+  'apps/web/src/app/auth/reset-password/page.tsx',
+  'apps/web/src/app/auth/two-factor/page.tsx',
+  'apps/web/src/app/auth/verify-email/page.tsx',
+  // Better Auth: TOTP issuer + email subjects.
+  'packages/auth/src/server/auth.ts',
+  'packages/auth/src/server/email/email-helpers.ts',
+  // Rebuilds the otpauth:// URI during E2E — must match the issuer above.
+  'apps/web/e2e/helpers/auth.helper.ts',
+  // Test/dev defaults.
+  'apps/api/test/e2e-env.ts',
+  '.github/workflows/ci.yml',
+]);
 
 export const UNDOTTED_ALIASES = Object.freeze([
   { dotted: '.gitignore', undotted: 'gitignore' },

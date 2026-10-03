@@ -323,7 +323,7 @@ export default function AuthPage() {
             >
               <img
                 src="/logo.svg"
-                alt="Ozon"
+                alt="MyApp"
                 className="w-8 h-8 object-contain"
               />
             </motion.div>

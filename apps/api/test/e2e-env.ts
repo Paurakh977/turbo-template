@@ -13,4 +13,4 @@ process.env.NEXT_PUBLIC_APP_URL ??= 'http://localhost:3000';
 process.env.BETTER_AUTH_URL ??= 'http://localhost:3000';
 process.env.BETTER_AUTH_SECRET ??=
   'e2e-only-secret-0123456789abcdef0123456789abcdef';
-process.env.APP_NAME ??= 'Ozon E2E';
+process.env.APP_NAME ??= 'MyApp E2E';

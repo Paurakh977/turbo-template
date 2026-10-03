@@ -17,10 +17,10 @@ const geistMono = localFont({
 
 export const metadata: Metadata = {
   title: {
-    default: 'Ozon',
-    template: '%s - Ozon',
+    default: 'MyApp',
+    template: '%s - MyApp',
   },
-  description: 'Ozon - secure full-stack application',
+  description: 'MyApp - secure full-stack application',
 };
 
 export default async function RootLayout({

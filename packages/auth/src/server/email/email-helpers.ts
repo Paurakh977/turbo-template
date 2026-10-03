@@ -33,7 +33,7 @@ export async function sendEmail({
     ? `[DEV → ${to}] ${subject}`
     : subject;
   const fromAddress = devEmailOverride
-    ? `Ozon <onboarding@resend.dev>`
+    ? `MyApp <onboarding@resend.dev>`
     : emailFrom;
 
   const { error } = await resend.emails.send({

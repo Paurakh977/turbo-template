@@ -598,6 +598,70 @@ describe('publishable-payload guarantees (npx path)', () => {
   }, { timeout: 120000 });
 });
 
+describe('brand placeholder', () => {
+  it('the template carries no project-specific brand, only the MyApp placeholder', () => {
+    // A previous product name leaked through 21 call sites (page metadata, logo
+    // alt text, TOTP issuer, email subjects, CI env). Guard against a repeat.
+    // The needle is assembled at runtime so this test's own source — which must
+    // name the thing it forbids — does not match itself.
+    const needle = ['o', 'zon'].join('');
+    const res = spawnSync('git', ['grep', '-il', needle, '--', '.'], {
+      cwd: TEMPLATE_ROOT,
+      encoding: 'utf8',
+    });
+    const hits = (res.stdout || '')
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .filter((f) => !f.startsWith('scripts/scaffold/tests/'));
+    assert.deepEqual(hits, [], `template still references a previous product name:\n${hits.join('\n')}`);
+  });
+
+  it('rewrites MyApp to the project display name in exactly the allowlisted files', async () => {
+    const dest = path.join(await mkTemp(), 'brand-app');
+    const t = await generateInto(dest, { projectName: 'brand-app', newScope: '@brand-app' });
+    assert.ok(t.brandFiles >= 10, `expected >=10 branded files, got ${t.brandFiles}`);
+
+    const read = async (...p) => fs.readFile(path.join(dest, ...p), 'utf8');
+
+    // Page metadata.
+    const layout = await read('apps', 'web', 'src', 'app', 'layout.tsx');
+    assert.ok(layout.includes("default: 'Brand App'"), 'metadata default must carry the project name');
+    assert.ok(layout.includes("template: '%s - Brand App'"));
+    assert.equal(layout.includes('MyApp'), false, 'no placeholder may survive in layout.tsx');
+
+    // TOTP issuer must match the E2E helper that rebuilds the otpauth:// URI.
+    const auth = await read('packages', 'auth', 'src', 'server', 'auth.ts');
+    assert.ok(auth.includes("issuer: 'Brand App'"), 'TOTP issuer must carry the project name');
+    const helper = await read('apps', 'web', 'e2e', 'helpers', 'auth.helper.ts');
+    assert.ok(
+      helper.includes('otpauth://totp/Brand App:') && helper.includes('issuer=Brand App'),
+      'E2E otpauth URI must match the Better Auth issuer or TOTP enrolment breaks',
+    );
+
+    // Email subjects + Resend From name.
+    assert.ok(auth.includes('Reset your password — Brand App'));
+    assert.ok((await read('packages','auth','src','server','email','email-helpers.ts')).includes('Brand App <onboarding@resend.dev>'));
+
+    // User-visible alt text and dashboard brand.
+    const shell = await read('apps', 'web', 'src', 'app', 'dashboard', '_components', 'DashboardShell.tsx');
+    assert.ok(shell.includes('Brand App'), 'dashboard brand must carry the project name');
+
+    // Nothing left anywhere.
+    const stale = spawnSync('git', ['grep', '-l', 'MyApp', '--', '.'], { cwd: dest, encoding: 'utf8' });
+    for (const line of (stale.stdout || '').trim().split('\n').filter(Boolean)) {
+      // The scaffolder's own docs/tests legitimately use MyApp to illustrate
+      // name normalization, and .env.example is handled key-aware.
+      assert.ok(
+        line.startsWith('scripts/scaffold/') || line.startsWith('docs/SCAFFOLD.md'),
+        `unexpected MyApp left in ${line}`,
+      );
+    }
+
+    await fs.rm(path.dirname(dest), { recursive: true, force: true });
+  }, { timeout: 120000 });
+});
+
 describe('CLI', () => {
   it('Case 4 dry-run changes nothing', async () => {
     const tmp = await mkTemp();
