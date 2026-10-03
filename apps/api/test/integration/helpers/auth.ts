@@ -1,4 +1,5 @@
 import { db } from '@repo/database';
+import { hashPassword } from 'better-auth/crypto';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 
@@ -46,15 +47,18 @@ export async function createTestUser(
     },
   });
 
-  // Create the password account (Better Auth stores hashed passwords here)
-  // We use a raw insert since Better Auth handles hashing internally
+  // Create the password account (Better Auth stores hashed passwords here).
+  // The raw insert bypasses Better Auth's signup endpoint, so the hash must be
+  // produced here or every later sign-in fails with "Invalid password" — Better
+  // Auth verifies against a hash, never against the plaintext.
+  const passwordHash = await hashPassword(user.password);
   await db.account.create({
     data: {
       id: `acc-${user.id}`,
       accountId: user.email,
       providerId: 'email-password',
       userId: user.id,
-      password: user.password, // Will be hashed by Better Auth on real signup
+      password: passwordHash,
     },
   });
 
